@@ -1,4 +1,8 @@
+"use client";
+
+import type { ReactNode } from "react";
 import { StackedStickColumns } from "@/components/ui/stacked-stick-columns";
+import { HorizontalStickGauge } from "@/components/ui/horizontal-stick-gauge";
 
 /**
  * F021/F022-F025 — a single platform-wide dashboard metric tile.
@@ -7,12 +11,19 @@ import { StackedStickColumns } from "@/components/ui/stacked-stick-columns";
  * the design system's "big type, small chrome" jump, with nothing in between.
  *
  * The right side displays the 7-day stacked sticks chart showing daily distribution.
+ * The bottom uses HorizontalStickGauge to display pipeline share with no border.
  */
 export function StatCard({
   label,
   value,
   share,
   caption,
+  data,
+  total,
+  checked,
+  showGauge,
+  gaugeColor,
+  footerBadge,
   emphasis = false,
 }: {
   label: string;
@@ -20,13 +31,38 @@ export function StatCard({
   /** 0–1. Drives the meter width only; the caption states it in words. */
   share: number;
   caption: string;
+  data?: number[];
+  total?: number;
+  checked?: number;
+  showGauge?: boolean;
+  gaugeColor?: string;
+  footerBadge?: ReactNode;
   emphasis?: boolean;
 }) {
-  const width = `${Math.round(Math.min(Math.max(share, 0), 1) * 100)}%`;
+  const isResponse =
+    label.toLowerCase().includes("response") || label.toLowerCase().includes("repl");
+  const isConverted =
+    emphasis || label.toLowerCase().includes("converted");
+
+  const shouldShowGauge = showGauge !== undefined ? showGauge : !isResponse;
+
+  const calculatedTotal =
+    total !== undefined
+      ? total
+      : share > 0
+        ? Math.round(value / share)
+        : 0;
+
+  const calculatedChecked =
+    checked !== undefined
+      ? checked
+      : total !== undefined
+        ? Math.min(value, calculatedTotal)
+        : Math.round(share * calculatedTotal);
 
   return (
-    <div className="flex flex-col justify-between rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-card">
-      <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+    <div className="relative hover:z-30 focus-within:z-30 flex flex-col justify-between rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-card">
+      <p className="font-body text-[20px] font-semibold capitalize tracking-[-0.02em] text-ink">
         {label}
       </p>
 
@@ -37,30 +73,43 @@ export function StatCard({
 
         <div className="shrink-0">
           <StackedStickColumns
-            total={value > 0 ? value : 70}
+            data={data}
             unit={label.toLowerCase()}
             activeColorClass={
-              emphasis || label.toLowerCase().includes("converted")
-                ? "bg-emerald-600 dark:bg-emerald-400"
-                : label.toLowerCase().includes("response")
-                  ? "bg-sky-500 dark:bg-sky-400"
+              isConverted
+                ? "bg-converted"
+                : isResponse
+                  ? "bg-lead"
                   : "bg-indigo-600 dark:bg-indigo-400"
             }
           />
         </div>
       </div>
 
-      <div className="mt-4 border-t border-black/[0.04] pt-2.5 dark:border-white/[0.06]">
-        <div
-          aria-hidden="true"
-          className="h-1 w-full overflow-hidden rounded-full bg-black/[0.07] dark:bg-white/[0.08]"
-        >
-          <div
-            className={`h-full rounded-full ${emphasis ? "bg-brand" : "bg-black/25 dark:bg-white/40"}`}
-            style={{ width }}
+      <div className="mt-4">
+        {footerBadge ? (
+          <div className="flex items-center min-h-[16px]">{footerBadge}</div>
+        ) : shouldShowGauge && calculatedTotal > 0 ? (
+          <HorizontalStickGauge
+            checked={calculatedChecked}
+            total={calculatedTotal}
+            pitch={8.5}
+            stickWidth={3}
+            stickHeight={14}
+            activeColor={
+              gaugeColor ??
+              (isConverted ? "var(--converted, #067647)" : "var(--lead, #23407a)")
+            }
+            inactiveColor="var(--rule-soft)"
+            hoverInactiveColor="var(--faint)"
+            checkedLabel={label}
+            remainingLabel="Remaining pipeline"
+            ariaLabel={`${label} percentage of pipeline`}
+            valueFormatter={(v) => `${v.toLocaleString()} orgs`}
+            showTooltip
           />
-        </div>
-        <p className="mt-2 text-[11px] text-foreground/40">{caption}</p>
+        ) : null}
+        <p className="mt-2 text-[11px] text-foreground/40 font-body">{caption}</p>
       </div>
     </div>
   );

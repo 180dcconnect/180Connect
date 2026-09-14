@@ -546,3 +546,140 @@ export function queueBands(scores: LatestScoreRow[]): { bands: QueueBands; score
   }
   return { bands, scored };
 }
+
+// ---------------------------------------------------------------------------
+// 7-Quadrant Period Subdivision & Counts
+// ---------------------------------------------------------------------------
+
+export type PerformanceBucket = {
+  index: number;
+  startMs: number;
+  endMs: number;
+  dateNumber: string;
+  shortLabel: string;
+};
+
+/**
+ * Divides an arbitrary [fromISO, toISO] date range into 7 sequential buckets
+ * (quadrants) for the 7-bar chart.
+ * - For <= 7 days: 1 day per bar up to totalDays, starting on fromISO.
+ * - For > 7 days (e.g. 30 or 90 days): divides totalDays into 7 equal intervals,
+ *   starting at day 0 (fromISO) and stepping through to toISO.
+ */
+export function createPeriodBuckets(fromISO: string, toISO: string): PerformanceBucket[] {
+  const startMs = Date.parse(`${fromISO}T00:00:00Z`);
+  const toDayStartMs = Date.parse(`${toISO}T00:00:00Z`);
+  const totalDays = Math.max(1, Math.round((toDayStartMs - startMs) / DAY_MS) + 1);
+
+  const buckets: PerformanceBucket[] = [];
+
+  if (totalDays <= 7) {
+    for (let i = 0; i < 7; i++) {
+      const bStartMs = startMs + i * DAY_MS;
+      const bEndMs = bStartMs + DAY_MS;
+      const d = new Date(bStartMs);
+      const dayNum = d.getUTCDate().toString();
+      const monthShort = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+      buckets.push({
+        index: i,
+        startMs: bStartMs,
+        endMs: bEndMs,
+        dateNumber: dayNum,
+        shortLabel: `${monthShort} ${dayNum}`,
+      });
+    }
+    return buckets;
+  }
+
+  const step = totalDays / 7;
+  for (let i = 0; i < 7; i++) {
+    const startDayOffset = Math.round(i * step);
+    const endDayOffset =
+      i === 6 ? totalDays - 1 : Math.min(totalDays - 1, Math.round((i + 1) * step) - 1);
+
+    const bStartMs = startMs + startDayOffset * DAY_MS;
+    const bEndMs = startMs + (endDayOffset + 1) * DAY_MS;
+
+    const bStart = new Date(bStartMs);
+    const bEnd = new Date(startMs + endDayOffset * DAY_MS);
+
+    const startDay = bStart.getUTCDate().toString();
+    const startMonth = bStart.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+    const endDay = bEnd.getUTCDate().toString();
+    const endMonth = bEnd.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+
+    const shortLabel =
+      startDayOffset === endDayOffset
+        ? `${startMonth} ${startDay}`
+        : startMonth === endMonth
+          ? `${startMonth} ${startDay}–${endDay}`
+          : `${startMonth} ${startDay} – ${endMonth} ${endDay}`;
+
+    buckets.push({
+      index: i,
+      startMs: bStartMs,
+      endMs: bEndMs,
+      dateNumber: startDay,
+      shortLabel,
+    });
+  }
+
+  return buckets;
+}
+
+export function bucketCountsForPeriod(
+  input: PerformanceInput,
+  buckets: PerformanceBucket[],
+  userId?: string | null,
+): {
+  emails: number[];
+  replies: number[];
+  conversions: number[];
+  scores: number[];
+} {
+  const emails = [0, 0, 0, 0, 0, 0, 0];
+  const replies = [0, 0, 0, 0, 0, 0, 0];
+  const conversions = [0, 0, 0, 0, 0, 0, 0];
+  const scores = [0, 0, 0, 0, 0, 0, 0];
+
+  const findBucketIndex = (timestamp: string | null | undefined): number => {
+    if (!timestamp) return -1;
+    const ms = Date.parse(timestamp);
+    if (Number.isNaN(ms)) return -1;
+    for (let i = 0; i < buckets.length; i++) {
+      if (ms >= buckets[i].startMs && ms < buckets[i].endMs) {
+        return i;
+      }
+    }
+    return -1;
+  };
+
+  const senderByMessage = new Map<string, string>();
+  for (const message of input.messages) {
+    if (message.sent_by_user_id) senderByMessage.set(message.id, message.sent_by_user_id);
+    if (userId && message.sent_by_user_id !== userId) continue;
+    const idx = findBucketIndex(message.sent_at);
+    if (idx >= 0) emails[idx] += 1;
+  }
+
+  for (const reply of input.replies) {
+    if (!reply.outreach_message_id) continue;
+    const sender = senderByMessage.get(reply.outreach_message_id);
+    if (userId && sender !== userId) continue;
+    const idx = findBucketIndex(reply.received_at);
+    if (idx >= 0) replies[idx] += 1;
+  }
+
+  for (const conversion of input.conversions) {
+    if (userId && conversion.recorded_by_user_id !== userId) continue;
+    const idx = findBucketIndex(conversion.created_at);
+    if (idx >= 0) conversions[idx] += 1;
+  }
+
+  for (const score of input.scores) {
+    const idx = findBucketIndex(score.scored_at);
+    if (idx >= 0) scores[idx] += 1;
+  }
+
+  return { emails, replies, conversions, scores };
+}

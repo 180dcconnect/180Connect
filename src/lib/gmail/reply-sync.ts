@@ -119,7 +119,44 @@ async function gmailJson<T>(url: string, token: string, fetchImpl: typeof fetch,
   }
 }
 
-export async function syncGmailReplies(deps?: Dependencies): Promise<ReplySyncResult> {
+/**
+ * Ids from `ids` that capture_gmail_reply has already recorded. Re-fetching a
+ * captured message in full on every run was most of what a run cost — the
+ * lookback re-lists the same two days each time. Deliberately NOT skipped:
+ * messages only flagged for review (gmail_reply_needs_review), since a later
+ * run with a fresher sent-outreach snapshot is what resolves those.
+ *
+ * Best-effort: if the lookup fails, nothing is skipped and the RPC's own
+ * dedupe keeps the run correct, just slower.
+ */
+async function alreadyCaptured(admin: SupabaseClient, ids: readonly string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const { data, error } = await admin
+    .from("audit_log")
+    .select("detail")
+    .eq("action", "gmail_reply_captured")
+    .in("detail->>provider_message_id", ids);
+  if (error) {
+    await reportError(error, { operation: "gmail.reply_sync.skip_captured" });
+    return new Set();
+  }
+  return new Set(
+    ((data ?? []) as { detail: { provider_message_id?: unknown } | null }[])
+      .map((row) => row.detail?.provider_message_id)
+      .filter((value): value is string => typeof value === "string"),
+  );
+}
+
+export type ReplySyncOptions = {
+  /**
+   * Push-triggered runs (src/app/api/webhooks/gmail) look only at the last few
+   * minutes of inbox instead of the full day lookback. Absent = the poll's
+   * GMAIL_REPLY_LOOKBACK_DAYS window.
+   */
+  sinceMinutes?: number;
+};
+
+export async function syncGmailReplies(deps?: Dependencies, options: ReplySyncOptions = {}): Promise<ReplySyncResult> {
   const result: ReplySyncResult = { scanned: 0, captured: 0, duplicates: 0, ignored: 0, unmatched: 0, failed: 0 };
   const admin = deps?.admin ?? createAdminClient();
   const config = deps?.config ?? resolveGmailConfig();
@@ -131,8 +168,15 @@ export async function syncGmailReplies(deps?: Dependencies): Promise<ReplySyncRe
   try {
     const token = await (deps?.tokenProvider ? deps.tokenProvider() : getGmailAccessToken(config, fetchImpl));
     const listUrl = new URL(`${GMAIL_API}/messages`);
-    const lookbackDays = deps?.lookbackDays ?? resolveGmailReplyLookbackDays();
-    listUrl.searchParams.set("q", `in:inbox newer_than:${lookbackDays}d`);
+    if (options.sinceMinutes && options.sinceMinutes > 0) {
+      // Gmail's `after:` accepts epoch seconds, which is what makes a
+      // minutes-wide window possible (newer_than: only goes down to hours).
+      const after = Math.floor((Date.now() - options.sinceMinutes * 60_000) / 1000);
+      listUrl.searchParams.set("q", `in:inbox after:${after}`);
+    } else {
+      const lookbackDays = deps?.lookbackDays ?? resolveGmailReplyLookbackDays();
+      listUrl.searchParams.set("q", `in:inbox newer_than:${lookbackDays}d`);
+    }
     listUrl.searchParams.set("maxResults", String(MAX_MESSAGES));
     const listed = await gmailJson<{ messages?: { id: string }[] }>(listUrl.toString(), token, fetchImpl, "users.messages.list.replies");
 
@@ -144,8 +188,15 @@ export async function syncGmailReplies(deps?: Dependencies): Promise<ReplySyncRe
     if (sentError) throw sentError;
     const threads = (sentRows ?? []) as SentThreadReference[];
 
-    for (const item of listed.messages ?? []) {
+    const listedMessages = listed.messages ?? [];
+    const captured = await alreadyCaptured(admin, listedMessages.map((item) => item.id));
+
+    for (const item of listedMessages) {
       result.scanned += 1;
+      if (captured.has(item.id)) {
+        result.duplicates += 1;
+        continue;
+      }
       try {
         const message = await gmailJson<GmailInboundMessage>(
           `${GMAIL_API}/messages/${encodeURIComponent(item.id)}?format=full`,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isAutomatedInbound, isPotentialCrmReply, matchInboundReply, parseInboundReply, type GmailHeader, type ParsedInboundReply } from "./reply-message.ts";
+import { isAutomatedInbound, isPotentialCrmReply, matchInboundReply, parseInboundReply, stripQuotedReply, type GmailHeader, type ParsedInboundReply } from "./reply-message.ts";
 
 const encoded = (value: string) => Buffer.from(value).toString("base64url");
 const headers = (extra: GmailHeader[] = []): GmailHeader[] => [
@@ -47,6 +47,131 @@ test("uses HTML only when no plain part exists", () => {
     payload: { mimeType: "text/html", headers: headers(), body: { data: encoded("<p>Interested &amp; available.</p>") } },
   });
   assert.equal(parsed?.body, "Interested & available.");
+});
+
+test("strips a Gmail HTML quote even when it sits in a bare div, not a <p>", () => {
+  // Gmail wraps quoted history in <div class="gmail_quote">, not <p> — with no
+  // newline inserted at the div boundary, the "From: ..." line runs onto the
+  // client's own last line and stripQuotedReply's line-anchored regex never
+  // sees it as its own line.
+  const parsed = parseInboundReply({
+    id: "gmail-3",
+    threadId: "thread-3",
+    internalDate: "1787673600000",
+    payload: {
+      mimeType: "text/html",
+      headers: headers(),
+      body: {
+        data: encoded(
+          '<div dir="ltr">Yes please, that works for us.</div>' +
+            '<div class="gmail_quote">' +
+            "From: 180 Degrees Sheffield &lt;clients.sheffield@180dc.org&gt;<br>" +
+            "To: contact@charity.org<br>" +
+            "Subject: Partnership<br><br>" +
+            "Dear team, we are writing to introduce ourselves." +
+            "</div>",
+        ),
+      },
+    },
+  });
+  assert.equal(parsed?.body, "Yes please, that works for us.");
+});
+
+// ---------------------------------------------------------------------------
+// Quoted history. A reply carries our own previous email underneath it, and
+// that text used to reach the drafting prompt as "the client's reply".
+// ---------------------------------------------------------------------------
+
+test("strips a Gmail-style quoted chain, keeping the client's own words", () => {
+  const stripped = stripQuotedReply(
+    [
+      "Thanks for reaching out — we would be interested in a call.",
+      "",
+      "Best,",
+      "Sarah",
+      "",
+      "On Mon, 8 Sep 2026 at 10:00, Marissa Law <marissa@180dc.org> wrote:",
+      "> Hi Sarah,",
+      "> I am reaching out about a possible collaboration.",
+    ].join("\n"),
+  );
+
+  assert.match(stripped, /we would be interested in a call/);
+  assert.doesNotMatch(stripped, /On Mon, 8 Sep/);
+  assert.doesNotMatch(stripped, /I am reaching out about/);
+});
+
+test("keeps an inline reply that sits below quoted lines", () => {
+  // The reason this cuts at an attribution header and then drops quoted lines,
+  // rather than cutting at the first ">": an inline reply interleaves, and
+  // truncating there would throw away everything they wrote underneath it.
+  const stripped = stripQuotedReply(
+    [
+      "My answers are inline below.",
+      "> What is your budget?",
+      "About £5k for this year.",
+      "> When would you start?",
+      "After our trustees meet in October.",
+    ].join("\n"),
+  );
+
+  assert.match(stripped, /My answers are inline below\./);
+  assert.match(stripped, /About £5k for this year\./);
+  assert.match(stripped, /After our trustees meet in October\./);
+  assert.doesNotMatch(stripped, /What is your budget\?/);
+});
+
+test("strips Outlook's separator and forwarded-header block", () => {
+  const stripped = stripQuotedReply(
+    [
+      "Happy to help — see my colleague below.",
+      "________________________________",
+      "From: Marissa Law",
+      "Sent: Monday, 8 September 2026",
+      "To: Sarah",
+      "Subject: Partnership",
+      "",
+      "Hi Sarah, I am reaching out about a possible collaboration.",
+    ].join("\n"),
+  );
+
+  assert.match(stripped, /Happy to help/);
+  assert.doesNotMatch(stripped, /I am reaching out about/);
+  assert.doesNotMatch(stripped, /Marissa Law/);
+});
+
+test("resolves the original-message header form too", () => {
+  const stripped = stripQuotedReply(
+    "Yes please.\n\n-----Original Message-----\nFrom: branch@180dc.org\nOur original email.",
+  );
+  assert.equal(stripped, "Yes please.");
+});
+
+test("never empties a reply, even one that is nothing but a quotation", () => {
+  // A missed reply is worse than a noisy one: an empty-body message is dropped
+  // entirely by parseInboundReply, so stripping must not be able to produce one.
+  const onlyQuoted = ["On Mon, 8 Sep 2026 at 10:00, Marissa Law wrote:", "> Hi Sarah,", "> Reaching out."].join("\n");
+  assert.equal(stripQuotedReply(onlyQuoted), onlyQuoted);
+  assert.equal(stripQuotedReply("> only a quote"), "> only a quote");
+});
+
+test("leaves a reply with no quoted history exactly as written", () => {
+  const plain = "Yes, that works for us.\n\nBest,\nSarah";
+  assert.equal(stripQuotedReply(plain), plain);
+});
+
+test("parseInboundReply hands on the client's words without the quotation", () => {
+  const parsed = parseInboundReply({
+    id: "gmail-9",
+    threadId: "thread-9",
+    internalDate: "1787673600000",
+    payload: {
+      mimeType: "text/plain",
+      headers: headers(),
+      body: { data: encoded("Interested.\n\nOn Mon, 8 Sep 2026 at 10:00, Marissa Law wrote:\n> Hi Sarah,\n> Reaching out.") },
+    },
+  });
+  assert.equal(parsed?.body, "Interested.");
 });
 
 test("matches only the sent thread, branch recipient, and client sender", () => {

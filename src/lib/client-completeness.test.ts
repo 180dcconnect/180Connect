@@ -9,6 +9,7 @@ import {
 
 const empty: CompletenessInput = {
   identifierCount: 0,
+  hasMission: false,
   filingCount: 0,
   headcountFilingCount: 0,
   grantCount: 0,
@@ -16,6 +17,7 @@ const empty: CompletenessInput = {
 
 const full: CompletenessInput = {
   identifierCount: 2,
+  hasMission: true,
   filingCount: 3,
   headcountFilingCount: 2,
   grantCount: 5,
@@ -28,34 +30,35 @@ function keysPresent(input: CompletenessInput): CompletenessKey[] {
 }
 
 describe("buildCompleteness", () => {
-  it("returns the same four signals in the same order whatever the state", () => {
+  it("returns the same five signals in the same order whatever the state", () => {
     const order = buildCompleteness(empty).items.map((item) => item.key);
-    assert.deepEqual(order, ["registration", "accounts", "headcount", "grants"]);
+    assert.deepEqual(order, ["registration", "mission", "accounts", "headcount", "grants"]);
     assert.deepEqual(buildCompleteness(full).items.map((item) => item.key), order);
   });
 
   it("counts nothing on an empty record", () => {
     const result = buildCompleteness(empty);
     assert.equal(result.present, 0);
-    assert.equal(result.total, 4);
+    assert.equal(result.total, 5);
     assert.equal(result.items.every((item) => !item.present), true);
   });
 
   it("counts everything on a complete record", () => {
     const result = buildCompleteness(full);
-    assert.equal(result.present, 4);
-    assert.equal(result.total, 4);
+    assert.equal(result.present, 5);
+    assert.equal(result.total, 5);
   });
 
   it("lights a signal on a single row", () => {
     assert.deepEqual(
-      keysPresent({ identifierCount: 1, filingCount: 1, headcountFilingCount: 1, grantCount: 1 }),
-      ["registration", "accounts", "headcount", "grants"],
+      keysPresent({ identifierCount: 1, hasMission: true, filingCount: 1, headcountFilingCount: 1, grantCount: 1 }),
+      ["registration", "mission", "accounts", "headcount", "grants"],
     );
   });
 
   it("keeps the signals independent", () => {
     assert.deepEqual(keysPresent({ ...empty, identifierCount: 1 }), ["registration"]);
+    assert.deepEqual(keysPresent({ ...empty, hasMission: true }), ["mission"]);
     assert.deepEqual(keysPresent({ ...empty, grantCount: 1 }), ["grants"]);
   });
 

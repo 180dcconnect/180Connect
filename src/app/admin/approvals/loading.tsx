@@ -8,8 +8,9 @@ export default function Loading() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <Skeleton className="h-4 w-28" />
-            <Skeleton className="mt-2 h-8 w-48" />
-            <Skeleton className="mt-3 h-4 w-96 max-w-full" />
+            {/* The h1 is `text-3xl`, 36px of line box. */}
+            <Skeleton className="mt-1 h-9 w-48" />
+            <Skeleton className="mt-3 h-5 w-96 max-w-full" />
           </div>
           <Skeleton className="h-5 w-24" />
         </div>

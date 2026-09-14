@@ -12,8 +12,8 @@ import { createClient } from "@/lib/supabase/server";
  *       ACTIONS — actions_select_active, matrix §3.11 — this route narrows
  *       to "admin-assigned" the same way @/lib/actions's
  *       formatTeamAssignedActions does, client-side). AC3.
- * POST  create a new action and assign it to a CAM — a plain INSERT under
- *       actions_insert_admin (admin: any row, any column value; matrix §3.11
+ * POST  create a new action and assign it to a team member (an active CAM or
+ *       admin) — a plain INSERT under actions_insert_admin (admin: any row, any column value; matrix §3.11
  *       already documents this as F169's own path). No RPC: unlike
  *       *reassigning* an existing action (F257's reason-carrying
  *       reassign_actions RPC), a fresh INSERT naming every column explicitly

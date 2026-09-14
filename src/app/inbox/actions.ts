@@ -71,11 +71,9 @@ export async function applyInboxThreadFlags(
     return { ok: false, message: "Too many threads changed at once. Try a smaller selection." };
   }
 
-  // A non-uuid organisation_id is the design fill (ids like `mock-org-oxfam`),
-  // which has no organisation row to reference. Dropped rather than rejected:
-  // the mailbox can hold a mix of real and fill rows while the mock set is
-  // still switched on, and starring a fill row should be a no-op, not an error
-  // that makes the real rows in the same click fail too.
+  // A non-uuid organisation_id has no organisation row to reference. Dropped
+  // rather than rejected: one bad id in a bulk selection should be a no-op, not
+  // an error that makes every other thread in the same click fail too.
   const rows = updates
     .filter((update) => isUuid(update.organisationId))
     .map((update) => ({

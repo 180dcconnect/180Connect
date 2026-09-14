@@ -3931,6 +3931,23 @@ begin
     not app.is_personal_email('not-an-address'),
     'a string with no @ is not something this function has an opinion about'
   );
+  -- 20261003130000: the organisation's own domain label is a role.
+  return next ok(
+    not app.is_personal_email('wakamate@wakamate.ng'),
+    'a local part naming the address''s own domain is not personal'
+  );
+  return next ok(
+    not app.is_personal_email('waka.mate@wakamate.co.uk'),
+    'the domain name split by a separator in the local part is not personal'
+  );
+  return next ok(
+    app.is_personal_email('jane@wakamate.ng'),
+    'a named person at the organisation''s domain is still personal'
+  );
+  return next ok(
+    app.is_personal_email('com@example.com'),
+    'the TLD or a generic label never counts as the organisation''s name'
+  );
 
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
@@ -4746,6 +4763,7 @@ declare
   v_org_a       uuid := '00000000-0000-4000-b000-000000000002';  -- owned by cam_a
   v_att         uuid;
   v_reply       uuid;
+  v_path        text;
   v_count       bigint;
   v_rls         boolean;
 begin
@@ -4953,6 +4971,59 @@ begin
    where id = v_att and timeline_context_id = v_reply;
   return next is(v_count, 1::bigint,
     'adding later timeline events does not change the stored attachment link');
+
+  -- -----------------------------------------------------------------------
+  -- delete_attachment — the sanctioned delete path
+  -- -----------------------------------------------------------------------
+  if to_regprocedure('public.delete_attachment(uuid,uuid)') is null then
+    return next skip(6, 'delete_attachment not yet migrated');
+    return;
+  end if;
+
+  -- Read-only roles cannot delete.
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.delete_attachment(%L, %L)', v_att, v_org_a)),
+    '42501',
+    'a viewer cannot delete an attachment'
+  );
+
+  -- A mismatched id pair is "not found", never an existence oracle for
+  -- another client's files.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.delete_attachment(%L, %L)', v_att, '99999999-9999-4999-8999-999999999999')),
+    'P0002',
+    'deleting with another client''s id is refused as not found'
+  );
+
+  select count(*) into v_count from public.attachments where id = v_att;
+  return next is(v_count, 1::bigint,
+    'refused deletes leave the row in place');
+
+  -- Any CAM with write access can delete: client files are shared, like the
+  -- shared attachment reads — not scoped to the uploader. The function hands
+  -- back the storage path the caller must remove from the bucket.
+  perform tests.login_as(v_cam_b);
+  select public.delete_attachment(v_att, v_org_a) into v_path;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  return next is(v_path,
+    v_org_a::text || '/33333333-3333-4333-8333-333333333333-signed.pdf',
+    'a CAM deletes a client file and gets back its storage path');
+
+  select count(*) into v_count from public.attachments where id = v_att;
+  return next is(v_count, 0::bigint,
+    'the deleted attachment row is gone');
+
+  -- Deleting twice is not found, not a shape-shifting error.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.delete_attachment(%L, %L)', v_att, v_org_a)),
+    'P0002',
+    'deleting an already-deleted attachment is refused as not found'
+  );
 end;
 $$;
 

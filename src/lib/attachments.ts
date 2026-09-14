@@ -353,6 +353,27 @@ export function attachmentRpcFailure(error: { code?: string; message?: string })
   }
 }
 
+/** Safe UI mapping for the delete_attachment SECURITY DEFINER RPC. */
+export function attachmentDeleteRpcFailure(error: {
+  code?: string;
+  message?: string;
+}): RpcFailure {
+  if (!error.message?.trim()) {
+    return { status: 500, error: "The file could not be deleted. Refresh and try again." };
+  }
+  switch (error.code) {
+    case "42501":
+      return { status: 403, error: error.message };
+    case "22023":
+    case "23514":
+      return { status: 400, error: error.message };
+    case "P0002":
+      return { status: 404, error: error.message };
+    default:
+      return { status: 500, error: "The file could not be deleted. Refresh and try again." };
+  }
+}
+
 /** Safe UI mapping for the F219 SECURITY DEFINER linking RPC. */
 export function attachmentTimelineRpcFailure(error: {
   code?: string;

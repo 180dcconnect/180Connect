@@ -17,7 +17,6 @@
  * blank the sent history), then:
  *
  *   rows → buildRealInboxThreads (one thread per organisation)
- *        → mergeWithMockFill     (design fill behind the real rows)
  *        → sortInboxThreads
  *
  * Deliberately no `body` in the message query. The list renders subjects and
@@ -34,14 +33,19 @@
 import { redirect } from "next/navigation";
 
 import { GmailInboxShell } from "@/components/inbox/gmail-inbox-shell";
+import { InboxRealtimeRefresher } from "@/components/inbox/inbox-realtime-refresher";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
-import { mockFillThreads } from "@/lib/inbox-mock-data";
+import { getOutreachEngineHealth } from "@/lib/gmail/engine-status.ts";
+import { emailField, safeValidate } from "@/lib/validation";
+import {
+  parseCategoryTabParam,
+  tabForThreadStatus,
+} from "@/lib/inbox/category-tabs.ts";
 import {
   buildAddressableClients,
   buildRealInboxThreads,
-  mergeWithMockFill,
   sortInboxThreads,
   type InboxContactRow,
   type InboxOrganisationRow,
@@ -52,8 +56,16 @@ import { DEFAULT_FOLLOW_UP_THRESHOLDS } from "@/lib/outreach/follow-up-recommend
 import type { InboxMessageRow, InboxReplyRow } from "@/lib/outreach-inbox";
 import type { InboxThreadTag } from "@/lib/inbox-thread-view";
 import { createClient } from "@/lib/supabase/server";
+import { isUuid } from "@/lib/validation";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
+
+/** Column sets for the directory reads below, shared with the ?compose=
+// top-up so the two can never drift apart. */
+const INBOX_ORG_SELECT =
+  "id, legal_name, organisation_type, city, country_code, contact_email, sector, sub_sector, is_seed, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name, email)";
+const INBOX_CONTACT_SELECT =
+  "id, organisation_id, first_name, last_name, email, job_title, phone, is_primary";
 
 /** PostgREST caps a response at 1000 rows, so history is paged the same way
     the dashboard pages its own reads. */
@@ -210,6 +222,19 @@ export default async function InboxPage({
   // client — the client record's "Write to this client" link, so composing is
   // one click from research without the record needing a composer of its own.
   const composeParam = Array.isArray(params.compose) ? params.compose[0] : params.compose;
+  // ?to= carries the client record's on-file address alongside ?compose=, so
+  // the composer opens addressed even when the id resolves to nothing in the
+  // directory below (seed rows are excluded from it by design). Display hint
+  // only: anything not shaped like an address is ignored, and the compose
+  // window's own save/send gates still decide what can actually leave.
+  const toParam = Array.isArray(params.to) ? params.to[0] : params.to;
+  const toTrimmed = toParam?.trim().slice(0, 254) ?? "";
+  const composeRecipient = safeValidate(emailField(), toTrimmed).success ? toTrimmed : null;
+  // ?tab=<category> pins the tab bar (and survives refresh and shares, because
+  // the shell writes it back on every tab click). Unknown values are ignored
+  // rather than matching nothing.
+  const tabParamRaw = Array.isArray(params.tab) ? params.tab[0] : params.tab;
+  const explicitTab = parseCategoryTabParam(tabParamRaw);
 
   const supabase = await createClient();
 
@@ -220,6 +245,7 @@ export default async function InboxPage({
     contactResult,
     orgTagResult,
     tagResult,
+    engineHealth,
   ] = await Promise.all([
     fetchMessages(supabase),
     fetchAllPages<InboxReplyRow>((from, to) =>
@@ -234,15 +260,22 @@ export default async function InboxPage({
       supabase
         .from("organisations")
         .select(
-          "id, legal_name, organisation_type, city, country_code, contact_email, sector, sub_sector, owner:users!organisations_owner_id_fkey(full_name, email)",
+          INBOX_ORG_SELECT,
         )
+        // Real data only: seed/demo rows (npm run seed, seed:demo) never enter
+        // the mailbox — not as threads, not as compose recipients. Production
+        // refuses seeding outright, but staging/local can hold both, and without
+        // this the demo scenario's invented clients would read as real mail.
+        // buildRealInboxThreads / buildAddressableClients also skip is_seed
+        // defensively, so callers that pass unfiltered rows stay honest too.
+        .eq("is_seed", false)
         .order("id", { ascending: true })
         .range(from, to),
     ),
     fetchAllPages<InboxContactRow>((from, to) =>
       supabase
         .from("contacts")
-        .select("id, organisation_id, first_name, last_name, email, job_title, phone, is_primary")
+        .select(INBOX_CONTACT_SELECT)
         .order("id", { ascending: true })
         .range(from, to),
     ),
@@ -265,6 +298,11 @@ export default async function InboxPage({
         .order("name", { ascending: true })
         .range(from, to),
     ),
+    // Live outreach-engine checks for the sidebar's status card: Gmail
+    // transport (caps itself at ~6s) plus the reply-sync / scheduled-send
+    // pg_cron jobs. Runs alongside the mailbox reads so a sick check
+    // degrades its row to an X instead of holding the whole page open.
+    getOutreachEngineHealth(supabase),
   ]);
 
   // Fail-soft per source: one dead query degrades the mailbox rather than
@@ -359,22 +397,62 @@ export default async function InboxPage({
     orgTags,
   });
 
-  // Design fill sits behind the real rows and never shadows one — see
-  // mergeWithMockFill. Clearing it takes no code change: set
-  // NEXT_PUBLIC_INBOX_MOCK_FILL=0 and restart, and mockFillThreads() is [].
-  const threads = sortInboxThreads(mergeWithMockFill(real, mockFillThreads()));
+  const threads = sortInboxThreads(real);
+
+  // The tab the shell mounts on. An explicit ?tab= wins; otherwise a deep link
+  // (?thread=, e.g. from the dashboard reply queue or a notification) lands on
+  // the queue its thread belongs to, so Back returns to Inbound/Awaiting
+  // instead of stranding the CAM on Primary. Anything else is Primary, which
+  // shows everything and can never hide the opened thread.
+  const initialTab =
+    explicitTab ??
+    (threadParam
+      ? tabForThreadStatus(threads.find((thread) => thread.id === threadParam)?.status)
+      : "primary");
 
   // Who Compose may write to. Every organisation with an address, NOT just the
   // ones with outreach history — `real` excludes an organisation nobody has
   // emailed, which is exactly the client a first email is being written to.
+  // Plus the ?compose= target when it is missing from those rows: seed rows
+  // are excluded from the directory by design, so without this top-up a
+  // deep link from such a record opens a composer that can resolve nothing —
+  // blank To, "Add a recipient" context, disabled Send. The fetch is
+  // RLS-scoped, so a bogus or invisible id yields nothing and the window
+  // opens as it does today; the thread list below is built separately and
+  // stays seed-free either way.
+  const orgRows = (orgResult.data ?? []) as unknown as InboxOrganisationRow[];
+  const contactRows = (contactResult.data ?? []) as unknown as InboxContactRow[];
+  let composeOrgRows: InboxOrganisationRow[] = [];
+  let composeContactRows: InboxContactRow[] = [];
+  if (
+    composeParam &&
+    isUuid(composeParam) &&
+    !orgRows.some((row) => row.id === composeParam)
+  ) {
+    const [{ data: composeOrg, error: composeOrgError }, { data: composeContacts, error: composeContactsError }] =
+      await Promise.all([
+        supabase.from("organisations").select(INBOX_ORG_SELECT).eq("id", composeParam).maybeSingle(),
+        supabase.from("contacts").select(INBOX_CONTACT_SELECT).eq("organisation_id", composeParam),
+      ]);
+    if (composeOrgError) {
+      await reportError(composeOrgError, { operation: "inbox.compose_org" });
+    }
+    if (composeContactsError) {
+      await reportError(composeContactsError, { operation: "inbox.compose_contacts" });
+    }
+    if (composeOrg) composeOrgRows = [composeOrg as unknown as InboxOrganisationRow];
+    composeContactRows = (composeContacts ?? []) as unknown as InboxContactRow[];
+  }
   const addressableClients = buildAddressableClients({
-    organisations: (orgResult.data ?? []) as unknown as InboxOrganisationRow[],
-    contacts: (contactResult.data ?? []) as unknown as InboxContactRow[],
+    organisations: [...orgRows, ...composeOrgRows],
+    contacts: [...contactRows, ...composeContactRows],
+    includeSeedIds: composeParam ? [composeParam] : [],
   });
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-[#f6f8fc] text-foreground">
       <main className="flex h-full w-full min-h-0 flex-col py-2 pr-2 sm:pr-4">
+        <InboxRealtimeRefresher />
         <GmailInboxShell
           className="h-full"
           followUpDays={
@@ -382,11 +460,21 @@ export default async function InboxPage({
           }
           initialThreadId={threadParam ?? null}
           initialComposeClientId={composeParam ?? null}
+          initialComposeRecipient={composeRecipient}
+          initialTab={initialTab}
+          viewerEmail={actor.email}
+          viewerIsAdmin={actor.role === "admin"}
           initialThreadFlags={threadFlags}
           addressableClients={addressableClients}
           initialThreads={threads}
           initialTags={allTags}
-          key={`${threadParam ?? "inbox"}:${composeParam ?? ""}`}
+          engineHealth={engineHealth}
+          // No key. It used to be `${thread}:${compose}`, but the shell writes
+          // ?thread= into the URL itself (replaceState) as threads open, so the
+          // next router.refresh rendered a new key and remounted the whole
+          // mailbox — closing any open compose window and, with a leftover
+          // ?compose= still in the URL, opening a fresh one on top of the
+          // thread. The shell follows these params with effects instead.
         />
       </main>
     </div>

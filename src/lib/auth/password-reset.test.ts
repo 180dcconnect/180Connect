@@ -4,6 +4,7 @@ import {
   DEFAULT_RECOVERY_WINDOW_SECONDS,
   emailSchema,
   fullNameSchema,
+  inviteTokenFromForm,
   isRecoveryAllowedPath,
   MAX_FULL_NAME_LENGTH,
   NAME_TOO_LONG_MESSAGE,
@@ -188,5 +189,23 @@ describe("recovery confinement", () => {
     for (const path of ["/", "/dashboard", "/dashboard/clients", "/api/anything"]) {
       assert.equal(isRecoveryAllowedPath(path), false, path);
     }
+  });
+});
+
+describe("inviteTokenFromForm", () => {
+  it("passes a token through untouched — verifyOtp is the validator", () => {
+    assert.equal(inviteTokenFromForm("abc123"), "abc123");
+  });
+
+  it("trims surrounding whitespace", () => {
+    assert.equal(inviteTokenFromForm("  abc123  "), "abc123");
+  });
+
+  it("returns null for anything that is not a usable token", () => {
+    assert.equal(inviteTokenFromForm(undefined), null);
+    assert.equal(inviteTokenFromForm(null), null);
+    assert.equal(inviteTokenFromForm(42), null);
+    assert.equal(inviteTokenFromForm(""), null);
+    assert.equal(inviteTokenFromForm("   "), null);
   });
 });

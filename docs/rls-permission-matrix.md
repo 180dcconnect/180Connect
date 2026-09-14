@@ -1411,8 +1411,19 @@ what actually stops an over-limit or wrong-type upload, not application code.
 Two policies on `storage.objects`: SELECT mirrors `attachments_select_active`
 (any active user, needed for `createSignedUrl` to succeed on open/download);
 INSERT requires `app.can_write()`. No UPDATE/DELETE policy for either —
-replacing or removing an uploaded file is out of both tickets' AC and stays
-`service_role`-only.
+replacing an uploaded file stays `service_role`-only.
+
+**Delete** removes the row and the bytes together. `delete_attachment(
+attachment_id, organisation_id)` is `SECURITY DEFINER`, self-checks
+`app.can_write()`, verifies the row belongs to the organisation in the URL (a
+mismatched pair is "not found", never an existence oracle), deletes the row —
+draft links cascade with it — and returns the `storage_path`. The colocated
+server action then removes that object through the service-role Storage API,
+since Postgres cannot call Storage and a SQL delete of the `storage.objects`
+row would orphan the bytes on disk. No direct DELETE grant on either side, and
+no `audit_log` entry: deleting a file changes no ownership/status/role/
+approval state (`docs/audit-log-pattern.md` §1), same reasoning as
+`record_attachment` and `NOTES`.
 
 **Known limitation, not a gap**: a failure between the Storage upload
 succeeding and `record_attachment` running leaves an orphaned object with no

@@ -1,31 +1,22 @@
 /**
  * Who the compose window may address, and how a typed query finds them.
  *
- * This used to live in `@/lib/inbox-mock-data` and read stand-in contacts
- * derived from the thread — which meant that with real clients loaded, the
- * recipient dropdown offered addresses (`partnerships@…`, `info@…`) that were
- * never on the record, and Send was enabled for them. A recipient list must be
- * a projection of CONTACTS, not an invention: what can be picked here is
- * exactly what the organisation is reachable on.
- *
- * The design fill has no CONTACTS rows behind it, so a fill thread still falls
- * back to the derived stand-ins — a fill row is never sendable anyway (see
- * `directory` in gmail-compose-modal.tsx), so nothing addressable comes out of
- * that branch.
+ * A recipient list is a projection of CONTACTS, not an invention: what can be
+ * picked here is exactly what the organisation is reachable on. An earlier
+ * version derived stand-in contacts from the thread, which meant the dropdown
+ * offered addresses (`partnerships@…`, `info@…`) that were never on the record
+ * and Send was enabled for them.
  */
 
-import { deriveFillContacts } from "../inbox-mock-data.ts";
-import type { InboxContactView, InboxThreadView } from "../inbox-thread-view.ts";
-import type { AddressableClient } from "./real-threads.ts";
+import type { InboxContactView } from "../inbox-thread-view.ts";
 
 /**
  * The least a thing needs to be searchable as a recipient.
  *
- * Structural rather than a named union, because two different things are
- * searched here and neither should have to become the other: an
- * `AddressableClient` (every organisation, whether it has been emailed or not
- * — see ./real-threads.ts) and an `InboxThreadView` (the design fill, and any
- * caller that only has threads to hand).
+ * Structural rather than a named union, because more than one thing is searched
+ * here and neither should have to become the other: an `AddressableClient`
+ * (every organisation, whether it has been emailed or not — see
+ * ./real-threads.ts) and any caller that only has threads to hand.
  */
 export type RecipientSource = {
   id: string;
@@ -39,10 +30,10 @@ export type RecipientSource = {
 /**
  * The addresses this client or thread is reachable on. Anything built from the
  * database carries its own CONTACTS rows (see `contactsFor` in
- * ./real-threads.ts); the design fill has none behind it and derives stand-ins.
+ * ./real-threads.ts); anything without them offers no addresses.
  */
 export function threadContacts(source: RecipientSource): InboxContactView[] {
-  return source.contacts ?? deriveFillContacts(source as InboxThreadView);
+  return source.contacts ?? [];
 }
 
 export type RecipientMatch<T extends RecipientSource = RecipientSource> = {
@@ -119,30 +110,4 @@ export function resolveRecipientThread<T extends RecipientSource>(
       threadContacts(thread).some((contact) => contact.email.toLowerCase() === needle),
     ) ?? null
   );
-}
-
-/**
- * The design fill, shaped as addressable clients.
- *
- * Only for the case where the database has no clients at all: the compose
- * window falls back to this so its recipient field is demonstrable while
- * testing with the mock set. Send stays disabled for every one of them,
- * because a fill id is not an organisation id and the send would write
- * nothing — see `sendableClient` in gmail-compose-modal.tsx. With
- * `NEXT_PUBLIC_INBOX_MOCK_FILL=0` the fill is empty and so is this.
- */
-export function fillAsAddressableClients(
-  threads: readonly InboxThreadView[],
-): AddressableClient[] {
-  return threads.map((thread) => ({
-    id: thread.id,
-    orgName: thread.orgName,
-    orgType: thread.orgType,
-    city: thread.city,
-    country: thread.country,
-    sector: thread.sector,
-    primaryContact: thread.primaryContact,
-    camOwner: thread.camOwner,
-    contacts: threadContacts(thread),
-  }));
 }

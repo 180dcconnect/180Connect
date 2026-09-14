@@ -73,6 +73,49 @@ describe("myWorkSummary", () => {
     const summary = myWorkSummary([org({ owner_id: ME, outreach_status: "converted" })], ME);
     assert.ok(!summary.buckets.some((entry) => /conver/i.test(entry.label)));
   });
+
+  it("labels the reply buckets as the inbox tabs they open", () => {
+    const summary = myWorkSummary([], ME);
+    assert.equal(bucket(summary, "awaiting_reply").label, "Awaiting reply");
+    assert.equal(bucket(summary, "needs_action").label, "Inbound replies");
+  });
+
+  it("marks hasNew as false when unreadOrgIds is not provided", () => {
+    const rows = [org({ id: "a", owner_id: ME, outreach_status: "responded" })];
+    const needsAction = bucket(myWorkSummary(rows, ME), "needs_action");
+    assert.equal(needsAction.hasNew, false);
+    assert.equal(needsAction.newCount, 0);
+  });
+
+  it("marks hasNew as true and sets newCount when owned responded org is unread", () => {
+    const rows = [
+      org({ id: "a", owner_id: ME, outreach_status: "responded" }),
+      org({ id: "b", owner_id: ME, outreach_status: "responded" }),
+    ];
+    const summary = myWorkSummary(rows, ME, { unreadOrgIds: new Set(["a"]) });
+    const needsAction = bucket(summary, "needs_action");
+    assert.equal(needsAction.hasNew, true);
+    assert.equal(needsAction.newCount, 1);
+  });
+
+  it("marks hasNew as false when all owned responded orgs are read", () => {
+    const rows = [org({ id: "a", owner_id: ME, outreach_status: "responded" })];
+    const summary = myWorkSummary(rows, ME, { unreadOrgIds: new Set() });
+    const needsAction = bucket(summary, "needs_action");
+    assert.equal(needsAction.hasNew, false);
+    assert.equal(needsAction.newCount, 0);
+  });
+
+  it("ignores unread orgs not owned by this actor or not in responded status", () => {
+    const rows = [
+      org({ id: "a", owner_id: THEM, outreach_status: "responded" }),
+      org({ id: "b", owner_id: ME, outreach_status: "initial_outreach_sent" }),
+    ];
+    const summary = myWorkSummary(rows, ME, { unreadOrgIds: new Set(["a", "b"]) });
+    const needsAction = bucket(summary, "needs_action");
+    assert.equal(needsAction.hasNew, false);
+    assert.equal(needsAction.newCount, 0);
+  });
 });
 
 describe("myWorkHref", () => {
@@ -81,11 +124,21 @@ describe("myWorkHref", () => {
     assert.equal(myWorkHref(bucket(summary, "owned"), ME), `/clients?owner=${ME}`);
   });
 
+  it("opens the inbox at Awaiting Response for the awaiting-reply bucket", () => {
+    const summary = myWorkSummary([org({ owner_id: ME })], ME);
+    assert.equal(myWorkHref(bucket(summary, "awaiting_reply"), ME), "/inbox?tab=awaiting");
+  });
+
+  it("opens the inbox at Inbound Replies for the replied bucket", () => {
+    const summary = myWorkSummary([org({ owner_id: ME })], ME);
+    assert.equal(myWorkHref(bucket(summary, "needs_action"), ME), "/inbox?tab=inbound");
+  });
+
   it("repeats the status parameter once per status, as the list expects", () => {
     const summary = myWorkSummary([org({ owner_id: ME })], ME);
     assert.equal(
-      myWorkHref(bucket(summary, "awaiting_reply"), ME),
-      `/clients?owner=${ME}&status=initial_outreach_sent&status=follow_up_sent`,
+      myWorkHref(bucket(summary, "not_started"), ME),
+      `/clients?owner=${ME}&status=not_contacted`,
     );
   });
 });

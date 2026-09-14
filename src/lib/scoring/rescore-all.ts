@@ -35,7 +35,6 @@ type SweepRow = {
   city: string | null;
   sector: string | null;
   outreach_status: string;
-  total_income: number | null;
   financial_periods: { total_income: number | null; period_end: string | null }[] | null;
   grants: { count: number }[] | null;
   outreach_messages: { sent_at: string | null }[] | null;
@@ -119,7 +118,7 @@ export async function rescoreAllOrganisations(): Promise<RescoreAllResult> {
     const { data, error } = await admin
       .from("organisations")
       .select(
-        "id, city, sector, outreach_status, total_income, financial_periods(total_income, period_end), grants(count), outreach_messages(sent_at)",
+        "id, city, sector, outreach_status, financial_periods(total_income, period_end), grants(count), outreach_messages(sent_at)",
       )
       // F093: only the newest sent message matters for the recency signal, so
       // the embed is ordered and capped server-side rather than pulling an
@@ -153,7 +152,6 @@ export async function rescoreAllOrganisations(): Promise<RescoreAllResult> {
             city: row.city,
             sector: row.sector,
             outreach_status: row.outreach_status,
-            total_income: row.total_income,
             financial_periods: row.financial_periods ?? [],
             last_contacted_at: lastContactedFrom(row.outreach_messages),
             matched_grant_count: row.grants?.[0]?.count ?? null,

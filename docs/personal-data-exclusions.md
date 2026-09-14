@@ -92,6 +92,23 @@ boundary on `MANUAL_ENTRY_RECORDS.contact_email` via the trigger in
 Any attempt to save or submit a personal email address is rejected, ensuring
 consistent enforcement across automated and manual ingestion paths (AC3).
 
+Two refinements (`20261003130000_contact_email_shared_inbox_override.sql`):
+
+- **The organisation's own name is a role.** A local part that is one of the
+  address's own domain labels — `wakamate@wakamate.ng`, `waka.mate@wakamate.co.uk`
+  — is kept by both detectors (`app.is_personal_email` and `isPersonalEmail`),
+  so ingestion redaction changes the same way. The TLD, labels under three
+  characters and generic labels (`www`, `mail`, `email`, `com`, `org`, `net`,
+  `gov`, `edu`, `ltd`, `plc`) never count. `jane@wakamate.ng` is still personal.
+- **A recorded shared-inbox confirmation.** When the address is still refused,
+  the submitter can confirm it is the organisation's shared inbox. The
+  confirmation is stored with the exact address, who and when
+  (`MANUAL_ENTRY_RECORDS.contact_email_role_confirmed_*`), is set only through
+  `save_manual_entry`, is void as soon as the address changes, and writes
+  `audit_log` `manual_entry_contact_email_role_confirmed` holding the domain only.
+  An admin sees "Shared inbox confirmed by …" in the manual-entry review queue
+  before approving a CAM's submission.
+
 ## Rules ahead of the data
 
 Most of the table above says "No" under "Live today". That's by design, not

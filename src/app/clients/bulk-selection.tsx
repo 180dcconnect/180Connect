@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
+import { motion } from "motion/react";
 
 /**
  * F062 (#64) — selecting several clients on the list view, and the shared state
@@ -167,7 +168,7 @@ export function useBulkSelection(): BulkSelection {
 }
 
 const BOX =
-  "size-4 shrink-0 cursor-pointer accent-brand disabled:cursor-not-allowed disabled:opacity-30";
+  "grid h-4 w-4 shrink-0 place-items-center rounded border outline-none transition-[opacity,background-color,border-color] duration-150 cursor-pointer disabled:cursor-not-allowed disabled:opacity-30 focus-visible:ring-2 focus-visible:ring-brand";
 
 /**
  * One row's checkbox.
@@ -194,6 +195,7 @@ export function ClientSelectCheckbox({
 
   return (
     <span
+      data-client-select="true"
       className={`transition-opacity duration-150 ${
         checked
           ? "opacity-100"
@@ -202,14 +204,53 @@ export function ClientSelectCheckbox({
             : "opacity-0 group-hover/row:opacity-100 hover:opacity-100 focus-within:opacity-100"
       }`}
     >
-      <input
-        type="checkbox"
-        className={BOX}
-        checked={checked}
+      <motion.button
+        type="button"
+        role="checkbox"
+        data-client-select="true"
+        aria-checked={checked}
         title={statusNote ?? undefined}
         aria-label={statusNote ? `Select ${clientName} — ${statusNote}` : `Select ${clientName}`}
-        onChange={() => toggle({ id: clientId, canStatus })}
-      />
+        onClick={(e) => {
+          e.stopPropagation();
+          toggle({ id: clientId, canStatus });
+        }}
+        whileTap={{ scale: 0.9 }}
+        className={`${BOX} ${
+          checked
+            ? "border-brand bg-brand text-white"
+            : "border-rule bg-white text-transparent hover:border-dim"
+        }`}
+      >
+        <motion.svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3.5"
+          aria-hidden="true"
+          className="h-3 w-3"
+          initial={false}
+          animate={checked ? "checked" : "unchecked"}
+        >
+          <motion.path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M4.5 12.75l6 6 9-13.5"
+            variants={{
+              checked: {
+                pathLength: 1,
+                opacity: 1,
+                transition: { duration: 0.2, delay: 0.15 },
+              },
+              unchecked: {
+                pathLength: 0,
+                opacity: 0,
+                transition: { duration: 0.15 },
+              },
+            }}
+          />
+        </motion.svg>
+      </motion.button>
     </span>
   );
 }
@@ -231,34 +272,86 @@ export function SelectPageCheckbox({ clients }: { clients: readonly SelectableCl
   const selectedHere = clients.filter((client) => selected.has(client.id)).length;
   const allSelected = clients.length > 0 && selectedHere === clients.length;
   const someSelected = selectedHere > 0 && !allSelected;
+  const isCheckedOrMixed = allSelected || someSelected;
 
   return (
     <span
+      data-client-select="true"
       className={`transition-opacity duration-150 ${
-        allSelected || someSelected
+        isCheckedOrMixed
           ? "opacity-100"
           : "opacity-0 group-hover/header:opacity-100 hover:opacity-100 focus-within:opacity-100"
       }`}
     >
-      <input
-        type="checkbox"
-        className={BOX}
-      checked={allSelected}
-      disabled={clients.length === 0}
-      ref={(node) => {
-        // Partial selection reads as a dash rather than as unchecked — otherwise
-        // the header lies about a page where half the rows are picked. There is
-        // no `indeterminate` attribute in HTML, only the DOM property, which is
-        // why this is a ref callback and not a prop.
-        if (node) node.indeterminate = someSelected;
-      }}
-      aria-label={
-        allSelected ? "Deselect the clients on this page" : "Select the clients on this page"
-      }
-        onChange={() =>
-          allSelected ? deselect(clients.map((client) => client.id)) : select(clients)
+      <motion.button
+        type="button"
+        role="checkbox"
+        data-client-select="true"
+        aria-checked={someSelected ? "mixed" : allSelected}
+        disabled={clients.length === 0}
+        aria-label={
+          allSelected ? "Deselect the clients on this page" : "Select the clients on this page"
         }
-      />
+        onClick={(e) => {
+          e.stopPropagation();
+          if (allSelected) {
+            deselect(clients.map((client) => client.id));
+          } else {
+            select(clients);
+          }
+        }}
+        whileTap={{ scale: 0.9 }}
+        className={`${BOX} ${
+          isCheckedOrMixed
+            ? "border-brand bg-brand text-white"
+            : "border-rule bg-white text-transparent hover:border-dim"
+        }`}
+      >
+        <motion.svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3.5"
+          aria-hidden="true"
+          className="h-3 w-3"
+          initial={false}
+          animate={allSelected ? "checked" : someSelected ? "indeterminate" : "unchecked"}
+        >
+          {someSelected ? (
+            <motion.line
+              x1="5"
+              y1="12"
+              x2="19"
+              y2="12"
+              strokeLinecap="round"
+              initial={{ pathLength: 0, opacity: 0 }}
+              animate={{
+                pathLength: 1,
+                opacity: 1,
+                transition: { duration: 0.2 },
+              }}
+            />
+          ) : (
+            <motion.path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M4.5 12.75l6 6 9-13.5"
+              variants={{
+                checked: {
+                  pathLength: 1,
+                  opacity: 1,
+                  transition: { duration: 0.2, delay: 0.15 },
+                },
+                unchecked: {
+                  pathLength: 0,
+                  opacity: 0,
+                  transition: { duration: 0.15 },
+                },
+              }}
+            />
+          )}
+        </motion.svg>
+      </motion.button>
     </span>
   );
 }

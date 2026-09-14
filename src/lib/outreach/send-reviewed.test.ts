@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { safeValidate } from "../validation.ts";
-import { reviewedEmailSchema, scheduleSchema } from "./send-reviewed.ts";
+import {
+  isScheduleTimeAllowed,
+  reviewedEmailSchema,
+  SCHEDULE_MIN_LEAD_MESSAGE,
+  scheduleSchema,
+  startOfNextMinute,
+} from "./send-reviewed.ts";
 
 const valid = {
   organisationId: "00000000-0000-4000-a000-000000000001",
@@ -94,4 +100,47 @@ test("scheduling refuses a non-instant time", () => {
     const parsed = safeValidate(scheduleSchema, { ...valid, scheduledAt });
     assert.equal(parsed.success, false, `scheduledAt=${String(scheduledAt)} should fail`);
   }
+});
+
+test("startOfNextMinute rounds the current minute up", () => {
+  // Fixed clock so the boundary is exact rather than "about a minute out".
+  const now = new Date("2026-09-13T14:32:40.000Z");
+  assert.deepEqual(startOfNextMinute(now), new Date("2026-09-13T14:33:00.000Z"));
+});
+
+test("scheduling refuses the past and the current minute", () => {
+  const now = new Date();
+  const floor = startOfNextMinute(now);
+  // Deterministic at any wall-clock instant: the last millisecond still
+  // inside this minute fails, the first millisecond of the next passes.
+  assert.equal(isScheduleTimeAllowed(new Date("2000-01-01T00:00:00.000Z"), now), false);
+  assert.equal(isScheduleTimeAllowed(new Date(floor.getTime() - 1), now), false);
+  assert.equal(isScheduleTimeAllowed(new Date(now.getTime()), now), false);
+  assert.equal(isScheduleTimeAllowed(floor, now), true);
+  assert.equal(
+    isScheduleTimeAllowed(new Date("2030-01-01T09:00:00.000Z"), now),
+    true,
+  );
+  assert.equal(isScheduleTimeAllowed(new Date(Number.NaN), now), false);
+});
+
+test("the schema refuses a current-minute time with the shared message", () => {
+  const now = new Date();
+  const floor = startOfNextMinute(now);
+  const lastOfThisMinute = new Date(floor.getTime() - 1).toISOString();
+  const parsed = safeValidate(scheduleSchema, { ...valid, scheduledAt: lastOfThisMinute });
+  assert.equal(parsed.success, false);
+  if (!parsed.success) {
+    assert.deepEqual(parsed.fieldErrors.scheduledAt, [SCHEDULE_MIN_LEAD_MESSAGE]);
+  }
+
+  // +61s is past every minute boundary by construction (a bare "next minute"
+  // instant could straddle a :00 tick between computing `now` and validating),
+  // so this pass case cannot flake. The exact boundary is pinned on the pure
+  // helper above, where `now` is an argument rather than the wall clock.
+  const safelyFuture = new Date(now.getTime() + 61_000).toISOString();
+  assert.equal(
+    safeValidate(scheduleSchema, { ...valid, scheduledAt: safelyFuture }).success,
+    true,
+  );
 });

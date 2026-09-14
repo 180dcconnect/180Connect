@@ -1,11 +1,10 @@
 // F039: Import Status Tracking.
 //
-// Permission: "platform-settings:manage" is used as the closest existing fit
-// (admin-only, matches ingestion_runs' RLS policy per F038's migration
-// comment: "SELECT admin-only"). No dedicated "view import status"
-// permission exists in src/lib/auth/permissions.ts yet — this is an
-// assumption, not a confirmed decision; worth checking whether the team
-// wants a dedicated permission added to the matrix instead.
+// Permission: "client:edit", the gate every CAM-reachable Data imports tab
+// uses — CAMs run imports, so they see whether the runs worked.
+// ingestion_runs SELECT was widened to match
+// (20261002100000_ingestion_runs_select_for_cams). The run detail page reads
+// raw_source_records and stays admin-only, so its links render for admins only.
 //
 // AC3 ("failed runs visible without checking server logs"): a failed run shows
 // its error_message on the row itself and again, in full, in the expanded
@@ -32,6 +31,7 @@
 
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
+import { hasPermission } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
@@ -162,7 +162,7 @@ export default async function AdminImportStatusPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const authorization = await getCurrentActor("platform-settings:manage", {
+  const authorization = await getCurrentActor("client:edit", {
     route: "/admin/import-status",
   });
   if (!authorization.ok) {
@@ -428,7 +428,10 @@ export default async function AdminImportStatusPage({
             </Rise>
 
             {views.length > 0 ? (
-              <ImportFeed groups={groups} />
+              <ImportFeed
+                groups={groups}
+                canInspect={hasPermission(authorization.actor.role, "platform-settings:manage")}
+              />
             ) : (
               <Rise>
                 <EmptyState

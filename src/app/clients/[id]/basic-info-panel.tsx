@@ -46,6 +46,7 @@ import {
 } from "./inline-edit";
 import { suggestEditsAction } from "./actions";
 import { adminDirectEditsAction } from "./admin-actions";
+import { readMissionFromWebsiteAction } from "./mission-actions";
 
 /**
  * Field order is reading order, not schema order.
@@ -505,6 +506,19 @@ export function BasicInfoPanel({
     );
   }
 
+  /**
+   * Fills the mission draft from the organisation's own website. The action
+   * fetches and returns the description the site publishes about itself; the
+   * value goes into the draft exactly as if it had been typed, so it is read
+   * and saved through the normal admin edit path and this adds no writer.
+   */
+  async function readMissionFromWebsite() {
+    const result = await readMissionFromWebsiteAction({
+      organisationId: organisation.id,
+    });
+    return result.kind === "proposed" ? { text: result.mission } : { error: result.message };
+  }
+
   function discardAll() {
     setEditMode(false);
     setEditing([]);
@@ -700,6 +714,11 @@ export function BasicInfoPanel({
                           onCancel={() => closeRow(column)}
                           onSubmit={submit}
                           pending={pending}
+                          onReadFromWebsite={
+                            column === "mission_statement" && isAdmin
+                              ? readMissionFromWebsite
+                              : undefined
+                          }
                         />
                       )}
                     </motion.div>

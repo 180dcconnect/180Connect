@@ -73,7 +73,7 @@ export async function GET(
     supabase
       .from("organisations")
       .select(
-        "id, legal_name, organisation_type, city, country_code, contact_email, sector, sub_sector, owner:users!organisations_owner_id_fkey(full_name, email)",
+        "id, legal_name, organisation_type, city, country_code, contact_email, sector, sub_sector, is_seed, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name, email)",
       )
       .eq("id", orgId)
       .maybeSingle<InboxOrganisationRow>(),
@@ -99,7 +99,7 @@ export async function GET(
   }
 
   const organisation = orgResult.data;
-  if (!organisation) {
+  if (!organisation || organisation.is_seed) {
     return NextResponse.json({ error: "That thread could not be found." }, { status: 404 });
   }
 

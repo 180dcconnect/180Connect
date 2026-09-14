@@ -3,12 +3,10 @@
  * carrying everything the mailbox shell needs to draw a row, a folder and a
  * reading pane.
  *
- * This type used to be called `InboxThreadView` and lived in `inbox-mock-data.ts`,
- * back when the mailbox was a design harness with nothing behind it. It is now
- * what `/inbox` speaks: `buildRealInboxThreads` (./inbox/real-threads.ts)
- * builds these from Supabase rows, and the mock set in `inbox-mock-data.ts`
- * fills in behind them. Nothing here is mock-specific — the mock bends to this
- * shape, not the other way round.
+ * Back when the mailbox was a design harness with nothing behind it, this type
+ * and a mock data set lived together. It is now what `/inbox` speaks:
+ * `buildRealInboxThreads` (./inbox/real-threads.ts) builds these from Supabase
+ * rows.
  *
  * The pure helpers below travel with the type because they only read it:
  * formatting for the row's timestamp column, the file-size label, the date
@@ -103,9 +101,8 @@ export type InboxThreadView = {
   };
   /**
    * Every contact on the organisation's record, primary first. Present on
-   * threads built from the database; absent on the design fill, which has no
-   * CONTACTS rows behind it and derives stand-ins instead (see
-   * `threadContacts` in ./inbox/recipients.ts).
+   * threads built from the database; a source without CONTACTS rows offers no
+   * addresses (see `threadContacts` in ./inbox/recipients.ts).
    */
   contacts?: InboxContactView[];
   camOwner: {
@@ -113,7 +110,32 @@ export type InboxThreadView = {
     email: string;
     avatarUrl?: string;
   };
+  /**
+   * Current owner id, null when unowned. The reply composer's send gate reads
+   * this (not the display name) to decide whether replying needs the
+   * take-ownership confirmation — an owner removed mid-conversation must not
+   * silently leave the next reply ownerless.
+   */
+  ownerId: string | null;
   status: "replied" | "awaiting" | "sent" | "draft";
+  /**
+   * Whether this organisation has ever had an outbound email sent, regardless
+   * of `status` — which tracks who sent *last*, not whether a send happened
+   * at all. A thread with `status: "replied"` still needs this true to stay
+   * in the Sent mailbox folder once its client responds; without a field
+   * fixed at build time, the Sent folder had nothing reliable to filter on
+   * for a list-level thread, since `messages` (the hydrated body list) is
+   * empty until the thread is opened.
+   */
+  hasSentMessage: boolean;
+  /**
+   * The client's pipeline status (ORGANISATIONS.outreach_status) — the human
+   * decision behind the conversation, as opposed to `status`, which is only
+   * who sent last. Decided outcomes leave the triage tabs (see
+   * ./inbox/category-tabs.ts) and the reading pane offers this for editing.
+   * Null when unknown; unknown never hides a thread.
+   */
+  outreachStatus: string | null;
   replyIntent?: "interested" | "not_interested" | "more_info" | "referral" | null;
   subject: string;
   snippet: string;
@@ -137,9 +159,8 @@ export type InboxThreadView = {
   notesCount: number;
   handoversCount: number;
   /**
-   * Tags on this thread's organisation, primary sort by name. Present on
-   * threads built from the database; the design fill leaves it `[]`. Drives
-   * the sidebar's custom-label filter and the chips on a thread row.
+   * Tags on this thread's organisation, primary sort by name. Drives the
+   * sidebar's custom-label filter and the chips on a thread row.
    */
   tags: InboxThreadTag[];
 };

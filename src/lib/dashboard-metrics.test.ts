@@ -9,6 +9,7 @@ import {
   type OpenSuppression,
   type OverdueActionCandidate,
 } from "./dashboard-metrics.ts";
+import type { FollowUpRecommendation } from "./outreach/follow-up-recommendations.ts";
 
 function org(overrides: Partial<DashboardOrgRow> = {}): DashboardOrgRow {
   return {
@@ -104,14 +105,14 @@ describe("needsAttention", () => {
       org({
         id: "newer",
         owner_id: "cam-1",
-        outreach_status: "follow_up_sent",
+        outreach_status: "no_response",
         legal_name: "Newer Charity",
         updated_at: "2026-02-01T00:00:00Z",
       }),
       org({
         id: "older",
         owner_id: "cam-1",
-        outreach_status: "initial_outreach_sent",
+        outreach_status: "no_response",
         legal_name: "Older Charity",
         updated_at: "2026-01-01T00:00:00Z",
       }),
@@ -122,7 +123,51 @@ describe("needsAttention", () => {
       ["older", "newer"],
     );
     assert.equal(result[0].legalName, "Older Charity");
-    assert.equal(result[0].outreachStatusLabel, "Initial outreach sent");
+    assert.equal(result[0].outreachStatusLabel, "No response");
+    assert.equal(result[0].trigger, "stalled");
+  });
+
+  it("excludes clients in-flight within normal silence window", () => {
+    const rows = [
+      org({ id: "in-flight-1", owner_id: "cam-1", outreach_status: "initial_outreach_sent" }),
+      org({ id: "in-flight-2", owner_id: "cam-1", outreach_status: "follow_up_sent" }),
+    ];
+    assert.deepEqual(needsAttention(rows, "cam-1"), []);
+  });
+
+  it("surfaces inbound replies awaiting response with priority", () => {
+    const rows = [
+      org({ id: "reply", owner_id: "cam-1", outreach_status: "responded", legal_name: "Active Reply" }),
+      org({ id: "stalled", owner_id: "cam-1", outreach_status: "no_response", legal_name: "Stalled Org" }),
+    ];
+    const result = needsAttention(rows, "cam-1", { unreadOrgIds: new Set(["reply"]) });
+    assert.equal(result.length, 2);
+    assert.equal(result[0].id, "reply");
+    assert.equal(result[0].trigger, "inbound_reply");
+    assert.equal(result[0].isInboundReply, true);
+    assert.equal(result[0].isUnreadReply, true);
+    assert.equal(result[1].id, "stalled");
+  });
+
+  it("surfaces due follow-ups when silence exceeds thresholds", () => {
+    const rows = [
+      org({ id: "due-org", owner_id: "cam-1", outreach_status: "initial_outreach_sent", legal_name: "Due Client" }),
+    ];
+    const followUps: FollowUpRecommendation[] = [
+      {
+        organisationId: "due-org",
+        legalName: "Due Client",
+        statusLabel: "Initial outreach sent",
+        lastActivityAt: "2026-01-01T00:00:00Z",
+        daysWaiting: 8,
+        urgency: "due",
+      },
+    ];
+    const result = needsAttention(rows, "cam-1", { followUps });
+    assert.equal(result.length, 1);
+    assert.equal(result[0].id, "due-org");
+    assert.equal(result[0].trigger, "follow_up_due");
+    assert.equal(result[0].followUp?.urgency, "due");
   });
 
   it("treats no_response as needing attention", () => {
@@ -160,14 +205,14 @@ describe("needsAttention overdue actions (F172 AC3)", () => {
   });
 
   it("attaches the overdue-action badge onto a row that also qualifies by status", () => {
-    const rows = [org({ id: "org-1", owner_id: "cam-1", outreach_status: "follow_up_sent" })];
+    const rows = [org({ id: "org-1", owner_id: "cam-1", outreach_status: "no_response" })];
     const result = needsAttention(rows, "cam-1", [overdue({ organisationId: "org-1" })]);
     assert.equal(result.length, 1);
     assert.ok(result[0]?.overdueAction);
   });
 
   it("leaves overdueAction unset for a row with no overdue action", () => {
-    const rows = [org({ id: "org-1", owner_id: "cam-1", outreach_status: "follow_up_sent" })];
+    const rows = [org({ id: "org-1", owner_id: "cam-1", outreach_status: "no_response" })];
     const result = needsAttention(rows, "cam-1", []);
     assert.equal(result[0]?.overdueAction, undefined);
   });
@@ -183,7 +228,7 @@ describe("needsAttention overdue actions (F172 AC3)", () => {
 
   it("sorts overdue-action-only rows before status-only rows", () => {
     const rows = [
-      org({ id: "status-only", owner_id: "cam-1", outreach_status: "follow_up_sent", updated_at: "2026-01-01T00:00:00Z" }),
+      org({ id: "status-only", owner_id: "cam-1", outreach_status: "no_response", updated_at: "2026-01-01T00:00:00Z" }),
       org({ id: "overdue-only", owner_id: "cam-1", outreach_status: "converted" }),
     ];
     const result = needsAttention(rows, "cam-1", [overdue({ organisationId: "overdue-only" })]);
@@ -281,8 +326,8 @@ describe("filterActiveSuppressed (F022 AC3)", () => {
 
   it("excludes actively suppressed charities from needs attention", () => {
     const rows = [
-      org({ id: "a", owner_id: "cam-1", outreach_status: "initial_outreach_sent" }),
-      org({ id: "b", owner_id: "cam-1", outreach_status: "initial_outreach_sent" }),
+      org({ id: "a", owner_id: "cam-1", outreach_status: "no_response" }),
+      org({ id: "b", owner_id: "cam-1", outreach_status: "no_response" }),
     ];
     const suppressions: OpenSuppression[] = [{ organisation_id: "b", status: "active" }];
 

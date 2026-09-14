@@ -22,6 +22,7 @@ import { FinancialScaleCard } from "./financial-scale-card";
 import { SuggestEditSection } from "./suggest-edit-section";
 import { TagsCard } from "./tags-card";
 import { SourcesCard } from "./sources-card";
+import { WebsiteRetryButton } from "./website-retry-button";
 import { loadOperatingGeography } from "@/lib/operating-geography";
 import { sicTitles } from "@/lib/companies-register/sqlite";
 import {
@@ -382,6 +383,15 @@ export default async function ClientOverviewPage({
                       <p className="mt-1 text-[12.5px] leading-[1.5] text-stop" role="alert">
                         {website.message} Booklet generation will run without website context.
                       </p>
+                    )}
+                    {website.status === "unreachable" && (
+                      <>
+                        <WebsiteRetryButton organisationId={client.id} />
+                        <p className="mt-1 text-[12.5px] leading-[1.5] text-dim">
+                          If the site opens in a new tab, the check may be stale — retry it. If
+                          the address itself is wrong, correct it under General Information.
+                        </p>
+                      </>
                     )}
                   </div>
                   <Pill tone={website.status === "reachable" ? "go" : "stop"}>

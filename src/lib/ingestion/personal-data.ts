@@ -131,9 +131,32 @@ function localPartWords(localPart: string): string[] {
 }
 
 /**
+ * Domain labels that are never an organisation's name: web and mail hosts, and the
+ * generic parts of a domain. The TLD (last label) and anything under three
+ * characters (`co`, `ac`) are dropped separately. Must match the list in
+ * app.is_personal_email (20261003130000) — the two detectors agree by construction.
+ */
+const GENERIC_DOMAIN_LABELS: ReadonlySet<string> = new Set([
+  "www", "mail", "email", "com", "org", "net", "gov", "edu", "ltd", "plc",
+]);
+
+/** The labels of a domain that could be the organisation's own name. */
+function organisationDomainLabels(domain: string): Set<string> {
+  const labels = domain.toLowerCase().split(".").filter((label) => label.length > 0);
+  return new Set(
+    labels
+      .slice(0, -1)
+      .filter((label) => label.length >= 3 && !GENERIC_DOMAIN_LABELS.has(label)),
+  );
+}
+
+/**
  * Is this address a person's, rather than a role's?
  *
- * True — meaning "redact" — unless some word of the local part is a known role.
+ * True — meaning "redact" — unless some word of the local part is a known role,
+ * or the local part is the organisation's own name as its domain spells it
+ * (`wakamate@wakamate.ng`, `waka.mate@wakamate.co.uk`). A shared inbox named after
+ * the organisation does not name a person; `jane@wakamate.ng` still does.
  * Unknown is treated as personal: see the allow-list reasoning in the header.
  *
  * A malformed string with no `@` is not an address and is left alone; the caller
@@ -150,7 +173,9 @@ export function isPersonalEmail(
   const words = localPartWords(address.slice(0, at));
   if (words.length === 0) return false;
 
-  return !words.some((word) => roleLocalParts.has(word));
+  const domainLabels = organisationDomainLabels(address.slice(at + 1));
+  if (domainLabels.has(words.join(""))) return false;
+  return !words.some((word) => roleLocalParts.has(word) || domainLabels.has(word));
 }
 
 export type RedactionCounts = Partial<Record<RedactionKind, number>>;

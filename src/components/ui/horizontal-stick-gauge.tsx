@@ -284,7 +284,8 @@ export function HorizontalStickGauge({
 
   const tooltipX = useMemo(() => {
     if (!hoverState) return 0;
-    return Math.max(75, Math.min(effectiveWidth - 75, hoverState.x));
+    const minPadding = Math.min(85, effectiveWidth / 2);
+    return Math.max(minPadding, Math.min(effectiveWidth - minPadding, hoverState.x));
   }, [hoverState, effectiveWidth]);
 
   const svgHeight = stickHeight + 6;
@@ -428,17 +429,17 @@ export function HorizontalStickGauge({
             exit={{ opacity: 0, scale: 0.94, y: 3 }}
             transition={{ duration: 0.15, ease: "easeOut" }}
             style={{ left: tooltipX }}
-            className="pointer-events-none absolute -top-11 z-30 -translate-x-1/2 whitespace-nowrap rounded-panel border border-rule bg-white/95 px-2.5 py-1 text-[11px] shadow-[0_4px_14px_rgba(0,0,0,0.08)] backdrop-blur-md"
+            className="pointer-events-none absolute -top-10 z-50 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/10 bg-slate-900 px-2.5 py-1 text-[11px] font-medium text-white shadow-lg backdrop-blur-md"
           >
             <div className="flex items-center gap-1.5">
               <span
-                className="size-1.5 rounded-full"
+                className="size-1.5 shrink-0 rounded-full"
                 style={{ backgroundColor: hoverState.segmentColor }}
               />
-              <span className="font-semibold text-ink">
+              <span className="font-semibold text-white">
                 {hoverState.segmentLabel}
               </span>
-              <span className="font-mono tabular-nums text-dim">
+              <span className="font-mono tabular-nums text-slate-300">
                 {valueFormatter(hoverState.segmentValue)} ({hoverState.segmentPct.toFixed(1)}%)
               </span>
             </div>

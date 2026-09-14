@@ -165,7 +165,7 @@ function latestScoreOf(
   };
 }
 
-/** F163: filters visible clients down to those owned by a specific CAM. */
+/** F163: filters visible clients down to those owned by a specific team member. */
 export function filterByOwner(
   clients: VisibleClient[],
   ownerFilter: string | null | undefined,

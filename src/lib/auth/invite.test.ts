@@ -523,6 +523,18 @@ describe("inviteEmail", () => {
     assert.match(text, new RegExp(`${INVITE_EXPIRY_HOURS} hours`));
   });
 
+  it("says the link stays usable until the password is set, not single-use", () => {
+    // Opening the link no longer consumes it — verification happens when the
+    // password is submitted — so the copy must not promise single-use.
+    for (const body of [
+      inviteEmail({ link, inviterName: "Bashir", role: "cam" }).text,
+      inviteEmail({ link, inviterName: "Bashir", role: "cam" }).html,
+    ]) {
+      assert.doesNotMatch(body, /only be used once/);
+      assert.match(body, /as many times as you need/);
+    }
+  });
+
   it("escapes a name that would otherwise inject markup into the HTML body", () => {
     const { html } = inviteEmail({
       link,
@@ -711,9 +723,12 @@ describe("resendInvite", () => {
   });
 
   it("gives an actionable message when the previous link was opened but never completed", async () => {
-    // GoTrue's real response to a resend for an already-`email_confirmed` user:
-    // the invited person opened the link once (consuming the token, which
-    // confirms the email) but never finished choosing a password.
+    // GoTrue's real response to a resend for an already-`email_confirmed` user.
+    // Before deferred verification shipped, that meant the invited person had
+    // opened the link once (consuming the token, which confirms the email) but
+    // never finished choosing a password — opening no longer confirms
+    // anything, so this now only fires for invites burned that way beforehand.
+    // Either way the escape is the same: cancel the stuck invite, send fresh.
     const { lookup } = fakePendingLookup({
       row: { email: "ada@180dc.org", accepted: false },
     });

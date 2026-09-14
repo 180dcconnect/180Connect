@@ -4,6 +4,7 @@ import * as React from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Liquid, type Transition } from "liquid-gooey";
 import { ArrowRight, Check, Loader2, Sparkles, Send, X, Plus } from "lucide-react";
+import { LoaderPinwheel } from "@/components/animate-ui/icons/loader-pinwheel";
 
 export interface GooeyEmailInputProps {
   /** Placeholder text for email input */
@@ -43,6 +44,20 @@ export interface GooeyEmailInputProps {
   className?: string;
   /** Disabled state */
   disabled?: boolean;
+  /**
+   * External busy flag for callers that own the async work — e.g. a server
+   * action driven through useActionState, whose `pending` outlives this
+   * input's own onSubmit return. While true the droplet stays separated and
+   * wears the loading icon, and field and droplet stay disabled, exactly as
+   * the internal loading state behaves. The caller owns outcome feedback.
+   */
+  submitting?: boolean;
+  /**
+   * Which loading icon the droplet wears while busy: the built-in spinner,
+   * or the AI pinwheel used for generation work. Default keeps every
+   * existing caller unchanged.
+   */
+  loadingIcon?: "spinner" | "pinwheel";
   /**
    * Controlled value. When provided the field stops owning its text (for
    * non-email uses like the booklet's website URL) — pair with onValueChange.
@@ -122,6 +137,8 @@ export function GooeyEmailInput({
   dropletLabel = "Close",
   className = "",
   disabled = false,
+  submitting = false,
+  loadingIcon = "spinner",
   value,
   onValueChange,
   inputType = "email",
@@ -148,6 +165,14 @@ export function GooeyEmailInput({
 
   const controlled = value !== undefined;
   const text = controlled ? value : email;
+
+  // External work in flight (see `submitting`): the droplet is already past
+  // its own submit by then — onSubmit returned at once — so busy, not the
+  // internal status, is what the droplet wears and what keeps it held out.
+  // Without the hold it would merge back on blur and the in-flight spinner
+  // would vanish with it.
+  const busy = submitting || status === "loading";
+  const dropletOut = isFocused || busy;
 
   // Live droplet validation. Empty means nothing to verify (droplet keeps its
   // resting behavior); otherwise each pause fires one check, and a stale
@@ -370,8 +395,9 @@ export function GooeyEmailInput({
 
   // Position shifts: when align === "start", the capsule stays anchored on the left
   // edge with zero left offset and the droplet travels rightward. When centered, they shift symmetrically.
-  const fieldShiftX = align === "start" ? 0 : isFocused ? -gap * 0.4 : 0;
-  const btnShiftX = align === "start" ? (isFocused ? gap : 0) : isFocused ? gap * 0.6 : 0;
+  // A busy droplet holds its separated pose even blurred (see `dropletOut`).
+  const fieldShiftX = align === "start" ? 0 : dropletOut ? -gap * 0.4 : 0;
+  const btnShiftX = align === "start" ? (dropletOut ? gap : 0) : dropletOut ? gap * 0.6 : 0;
 
   // Compute icon to display. In live mode a tick means "verified — tap to
   // go"; anything unverified keeps the droplet's resting behavior.
@@ -379,7 +405,12 @@ export function GooeyEmailInput({
   const liveChecking = live && hasText && (checking || verdict === null);
   const liveTick = live && hasText && !checking && verdict === true;
   const renderIcon = () => {
-    if (status === "loading" || liveChecking) {
+    if (busy || liveChecking) {
+      // Explicit size, like every other face here: the vendored icons default
+      // to 28, and only the passed size keeps server and client identical.
+      if (busy && loadingIcon === "pinwheel") {
+        return <LoaderPinwheel animate aria-hidden="true" size={dims.iconSize} />;
+      }
       return <Loader2 className="animate-spin" size={dims.iconSize} />;
     }
     if (status === "success" || liveTick) {
@@ -456,9 +487,9 @@ export function GooeyEmailInput({
               type={inputType}
               value={text}
               maxLength={maxLength}
-              disabled={disabled || status === "loading"}
+              disabled={disabled || busy}
               placeholder={
-                status === "success"
+                status === "success" && !submitting
                   ? successPlaceholder
                   : resting
                     ? ""
@@ -515,14 +546,16 @@ export function GooeyEmailInput({
         >
           <button
             type="button"
-            disabled={disabled || status === "loading"}
+            disabled={disabled || busy}
             tabIndex={isFocused ? 0 : -1}
             aria-label={
-              liveTick
-                ? "Verified"
-                : onDropletClick
-                  ? dropletLabel
-                  : submitLabel
+              busy
+                ? `${onDropletClick ? dropletLabel : submitLabel} — working…`
+                : liveTick
+                  ? "Verified"
+                  : onDropletClick
+                    ? dropletLabel
+                    : submitLabel
             }
             onPointerDown={(e) => {
               // Prevent input blur before click finishes — but only once the
@@ -533,14 +566,16 @@ export function GooeyEmailInput({
               // Hidden droplet is a funnel, not a control: any tap on its zone
               // focuses the field instead of falling through (or not) to the
               // input beneath, which the goo layering cannot be trusted with.
+              if (busy) return;
               if (!isFocused) {
                 fieldRef.current?.focus();
                 return;
               }
               // A tick is a verdict, not a trigger: tapping it does nothing.
               // Generation stays on the explicit go actions (the header arrow,
-              // Enter), never on admiring the confirmation.
-              if (status === "loading" || liveChecking || liveTick) return;
+              // Enter), never on admiring the confirmation. (`busy` above
+              // already covers the loading state.)
+              if (liveChecking || liveTick) return;
               if (onDropletClick) {
                 // Blur first so the capsule settles back to its resting face;
                 // the caller clears (or collapses) underneath the merge.
@@ -548,7 +583,7 @@ export function GooeyEmailInput({
                 onDropletClick();
               } else handleSubmit();
             }}
-            className={`relative flex items-center justify-center rounded-full border-0 p-0 transition-all duration-200 active:scale-95 focus-visible:outline-none focus-visible:ring-2 ${theme.btnColor} ${isFocused ? `${theme.btnBg} cursor-pointer` : "cursor-text"} ${theme.accentRing}`}
+            className={`relative flex items-center justify-center rounded-full border-0 p-0 transition-all duration-200 active:scale-95 focus-visible:outline-none focus-visible:ring-2 ${theme.btnColor} ${dropletOut ? `${theme.btnBg} cursor-pointer` : "cursor-text"} ${theme.accentRing}`}
             style={{
               width: `${dims.btnSize}px`,
               height: `${dims.btnSize}px`,
@@ -560,10 +595,10 @@ export function GooeyEmailInput({
                 (the booklet composer's frosted search panel). */}
             <span
               className={`flex items-center justify-center transition-all duration-200 ${
-                isFocused ? "opacity-100 scale-100" : "opacity-0 scale-75 pointer-events-none"
+                dropletOut ? "opacity-100 scale-100" : "opacity-0 scale-75 pointer-events-none"
               } ${isPulsing ? "blur-[0.5px]" : "filter-none"}`}
               style={{
-                transitionDelay: isFocused ? `${Math.round(duration * 0.15)}ms` : "0ms",
+                transitionDelay: dropletOut ? `${Math.round(duration * 0.15)}ms` : "0ms",
               }}
             >
               {renderIcon()}

@@ -12,7 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { OriginButton } from "@/components/ui/origin-button";
 
-type TeamMember = { id: string; full_name: string | null };
+type TeamMember = { id: string; full_name: string | null; role?: string | null };
 
 /**
  * F163 — admin assigns or reassigns this client's owner. Posts to
@@ -44,7 +44,12 @@ export function AssignOwnerForm({
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!ownerId) {
-      setError("Choose a CAM to assign.");
+      setError("Choose a team member or Unassigned.");
+      return;
+    }
+    const targetOwnerId = ownerId === "unassigned" ? null : ownerId;
+    if (targetOwnerId === currentOwnerId) {
+      setError("Choose a different owner or Unassigned to change ownership.");
       return;
     }
     if (!reason.trim()) {
@@ -57,7 +62,7 @@ export function AssignOwnerForm({
       const response = await fetch(`/api/clients/${organisationId}/assign-owner`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ownerId, reason }),
+        body: JSON.stringify({ ownerId: targetOwnerId, reason }),
       });
       if (response.ok) {
         setReason("");
@@ -91,12 +96,16 @@ export function AssignOwnerForm({
         </span>
         <Select value={ownerId} onValueChange={setOwnerId}>
           <SelectTrigger className="w-full rounded-inset bg-white text-sm">
-            <SelectValue placeholder="Choose a CAM" />
+            <SelectValue placeholder="Choose a team member or Unassigned" />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="unassigned">
+              Unassigned
+            </SelectItem>
             {team.map((member) => (
               <SelectItem key={member.id} value={member.id}>
-                {member.full_name ?? "Unnamed CAM"}
+                {member.full_name ?? (member.role === "admin" ? "Unnamed Admin" : "Unnamed CAM")}
+                {member.role === "admin" ? " (Admin)" : ""}
                 {member.id === currentOwnerId ? " (current owner)" : ""}
               </SelectItem>
             ))}
@@ -118,7 +127,7 @@ export function AssignOwnerForm({
       </label>
 
       <OriginButton type="submit" size="sm" loading={busy} disabled={busy}>
-        {busy ? "Assigning…" : currentOwnerId ? "Reassign owner" : "Assign owner"}
+        {busy ? "Updating…" : ownerId === "unassigned" ? "Unassign client" : currentOwnerId ? "Reassign owner" : "Assign owner"}
       </OriginButton>
 
       {error && (

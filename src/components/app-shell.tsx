@@ -5,6 +5,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
 import { logout } from "@/lib/auth/logout";
 import { ONBOARDING_STEPS, shouldShowGuide, type OnboardingUser } from "@/lib/onboarding";
+import { DATA_IMPORTS_ROUTES } from "@/app/admin/import-group";
 import { AppShellFrame } from "./app-shell-frame";
 import { ShellWash } from "./shell-wash";
 import type { SidebarSection, SidebarOnboarding } from "./sidebar";
@@ -42,8 +43,17 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // One entry for the Data imports group — Import status, Add a client and the
+  // importers; each page carries the tab row (src/app/admin/import-group.ts),
+  // filtered to the tabs the role can open. CAMs run imports and add clients,
+  // so the entry sits in the daily rail rather than the admin section.
   if (hasPermission(actor.role, "client:edit")) {
-    sections[0].items.push({ href: "/clients/new", label: "Add client", icon: "add" });
+    sections[0].items.push({
+      href: "/admin/import-status",
+      label: "Data imports",
+      icon: "import",
+      matches: DATA_IMPORTS_ROUTES,
+    });
   }
 
   if (hasPermission(actor.role, "tags:manage")) {
@@ -58,10 +68,6 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         { href: "/admin/review", label: "Review queue", icon: "review" },
         { href: "/admin/analytics", label: "Team analytics", icon: "analytics" },
         { href: "/admin/audit-log", label: "Audit log", icon: "audit" },
-        // One entry for the four importer pages; each page carries a tab row
-        // (see src/app/admin/import-group.ts) so the group is navigable without
-        // spending four sidebar slots on pages that are cousins of each other.
-        { href: "/admin/import-status", label: "Data imports", icon: "import" },
         { href: "/admin/feedback", label: "Feedback", icon: "feedback" },
       ],
     });

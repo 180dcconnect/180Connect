@@ -6,9 +6,10 @@ import { AnimatePresence, motion } from "motion/react";
 
 import type { GrowthPoint } from "@/lib/dashboard-metrics";
 import {
+  bucketCountsForPeriod,
+  createPeriodBuckets,
   isoDayUTC,
   performanceForPeriod,
-  periodWindows,
   sectorPerformance,
   type PerformanceInput,
   type PerformanceSummary,
@@ -17,16 +18,16 @@ import {
   type WeeklyCount,
 } from "@/lib/performance-metrics";
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
-import { StackedStickColumns } from "@/components/ui/stacked-stick-columns";
+import { StackedStickColumns, type StackedStickBucket } from "@/components/ui/stacked-stick-columns";
 import { PeriodSelect, type PeriodOption } from "@/components/ui/metric-controls";
 
 /**
  * The Performance section (F-added): the whole team's week, filterable down to
  * one person. Scope is client-side state over data the server already computed
  * for every person, so switching between "Whole team", "Just me" and a picked
- * CAM never round-trips — the numbers re-derive instantly.
+ * team member never round-trips — the numbers re-derive instantly.
  *
- * Who can pick a specific CAM: admins and viewers (matrix §3.1 read the whole
+ * Who can pick a specific person: admins and viewers (matrix §3.1 read the whole
  * directory; the product rule is that CAMs see the team and themselves, while
  * oversight roles can drill into anyone). CAMs get only the two-way toggle.
  */
@@ -35,7 +36,7 @@ type Scope = { kind: "team" } | { kind: "me" } | { kind: "cam"; userId: string }
 
 export interface PerformanceSectionProps {
   summary: PerformanceSummary;
-  /** CAMs for the picker, name-sorted (same list the clients owner filter uses). */
+  /** Owner-eligible team members for the picker, name-sorted (same list the clients owner filter uses). */
   cams: TeamUserRow[];
   actorId: string;
   actorRole: string;
@@ -76,22 +77,26 @@ function PerformanceTile({
   label,
   count,
   unit = "",
-  placeholderTotal,
+  data,
+  buckets,
+  periodLabel,
   activeColorClass,
 }: {
   label: string;
   count: WeeklyCount;
   unit?: string;
-  placeholderTotal?: number;
+  data?: number[];
+  buckets?: StackedStickBucket[];
+  periodLabel?: string;
   activeColorClass?: string;
 }) {
-  const displayTotal = count.thisWeek > 0 ? count.thisWeek : (placeholderTotal ?? 0);
   const { value: pctValue, text: pctText } = getPercentageChange(count.thisWeek, count.lastWeek);
+  const comparisonText = periodLabel === "Last 7 days" ? "vs last week" : "vs prior period";
 
   return (
     <div className="flex flex-col justify-between rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-card">
       {/* Top Title */}
-      <h4 className="text-[16px] font-semibold tracking-tight text-foreground">
+      <h4 className="font-body text-[20px] font-semibold capitalize tracking-[-0.02em] text-ink">
         {label}
       </h4>
 
@@ -125,7 +130,7 @@ function PerformanceTile({
               {pctText}
             </span>
             <span className="text-[12px] font-normal text-muted-foreground">
-              vs last week
+              {comparisonText}
             </span>
           </div>
         </div>
@@ -133,16 +138,17 @@ function PerformanceTile({
         {/* Right 7-column stacked squarish sticks, aligned on the same bottom level */}
         <div className="shrink-0">
           <StackedStickColumns
-            total={displayTotal}
+            data={data}
+            buckets={buckets}
             unit={unit}
             activeColorClass={
               activeColorClass ??
               (label.toLowerCase().includes("conversion")
-                ? "bg-emerald-600 dark:bg-emerald-400"
+                ? "bg-converted"
                 : label.toLowerCase().includes("repl")
-                  ? "bg-sky-500 dark:bg-sky-400"
+                  ? "bg-lead"
                   : label.toLowerCase().includes("scored")
-                    ? "bg-violet-600 dark:bg-violet-400"
+                    ? "bg-scored"
                     : "bg-indigo-600 dark:bg-indigo-400")
             }
           />
@@ -152,7 +158,7 @@ function PerformanceTile({
   );
 }
 
-/** Searchable CAM picker — the oversight roles' way to drill into one person. */
+/** Searchable team picker — the oversight roles' way to drill into one person. */
 function CamPicker({
   cams,
   selectedId,
@@ -195,7 +201,10 @@ function CamPicker({
       >
         <Search size={13} strokeWidth={2.5} className="opacity-60" />
         <span className="max-w-[11rem] truncate">
-          {selected ? (selected.full_name || "Unnamed CAM") : "Select a CAM"}
+          {selected
+            ? (selected.full_name ||
+              (selected.role === "admin" ? "Unnamed Admin" : "Unnamed CAM"))
+            : "Select a team member"}
         </span>
         <motion.div animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }}>
           <ChevronDown size={14} strokeWidth={2.5} />
@@ -217,12 +226,12 @@ function CamPicker({
                 type="text"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search CAMs…"
-                aria-label="Search CAMs"
+                placeholder="Search team…"
+                aria-label="Search team"
                 className="w-full rounded-lg border border-black/[0.06] bg-black/[0.03] px-2.5 py-1.5 text-[12px] font-medium outline-none transition-colors focus-visible:border-brand"
               />
             </div>
-            <ul role="listbox" aria-label="Select a CAM" className="max-h-56 overflow-y-auto p-1.5">
+            <ul role="listbox" aria-label="Select a team member" className="max-h-56 overflow-y-auto p-1.5">
               <li>
                 <button
                   type="button"
@@ -256,14 +265,17 @@ function CamPicker({
                         isSelected ? "bg-black/[0.05]" : ""
                       }`}
                     >
-                      <span className="truncate">{cam.full_name || "Unnamed CAM"}</span>
+                      <span className="truncate">
+                        {cam.full_name ||
+                          (cam.role === "admin" ? "Unnamed Admin" : "Unnamed CAM")}
+                      </span>
                       {isSelected && <Check size={14} strokeWidth={3} className="shrink-0 text-brand" />}
                     </button>
                   </li>
                 );
               })}
               {filtered.length === 0 && (
-                <li className="px-3 py-3 text-[12px] text-muted-foreground">No CAMs match “{query}”.</li>
+                <li className="px-3 py-3 text-[12px] text-muted-foreground">No team members match “{query}”.</li>
               )}
             </ul>
           </motion.div>
@@ -392,7 +404,7 @@ export function PerformanceSection({
       ? "Whole team"
       : scope.kind === "me"
         ? "Your performance"
-        : `${cams.find((cam) => cam.id === scope.userId)?.full_name || "This CAM"}'s performance`;
+        : `${cams.find((cam) => cam.id === scope.userId)?.full_name || "This team member"}'s performance`;
 
   const emailsSent = person ? person.emailsSent : effectiveSummary.team.emailsSent;
   const replies = person ? person.replies : effectiveSummary.team.replies;
@@ -430,6 +442,18 @@ export function PerformanceSection({
 
   const visibleSectors = currentSectors.slice(0, 8);
   const hiddenSectors = currentSectors.length - visibleSectors.length;
+
+  const periodBuckets = useMemo(() => {
+    if (!selected.from || !selected.to) return undefined;
+    return createPeriodBuckets(selected.from, selected.to);
+  }, [selected.from, selected.to]);
+
+  const bucketData = useMemo(() => {
+    if (!raw || !periodBuckets) return null;
+    const targetUserId =
+      scope.kind === "me" ? actorId : scope.kind === "cam" ? scope.userId : null;
+    return bucketCountsForPeriod(raw, periodBuckets, targetUserId);
+  }, [raw, periodBuckets, scope, actorId]);
 
   const periodCaption = useMemo(() => {
     if (!selected.from || !selected.to) return "this period vs prior period";
@@ -477,20 +501,38 @@ export function PerformanceSection({
       </div>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <PerformanceTile label="Emails Sent" count={emailsSent} unit="emails" placeholderTotal={70} />
-        <PerformanceTile label="Replies Received" count={replies} unit="replies" placeholderTotal={24} />
+        <PerformanceTile
+          label="Emails Sent"
+          count={emailsSent}
+          unit="emails"
+          data={bucketData?.emails}
+          buckets={periodBuckets}
+          periodLabel={selected.label}
+        />
+        <PerformanceTile
+          label="Replies Received"
+          count={replies}
+          unit="replies"
+          data={bucketData?.replies}
+          buckets={periodBuckets}
+          periodLabel={selected.label}
+        />
         <PerformanceTile
           label="Conversions"
           count={conversions}
           unit="conversions"
-          placeholderTotal={8}
-          activeColorClass="bg-brand"
+          data={bucketData?.conversions}
+          buckets={periodBuckets}
+          periodLabel={selected.label}
+          activeColorClass="bg-converted"
         />
         <PerformanceTile
           label="Organisations Scored"
           count={effectiveSummary.orgsScored}
           unit="orgs"
-          placeholderTotal={48}
+          data={bucketData?.scores}
+          buckets={periodBuckets}
+          periodLabel={selected.label}
         />
       </div>
 
@@ -513,7 +555,7 @@ export function PerformanceSection({
 
         <div className="flex min-h-[300px] flex-col rounded-[28px] border border-border bg-card p-6 shadow-[0_2px_10px_rgba(0,0,0,0.04)]">
           <div className="flex items-baseline justify-between gap-3">
-            <h3 className="text-[16px] font-semibold tracking-tight text-foreground">
+            <h3 className="text-[20px] font-semibold capitalize font-body tracking-tight text-foreground">
               Sector performance
             </h3>
             <span className="text-[11px] font-medium text-muted-foreground">{selected.label}</span>
@@ -527,7 +569,7 @@ export function PerformanceSection({
             </div>
           ) : (
             <div className="mt-4 flex-1">
-              <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 border-b border-black/[0.06] pb-2 text-[10px] font-bold uppercase tracking-[0.1em] text-foreground/35 max-sm:grid-cols-[1fr_auto_auto]">
+              <div className="grid grid-cols-[minmax(0,1fr)_3.75rem_3.75rem] sm:grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_4.5rem] gap-x-4 border-b border-black/[0.06] pb-2 text-[10px] font-bold uppercase tracking-[0.1em] text-foreground/35">
                 <span>Sector</span>
                 <span className="text-right">Sent</span>
                 <span className="text-right">Reply</span>
@@ -537,12 +579,12 @@ export function PerformanceSection({
                 {visibleSectors.map((row) => (
                   <li
                     key={row.sector}
-                    className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-4 py-2.5 text-[13px] tabular-nums max-sm:grid-cols-[1fr_auto_auto]"
+                    className="grid grid-cols-[minmax(0,1fr)_3.75rem_3.75rem] sm:grid-cols-[minmax(0,1fr)_4.5rem_4.5rem_4.5rem] items-center gap-x-4 py-2.5 text-[13px] tabular-nums"
                   >
                     <span className="truncate pr-2 font-medium text-foreground">{row.sector}</span>
                     <span className="text-right text-foreground/70">{row.emailsSent.toLocaleString()}</span>
                     <span className="text-right text-foreground/70">{pct(row.replyRate)}</span>
-                    <span className="hidden font-semibold text-foreground sm:block">
+                    <span className="hidden text-right font-semibold text-foreground sm:block">
                       {pct(row.conversionRate)}
                     </span>
                   </li>

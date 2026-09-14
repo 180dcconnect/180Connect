@@ -48,7 +48,7 @@ type TooltipContentProps = TooltipContentPrimitiveProps & {
 function TooltipContent({
   className,
   sideOffset,
-  showArrow = true,
+  showArrow = false,
   children,
   ...props
 }: TooltipContentProps) {

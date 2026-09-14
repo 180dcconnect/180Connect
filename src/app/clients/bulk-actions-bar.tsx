@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
+import { ArrowRight, AtSign, Check, Search } from "lucide-react";
 import {
   PIPELINE_STATUSES,
   formatOutreachStatus,
@@ -16,49 +17,89 @@ import {
   filterMentionCandidates,
   limitMentionIdsByOccurrences,
   mentionQueryAtCursor,
+  splitNoteContentMentions,
   type MentionCandidate,
 } from "@/lib/note-mentions";
+import { MentionTag } from "@/components/ui/mention-tag";
 import { getMentionDirectory } from "@/lib/mention-directory";
+import { AnimateIcon } from "@/components/animate-ui/icons/icon";
+import { MessageSquarePlus } from "@/components/animate-ui/icons/message-square-plus";
+import { Tag } from "@/components/animate-ui/icons/tag";
+import { User } from "@/components/animate-ui/icons/user";
+import { Workflow } from "@/components/animate-ui/icons/workflow";
+import { XIcon } from "@/components/animate-ui/icons/x";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { EASE, stagger } from "@/components/brand/motion";
+import { LIP, SEARCH_GLASS, SEARCH_GLASS_OPEN } from "@/components/brand/tokens";
 import { useBulkSelection } from "./bulk-selection";
-import { OriginButton } from "@/components/ui/origin-button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { UsersGroupIcon } from "@/components/ui/users-group-icon";
 
 /**
  * Unified bulk action bar: F064 (status) + F065 (comment) + F253 (assign)
- * + F063 (tags), rebuilt as a compact dark floating pill.
+ * + F063 (tags), drawn in the BrandSearchBar's glass language.
  *
  * SELECTING IS POINTING, NOT COMMITTING — F062's bar is a readout of what the
- * CAM is holding plus the things they might do to all of it. The earlier
- * incarnation dumped every control, a comment box and the warning copy onto
- * the page the moment a single row was picked, so one selection turned the
- * bottom of the list into a forms screen. This one keeps that promise instead:
+ * CAM is holding plus the things they might do to all of it:
  *
- *   - A fixed, floating pill (not a sticky in-flow card) so selecting never
- *     reflows the list under it. Slides in when anything is selected.
- *   - The count readout (badge + count + "across all filters" scope note) is
- *     the anchor, always visible.
- *   - Actions appear as compact pills; the heavyweight inputs — a status
- *     picker, a tag multi-picker, a comment composer — are revealed on demand
- *     inside a popover or an expandable composer rather than parked on screen.
- *   - The all-or-nothing consequence of a bulk change, and any permission or
- *     limit caveats, live in the action's own confirm/dialog, not on the bar.
+ *   - The bar floats at the bottom of the page as a dark glass capsule; the
+ *     count is the anchor, always visible.
+ *   - The heavyweight inputs — a status picker, a tag picker, an owner picker,
+ *     a comment composer — unfold *upwards* from the capsule, which stays
+ *     pinned where the CAM's eye already is.
+ *   - Every panel is the same height. Switching from one action to another is
+ *     a crossfade inside a box that does not move, rather than the glass
+ *     lurching to a new size on every tap.
+ *   - The all-or-nothing consequence of a bulk change lives in a confirmation
+ *     that takes over the same panel (the search bar's confirm sheet), not in
+ *     a modal somewhere else on the page.
  */
 
-// Motion-ready easing from the design system / OriginButton.
-const EASE = [0.16, 1, 0.3, 1] as const;
+/** Capsule height; half of it is the radius, so the open card's corners match. */
+const ROW = 64;
+/** One height for every panel, so switching actions never resizes the glass. */
+const PANEL_HEIGHT = 340;
+
+const PANEL_STAGGER = stagger(0.04, 0.08);
+const OPTION_LIST: Variants = { hidden: {}, show: {} };
+
+/**
+ * Opacity and y only — never `filter`. A filter on any descendant of a
+ * `backdrop-filter` element poisons its frost in Chrome and Safari (see the
+ * note on GLASS_ITEM in BrandSearchBar).
+ */
+const GLASS_ITEM: Variants = {
+  hidden: { opacity: 0, y: 8 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: EASE } },
+};
+
+const GLASS_OPTION: Variants = {
+  hidden: { opacity: 0, y: 8 },
+  show: (index: number = 0) => ({
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.3, ease: EASE, delay: Math.min(index * 0.02, 0.2) },
+  }),
+};
+
+const OUTLINE =
+  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e6f5c0]";
+const NO_SCROLLBAR =
+  "[&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]";
+const FIELD_FOCUS = "focus-within:ring-2 focus-within:ring-[#e6f5c0]/60";
 
 const PLACEHOLDER = "";
 
+type ActivePanel = "status" | "note" | "tag" | "assign";
 type Pending = "status" | "comment" | "assign";
-type TeamMember = { id: string; full_name: string | null };
-type TagOption = { id: string; name: string };
+type TeamMember = { id: string; full_name: string | null; role?: string | null };
+type TagOption = { id: string; name: string; colour?: string | null };
+
+const clients = (count: number) => `${count} client${count === 1 ? "" : "s"}`;
+
+function initials(name: string | null): string {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
 
 export function BulkActionsBar({
   team,
@@ -76,20 +117,23 @@ export function BulkActionsBar({
   const { ids, statusBlockedCount, selected, deselect, clear } = useBulkSelection();
   const [status, setStatus] = useState<PipelineStatus | typeof PLACEHOLDER>(PLACEHOLDER);
   const [comment, setComment] = useState("");
-  const [commentOpen, setCommentOpen] = useState(false);
+  const [activePanel, setActivePanel] = useState<ActivePanel | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
-  const cancelRef = useRef<HTMLButtonElement>(null);
-  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerOverlayRef = useRef<HTMLDivElement | null>(null);
 
   // Assign state (F253)
   const [assignOwnerId, setAssignOwnerId] = useState("");
   const [assignReason, setAssignReason] = useState("");
+  const [teamQuery, setTeamQuery] = useState("");
 
   // Tags state (F063)
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
+  const [tagQuery, setTagQuery] = useState("");
 
   // F485 mention state for the comment composer. `directory` is the same
   // /api/users/mention-candidates list the single-note composer uses —
@@ -97,6 +141,10 @@ export function BulkActionsBar({
   // id chosen in this draft so `apply` can reconcile it against the text (a
   // mention typed over or deleted notifies nobody).
   const insertedRef = useRef(new Map<string, string>());
+  const [mentionedNames, setMentionedNames] = useState<string[]>([]);
+  const [animatedMention, setAnimatedMention] = useState<{ name: string; key: string } | null>(
+    null,
+  );
   const [commentCursor, setCommentCursor] = useState(0);
   const [directory, setDirectory] = useState<MentionCandidate[] | null>(null);
   const [directoryFailed, setDirectoryFailed] = useState(false);
@@ -110,21 +158,38 @@ export function BulkActionsBar({
   const preparedComment = prepareComment(comment);
   const statusBlocked = statusBlockedCount > 0;
 
-  // Escape clears the whole selection while the bar is up (and closes any open
-  // composer/popover first). Actually closing the confirm dialog takes priority:
-  // when pending, Escape dismisses it and does nothing more. An open @mention
-  // listbox dismisses before any of that — the textarea's own key handler
-  // stops propagation in that case, so this listener never fires for it; the
-  // check here covers Escape reaching the document any other way.
+  const resetTransients = useCallback(() => {
+    setError(null);
+    setResult(null);
+    setStatus(PLACEHOLDER);
+    setComment("");
+    setActivePanel(null);
+    setPending(null);
+    insertedRef.current.clear();
+    setMentionedNames([]);
+    setAnimatedMention(null);
+    setMentionIndex(0);
+    setDismissedStart(null);
+    setSelectedTagIds(new Set());
+    setTagQuery("");
+    setAssignOwnerId("");
+    setAssignReason("");
+    setTeamQuery("");
+  }, []);
+
+  // Escape walks back one step at a time: an open @mention listbox, then the
+  // confirmation (back to its panel), then the panel, then the selection
+  // itself. The textarea's own key handler stops propagation for the listbox
+  // case; the check here covers Escape reaching the document any other way.
   useEffect(() => {
     if (count === 0) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || busy) return;
       if (pending !== null) {
         setPending(null);
         return;
       }
-      if (commentOpen && composerRef.current) {
+      if (activePanel === "note" && composerRef.current) {
         const trigger = mentionQueryAtCursor(
           composerRef.current.value,
           composerRef.current.selectionStart ?? 0,
@@ -133,30 +198,70 @@ export function BulkActionsBar({
           setDismissedStart(trigger.start);
           return;
         }
-        setCommentOpen(false);
+      }
+      if (activePanel !== null) {
+        setActivePanel(null);
+        setError(null);
         return;
       }
       clear();
+      resetTransients();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [count, pending, commentOpen, dismissedStart, clear]);
+  }, [count, busy, pending, activePanel, dismissedStart, clear, resetTransients]);
 
-  // Focus the composer when it expands.
+  // Pointerdown outside folds the panel away (and any confirmation in it) —
+  // never mid-request, or the answer would land on a closed bar. Selection
+  // toggles are ignored so adding/removing clients keeps the active panel open.
   useEffect(() => {
-    if (commentOpen) composerRef.current?.focus();
-  }, [commentOpen]);
+    if (activePanel === null) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (busy) return;
+      const target = event.target as Node | null;
+      if (barRef.current?.contains(target)) return;
+      const element = (
+        target instanceof Element ? target : target?.parentElement
+      ) as Element | null;
+      if (element?.closest?.("[data-client-select], [role='checkbox']")) return;
+      setActivePanel(null);
+      setPending(null);
+      setError(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [activePanel, busy]);
 
+  // The success line is a moment, not a fixture.
   useEffect(() => {
-    if (pending === null) return;
-    cancelRef.current?.focus();
-  }, [pending]);
+    if (result === null) return;
+    const id = setTimeout(() => setResult(null), 4000);
+    return () => clearTimeout(id);
+  }, [result]);
+
+  // Views mount after the previous one's exit (mode="wait"), so an effect
+  // keyed on state would fire before the element exists. Stable callback refs
+  // run exactly when it does.
+  const attachComposer = useCallback((element: HTMLTextAreaElement | null) => {
+    composerRef.current = element;
+    element?.focus({ preventScroll: true });
+  }, []);
+  const focusOnMount = useCallback((element: HTMLElement | null) => {
+    element?.focus({ preventScroll: true });
+  }, []);
 
   const deselectStatusBlocked = useCallback(
     () =>
       deselect([...selected].filter(([, canStatus]) => !canStatus).map(([id]) => id)),
     [selected, deselect],
   );
+
+  function togglePanel(panel: ActivePanel) {
+    if (busy) return;
+    setError(null);
+    setPending(null);
+    setActivePanel((prev) => (prev === panel ? null : panel));
+  }
 
   // F485: the @mention trigger under the comment caret, if any. Routing on
   // chosen ids (not on parsing `@Name` out of the text) is what keeps an
@@ -165,7 +270,8 @@ export function BulkActionsBar({
   const mentionSuggestions =
     mentionTrigger && directory ? filterMentionCandidates(directory, mentionTrigger.query) : [];
   const mentionListOpen =
-    commentOpen &&
+    activePanel === "note" &&
+    pending === null &&
     mentionTrigger !== null &&
     mentionTrigger.start !== dismissedStart &&
     !directoryFailed &&
@@ -183,6 +289,8 @@ export function BulkActionsBar({
   function chooseMention(candidate: MentionCandidate) {
     const next = applyMentionInsertion(comment, commentCursor, candidate);
     insertedRef.current.set(candidate.id, candidate.fullName);
+    setMentionedNames([...insertedRef.current.values()]);
+    setAnimatedMention({ name: candidate.fullName, key: `${candidate.id}-${next.cursor}` });
     setComment(next.value);
     setMentionIndex(0);
     setDismissedStart(null);
@@ -220,7 +328,13 @@ export function BulkActionsBar({
 
   const showResult = result !== null && count === 0;
 
-  if (count === 0 && !showResult) return null;
+  function finishWith(message: string) {
+    setPending(null);
+    setActivePanel(null);
+    clear();
+    setResult(message);
+    router.refresh();
+  }
 
   async function apply(action: Pending) {
     setBusy(true);
@@ -252,19 +366,21 @@ export function BulkActionsBar({
       } else {
         // assign
         if (!assignOwnerId) {
-          setError("Choose a CAM to assign.");
-          setBusy(false);
+          setError("Choose a team member to assign, or Unassigned.");
+          setPending(null);
           return;
         }
         if (!assignReason.trim()) {
           setError("A reason is required so the handover can be understood later.");
-          setBusy(false);
+          setPending(null);
           return;
         }
+        const targetOwnerId = assignOwnerId === "unassigned" ? null : assignOwnerId;
         endpoint = "/api/clients/bulk-assign-owner";
         payload = {
           organisationIds: ids,
-          ownerId: assignOwnerId,
+          newOwnerId: targetOwnerId,
+          ownerId: targetOwnerId,
           reason: assignReason.trim(),
         };
       }
@@ -276,28 +392,27 @@ export function BulkActionsBar({
       });
       const body = await response.json();
       if (response.ok) {
-        setPending(null);
         if (action === "status") setStatus(PLACEHOLDER);
         else if (action === "comment") {
           setComment("");
           insertedRef.current.clear();
+          setMentionedNames([]);
+          setAnimatedMention(null);
           setMentionIndex(0);
           setDismissedStart(null);
-          setCommentOpen(false);
         } else {
           setAssignOwnerId("");
           setAssignReason("");
+          setTeamQuery("");
         }
-        clear();
-        setResult(
+        finishWith(
           body.message ??
             (action === "status"
               ? "The selected clients were updated."
               : action === "comment"
                 ? "The comment was added to the selected clients."
-                : `Assigned ${count} client${count === 1 ? "" : "s"}.`),
+                : `Assigned ${clients(count)}.`),
         );
-        router.refresh();
         return;
       }
       setError(
@@ -338,9 +453,8 @@ export function BulkActionsBar({
       const body = await response.json();
       if (response.ok) {
         setSelectedTagIds(new Set());
-        clear();
-        setResult(body.message ?? "The tags were applied to the selected clients.");
-        router.refresh();
+        setTagQuery("");
+        finishWith(body.message ?? "The tags were applied to the selected clients.");
         return;
       }
       setError(body.error ?? "The tags could not be applied.");
@@ -359,17 +473,27 @@ export function BulkActionsBar({
       return next;
     });
 
-  const resetTransients = () => {
-    setError(null);
-    setResult(null);
-    setStatus(PLACEHOLDER);
-    setComment("");
-    setCommentOpen(false);
-    insertedRef.current.clear();
-    setMentionIndex(0);
-    setDismissedStart(null);
-    setSelectedTagIds(new Set());
-  };
+  const trimmedTagQuery = tagQuery.trim().toLowerCase();
+  const visibleTags = trimmedTagQuery
+    ? tags.filter((tag) => tag.name.toLowerCase().includes(trimmedTagQuery))
+    : tags;
+
+  const trimmedTeamQuery = teamQuery.trim().toLowerCase();
+  const visibleTeam = trimmedTeamQuery
+    ? team.filter((member) =>
+        (member.full_name ?? (member.role === "admin" ? "Unnamed Admin" : "Unnamed CAM"))
+          .toLowerCase()
+          .includes(trimmedTeamQuery),
+      )
+    : team;
+  const assigneeName =
+    assignOwnerId === "unassigned"
+      ? "Unassigned"
+      : team.find((member) => member.id === assignOwnerId)?.full_name ??
+        (team.find((member) => member.id === assignOwnerId)?.role === "admin"
+          ? "Unnamed Admin"
+          : "Unnamed CAM");
+  const canReviewAssign = !busy && assignOwnerId !== "" && assignReason.trim() !== "";
 
   const pillMotion = reducedMotion
     ? { initial: false, animate: { opacity: 1 } }
@@ -377,8 +501,504 @@ export function BulkActionsBar({
         initial: { y: 36, opacity: 0 },
         animate: { y: 0, opacity: 1 },
         exit: { y: 36, opacity: 0 },
-        transition: { duration: 0.22, ease: EASE },
+        transition: { duration: 0.3, ease: EASE },
       };
+
+  const panelOpen = activePanel !== null;
+  const view = pending !== null ? `confirm-${pending}` : activePanel;
+
+  function renderView() {
+    if (pending !== null) {
+      const copy =
+        pending === "status"
+          ? {
+              title: `Move ${clients(count)} to ${label}?`,
+              description: `Applies to every selected client in one action, including any the current filter hides. Clients already on ${label} are left alone.`,
+              details: [
+                { label: "Clients", value: String(count) },
+                { label: "New status", value: label },
+                { label: "Undo", value: "Client by client only" },
+              ],
+              confirm: `Update ${count}`,
+              working: "Updating…",
+            }
+          : pending === "comment"
+            ? {
+                title: `Add this note to ${clients(count)}?`,
+                description:
+                  "Each client gets its own copy under your name. Owners, and anyone you @mentioned, are notified.",
+                details: [
+                  { label: "Clients", value: String(count) },
+                  { label: "Undo", value: "Delete on each client" },
+                ],
+                confirm: `Add to ${count}`,
+                working: "Adding…",
+              }
+            : {
+                title:
+                  assignOwnerId === "unassigned"
+                    ? `Release ${clients(count)} to unassigned pool?`
+                    : `Assign ${clients(count)} to ${assigneeName}?`,
+                description:
+                  assignOwnerId === "unassigned"
+                    ? "Clients return to the unowned pool and open actions are unassigned."
+                    : "Ownership and open actions move in one action, recorded in each client's audit log.",
+                details: [
+                  { label: "New owner", value: assigneeName },
+                  { label: "Reason", value: assignReason.trim() },
+                ],
+                confirm: assignOwnerId === "unassigned" ? `Release ${count}` : `Assign ${count}`,
+                working: assignOwnerId === "unassigned" ? "Releasing…" : "Assigning…",
+              };
+
+      return (
+        <>
+          <motion.p
+            variants={GLASS_ITEM}
+            className="font-body shrink-0 px-1 text-xl font-medium text-white"
+          >
+            {copy.title}
+          </motion.p>
+          <motion.p
+            variants={GLASS_ITEM}
+            className="mt-1.5 shrink-0 px-1 text-[13px] leading-[1.6] text-[#f4f4ef]/60"
+          >
+            {copy.description}
+          </motion.p>
+          <motion.dl
+            variants={GLASS_ITEM}
+            className="mt-4 flex shrink-0 flex-col gap-2 rounded-2xl bg-black/25 px-4 py-3"
+          >
+            {copy.details.map((detail) => (
+              <div className="flex items-baseline gap-4" key={detail.label}>
+                <dt className="shrink-0 text-[12px] text-[#f4f4ef]/50">{detail.label}</dt>
+                <dd className="min-w-0 flex-1 truncate text-right text-[13px] text-[#f4f4ef]">
+                  {detail.value}
+                </dd>
+              </div>
+            ))}
+          </motion.dl>
+          {pending === "comment" && (
+            <motion.div
+              variants={GLASS_ITEM}
+              className={`mt-2 min-h-0 flex-1 overflow-y-auto rounded-2xl bg-black/25 px-4 py-3 text-[14px] leading-[1.6] break-words whitespace-pre-wrap text-[#f4f4ef] ${NO_SCROLLBAR}`}
+            >
+              {splitNoteContentMentions(
+                preparedComment.ok ? preparedComment.content : comment,
+                mentionedNames,
+              ).map((part, index) =>
+                part.mention ? (
+                  <MentionTag key={index} text={part.text} variant="dark" animate={false} />
+                ) : (
+                  <span key={index}>{part.text}</span>
+                ),
+              )}
+            </motion.div>
+          )}
+          <motion.div
+            variants={GLASS_ITEM}
+            className="mt-auto flex shrink-0 items-center justify-end gap-2 pt-3"
+          >
+            <GhostButton ref={focusOnMount} disabled={busy} onClick={() => setPending(null)}>
+              Back
+            </GhostButton>
+            <PrimaryPill busy={busy} disabled={busy} onClick={() => apply(pending)}>
+              {busy ? copy.working : copy.confirm}
+            </PrimaryPill>
+          </motion.div>
+        </>
+      );
+    }
+
+    if (activePanel === "status") {
+      return (
+        <>
+          <PanelHeader title="Change status" meta={clients(count)} />
+          {(statusBlocked || overStatusLimit) && (
+            <motion.p
+              variants={GLASS_ITEM}
+              className="mt-3 shrink-0 rounded-2xl bg-amber-400/10 px-3.5 py-2.5 text-[13px] leading-[1.55] text-amber-200"
+            >
+              {statusBlocked ? (
+                <>
+                  <span className="font-semibold">
+                    {statusBlockedCount} of {count} {statusBlockedCount === 1 ? "isn't" : "aren't"}{" "}
+                    yours to change.
+                  </span>{" "}
+                  It&apos;s all-or-nothing —{" "}
+                  <button
+                    type="button"
+                    className={`font-semibold underline underline-offset-2 ${OUTLINE}`}
+                    disabled={busy}
+                    onClick={deselectStatusBlocked}
+                  >
+                    deselect {statusBlockedCount === 1 ? "it" : "them"}
+                  </button>{" "}
+                  or ask an admin.
+                </>
+              ) : (
+                `One change covers at most ${MAX_BULK_STATUS_CLIENTS} clients. Deselect some to continue.`
+              )}
+            </motion.p>
+          )}
+          <motion.ul
+            variants={OPTION_LIST}
+            className={`mt-3 grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-1 overflow-y-auto ${NO_SCROLLBAR}`}
+          >
+            {PIPELINE_STATUSES.map((option, index) => (
+              <OptionRow
+                key={option}
+                index={index}
+                selected={status === option}
+                disabled={busy || overStatusLimit}
+                onClick={() => setStatus(option)}
+              >
+                <span className="truncate">{formatOutreachStatus(option)}</span>
+              </OptionRow>
+            ))}
+          </motion.ul>
+          <PanelFooter
+            hint={
+              status !== PLACEHOLDER ? (
+                <>
+                  Moving to <span className="font-medium text-white">{label}</span>
+                </>
+              ) : (
+                "Pick where they're going"
+              )
+            }
+          >
+            <PrimaryPill
+              disabled={busy || status === PLACEHOLDER || overStatusLimit || statusBlocked}
+              onClick={() => setPending("status")}
+            >
+              Review
+            </PrimaryPill>
+          </PanelFooter>
+        </>
+      );
+    }
+
+    if (activePanel === "note") {
+      const draftMentionParts = splitNoteContentMentions(comment, mentionedNames);
+      return (
+        <>
+          <PanelHeader title="Add a note" meta={clients(count)} />
+          <motion.div
+            variants={GLASS_ITEM}
+            className={`mt-3 flex min-h-0 flex-1 flex-col rounded-2xl bg-white/10 px-4 pt-3 pb-2 transition-shadow ${FIELD_FOCUS}`}
+          >
+            <div className="relative min-h-0 flex-1">
+              <div
+                ref={composerOverlayRef}
+                aria-hidden="true"
+                className={`font-body pointer-events-none absolute inset-0 overflow-hidden text-[15px] leading-[1.6] break-words whitespace-pre-wrap ${NO_SCROLLBAR}`}
+              >
+                {draftMentionParts.map((part, index) =>
+                  part.mention ? (
+                    <MentionTag
+                      key={`${index}-${part.text}-${animatedMention?.key ?? ""}`}
+                      text={part.text}
+                      variant="dark"
+                      animate={animatedMention?.name === part.text.slice(1)}
+                      // Metric-stable: the overlay sits under a transparent
+                      // textarea, so the highlight must measure like plain
+                      // text or the caret drifts from the visible glyphs.
+                      matchTextarea
+                    />
+                  ) : (
+                    <span key={index} className="text-[#f4f4ef]">
+                      {part.text}
+                    </span>
+                  ),
+                )}
+              </div>
+              <textarea
+                ref={attachComposer}
+                id="bulk-comment"
+                aria-label={`Note for ${clients(count)}`}
+                className={`font-body relative min-h-0 w-full h-full resize-none bg-transparent text-[15px] leading-[1.6] whitespace-pre-wrap break-words text-transparent caret-[#e6f5c0] outline-none placeholder:text-[#f4f4ef]/40 ${NO_SCROLLBAR}`}
+                placeholder="Write the same note for every selected client…"
+                value={comment}
+                maxLength={MAX_NOTE_LENGTH}
+                disabled={busy}
+                role="combobox"
+                aria-expanded={mentionListOpen}
+                aria-controls={mentionListOpen ? "bulk-comment-mentions" : undefined}
+                aria-activedescendant={
+                  mentionListOpen && directory !== null && mentionSuggestions[mentionIndex]
+                    ? `bulk-comment-mentions-${mentionSuggestions[mentionIndex].id}`
+                    : undefined
+                }
+                onChange={(event) => {
+                  setComment(event.target.value);
+                  setMentionIndex(0);
+                  setDismissedStart(null);
+                  setCommentCursor(event.target.selectionStart ?? event.target.value.length);
+                  if (mentionQueryAtCursor(event.target.value, event.target.selectionStart ?? 0)) {
+                    ensureDirectory();
+                  }
+                }}
+                onSelect={(event) =>
+                  setCommentCursor(
+                    event.currentTarget.selectionStart ?? event.currentTarget.value.length,
+                  )
+                }
+                onKeyDown={onComposerKeyDown}
+                onScroll={(event) => {
+                  if (composerOverlayRef.current) {
+                    composerOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
+                    composerOverlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
+                  }
+                }}
+              />
+            </div>
+            <div className="flex shrink-0 items-center justify-between pt-1 text-[12px] text-[#f4f4ef]/45">
+              <span>Type @ to mention a teammate</span>
+              <span className="tabular-nums">
+                {comment.length} / {MAX_NOTE_LENGTH}
+              </span>
+            </div>
+          </motion.div>
+          <AnimatePresence initial={false}>
+            {mentionListOpen && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.25, ease: EASE }}
+                className="shrink-0 overflow-hidden"
+              >
+                {directory === null ? (
+                  <p className="px-3 pt-2 text-[13px] text-[#f4f4ef]/60" role="status">
+                    Finding teammates…
+                  </p>
+                ) : (
+                  <ul
+                    id="bulk-comment-mentions"
+                    role="listbox"
+                    aria-label="Mention a teammate"
+                    className={`mt-2 flex max-h-[112px] flex-col gap-0.5 overflow-y-auto ${NO_SCROLLBAR}`}
+                  >
+                    {mentionSuggestions.map((candidate, index) => (
+                      <li
+                        key={candidate.id}
+                        id={`bulk-comment-mentions-${candidate.id}`}
+                        role="option"
+                        aria-selected={index === mentionIndex}
+                      >
+                        <button
+                          type="button"
+                          className={`font-body flex w-full items-center gap-2.5 rounded-2xl px-3 py-1.5 text-left text-[15px] font-medium transition-colors ${
+                            index === mentionIndex
+                              ? "bg-white/15 text-[#e6f5c0]"
+                              : "text-white hover:bg-white/10"
+                          }`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => chooseMention(candidate)}
+                          onMouseEnter={() => setMentionIndex(index)}
+                        >
+                          <AtSign aria-hidden="true" className="h-4 w-4 shrink-0 opacity-60" />
+                          <span className="truncate">{candidate.fullName}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <PanelFooter
+            hint={
+              overNoteLimit ? (
+                <span className="text-amber-200">
+                  One note covers at most {MAX_BULK_NOTE_CLIENTS} clients.
+                </span>
+              ) : (
+                "Every selected client gets its own copy"
+              )
+            }
+          >
+            <PrimaryPill
+              disabled={busy || !preparedComment.ok || overNoteLimit}
+              onClick={() => setPending("comment")}
+            >
+              Review
+            </PrimaryPill>
+          </PanelFooter>
+        </>
+      );
+    }
+
+    if (activePanel === "tag") {
+      return (
+        <>
+          <PanelHeader
+            title="Apply tags"
+            meta={selectedTagIds.size > 0 ? `${selectedTagIds.size} chosen` : clients(count)}
+          />
+          <PanelSearch
+            label="Search tags"
+            placeholder="Search tags…"
+            value={tagQuery}
+            onChange={setTagQuery}
+          />
+          <motion.ul
+            variants={OPTION_LIST}
+            className={`mt-2 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto ${NO_SCROLLBAR}`}
+          >
+            {visibleTags.map((tag, index) => (
+              <OptionRow
+                key={tag.id}
+                index={index}
+                selected={selectedTagIds.has(tag.id)}
+                disabled={busy}
+                onClick={() => toggleTag(tag.id)}
+              >
+                <span
+                  aria-hidden="true"
+                  className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/20"
+                  style={{ backgroundColor: tag.colour ?? "transparent" }}
+                />
+                <span className="truncate">{tag.name}</span>
+              </OptionRow>
+            ))}
+            {visibleTags.length === 0 && (
+              <EmptyRow>
+                {trimmedTagQuery ? `No tag matches “${tagQuery.trim()}”.` : "No tags yet."}
+              </EmptyRow>
+            )}
+          </motion.ul>
+          <PanelFooter
+            hint={
+              overTagLimit ? (
+                <span className="text-amber-200">
+                  At most {MAX_BULK_TAG_CLIENTS} clients — deselect some.
+                </span>
+              ) : selectedTagIds.size > 0 ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setSelectedTagIds(new Set())}
+                  className={`rounded-full transition-colors hover:text-white ${OUTLINE}`}
+                >
+                  Clear choice
+                </button>
+              ) : (
+                "Added alongside existing tags"
+              )
+            }
+          >
+            <PrimaryPill
+              busy={busy}
+              disabled={busy || selectedTagIds.size === 0 || overTagLimit}
+              onClick={applyTags}
+            >
+              {busy ? "Applying…" : `Apply to ${count}`}
+            </PrimaryPill>
+          </PanelFooter>
+        </>
+      );
+    }
+
+    // assign
+    return (
+      <>
+        <PanelHeader title="Assign owner" meta={clients(count)} />
+        <PanelSearch
+          label="Search team"
+          placeholder="Search team…"
+          value={teamQuery}
+          onChange={setTeamQuery}
+        />
+        <motion.ul
+          variants={OPTION_LIST}
+          className={`mt-2 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto ${NO_SCROLLBAR}`}
+        >
+          <OptionRow
+            key="unassigned"
+            index={0}
+            selected={assignOwnerId === "unassigned"}
+            disabled={busy}
+            onClick={() =>
+              setAssignOwnerId((current) => (current === "unassigned" ? "" : "unassigned"))
+            }
+          >
+            <span
+              aria-hidden="true"
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-white/10 text-[10px] font-semibold tracking-wide"
+            >
+              UA
+            </span>
+            <span className="truncate">Unassigned</span>
+          </OptionRow>
+          {visibleTeam.map((member, index) => (
+            <OptionRow
+              key={member.id}
+              index={index + 1}
+              selected={assignOwnerId === member.id}
+              disabled={busy}
+              onClick={() =>
+                setAssignOwnerId((current) => (current === member.id ? "" : member.id))
+              }
+            >
+              <span
+                aria-hidden="true"
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-white/10 text-[10px] font-semibold tracking-wide"
+              >
+                {initials(member.full_name)}
+              </span>
+              <span className="truncate">
+                {member.full_name ?? (member.role === "admin" ? "Unnamed Admin" : "Unnamed CAM")}
+              </span>
+              {member.role === "admin" && (
+                <span className="ml-auto shrink-0 rounded bg-white/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#e6f5c0]">
+                  Admin
+                </span>
+              )}
+            </OptionRow>
+          ))}
+          {visibleTeam.length === 0 && (
+            <EmptyRow>
+              {trimmedTeamQuery
+                ? `No one matches “${teamQuery.trim()}”.`
+                : "No team members to assign."}
+            </EmptyRow>
+          )}
+        </motion.ul>
+        {/* The ask field's shape: the last thing to fill in carries the go disc. */}
+        <motion.div
+          variants={GLASS_ITEM}
+          className={`mt-3 flex shrink-0 items-center gap-2 rounded-2xl bg-white/10 py-1.5 pr-1.5 pl-4 transition-shadow ${FIELD_FOCUS}`}
+        >
+          <input
+            type="text"
+            value={assignReason}
+            disabled={busy}
+            aria-label="Reason for the handover"
+            placeholder="Reason for the handover (audit log)"
+            onChange={(event) => setAssignReason(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && canReviewAssign) {
+                event.preventDefault();
+                setPending("assign");
+              }
+            }}
+            className="font-body min-w-0 flex-1 bg-transparent text-[15px] text-[#f4f4ef] caret-[#e6f5c0] outline-none placeholder:text-[#f4f4ef]/40"
+          />
+          <button
+            type="button"
+            aria-label="Review assignment"
+            disabled={!canReviewAssign}
+            onClick={() => setPending("assign")}
+            className={`grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e6f5c0] text-[#1a1a1a] transition-colors hover:bg-[#d4e5a0] disabled:cursor-not-allowed disabled:opacity-40 ${OUTLINE}`}
+          >
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        </motion.div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -386,498 +1006,445 @@ export function BulkActionsBar({
         {count > 0 && (
           <motion.div
             {...pillMotion}
-            className="fixed bottom-6 inset-x-0 z-40 mx-auto w-[min(44rem,calc(100vw-2rem))]"
+            className="fixed inset-x-0 bottom-6 z-40 mx-auto w-[min(36rem,calc(100vw-2rem))]"
             role="region"
             aria-label="Bulk actions"
           >
-            <div className="overflow-hidden rounded-2xl bg-[#1c1a18]/95 shadow-2xl ring-1 ring-white/25 backdrop-blur-md">
-              {/* Expandable light composer, sits above the dark pill when open. */}
+            {/* justify-end pins the capsule to the bottom edge, so as the card's
+                height grows the clip reveals the panel from the top down — the
+                glass unfolds upwards and the row never moves. */}
+            <motion.div
+              ref={barRef}
+              className="relative flex w-full flex-col justify-end overflow-hidden backdrop-blur-[20px]"
+              style={{
+                boxShadow: `${LIP}, 0 20px 40px -15px rgba(0, 0, 0, 0.6)`,
+                borderRadius: ROW / 2,
+              }}
+              animate={{
+                height: panelOpen ? "auto" : ROW,
+                backgroundColor: panelOpen ? SEARCH_GLASS_OPEN : SEARCH_GLASS,
+              }}
+              initial={false}
+              transition={
+                reducedMotion
+                  ? { duration: 0 }
+                  : {
+                      height: { duration: 0.6, ease: EASE },
+                      backgroundColor: { duration: 0.7, ease: EASE },
+                    }
+              }
+            >
+              {/* Frost on its own childless leaf — see BrandSearchBar. */}
+              <div
+                className="pointer-events-none absolute inset-0 z-0 rounded-[inherit] backdrop-blur-[20px]"
+                aria-hidden="true"
+              />
+              <div
+                className="pointer-events-none absolute inset-0 z-30 rounded-[inherit] ring-1 ring-white/25 ring-inset"
+                aria-hidden="true"
+              />
+              <motion.div
+                className="pointer-events-none absolute inset-0 z-0 bg-white/8"
+                initial={false}
+                animate={{ opacity: panelOpen ? 1 : 0 }}
+                transition={{ duration: 0.3, ease: EASE }}
+              />
+
+              {/* PANEL — above the capsule, one fixed height for every action. */}
               <AnimatePresence initial={false}>
-                {commentOpen && (
+                {panelOpen && (
                   <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.2, ease: EASE }}
-                    className="overflow-hidden"
+                    key="panel"
+                    id="bulk-actions-panel"
+                    className="relative z-10 flex shrink-0 flex-col"
+                    style={{ height: PANEL_HEIGHT }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0, transition: { duration: 0.18, ease: EASE } }}
+                    transition={{ duration: 0.5, ease: EASE, delay: 0.2 }}
                   >
-                    <div className="space-y-2 border-b border-white/10 bg-white px-4 py-3">
-                      <Textarea
-                        ref={composerRef}
-                        id="bulk-comment"
-                        rows={2}
-                        className="rounded-xl border-black/15 bg-white text-sm"
-                        placeholder="Add the same comment to every selected client…"
-                        value={comment}
-                        maxLength={MAX_NOTE_LENGTH}
-                        disabled={busy}
-                        role="combobox"
-                        aria-expanded={mentionListOpen}
-                        aria-controls={mentionListOpen ? "bulk-comment-mentions" : undefined}
-                        aria-activedescendant={
-                          mentionListOpen &&
-                          directory !== null &&
-                          mentionSuggestions[mentionIndex]
-                            ? `bulk-comment-mentions-${mentionSuggestions[mentionIndex].id}`
-                            : undefined
-                        }
-                        onChange={(event) => {
-                          setComment(event.target.value);
-                          setMentionIndex(0);
-                          setDismissedStart(null);
-                          setCommentCursor(event.target.selectionStart ?? event.target.value.length);
-                          if (
-                            mentionQueryAtCursor(
-                              event.target.value,
-                              event.target.selectionStart ?? 0,
-                            )
-                          ) {
-                            ensureDirectory();
-                          }
-                        }}
-                        onSelect={(event) =>
-                          setCommentCursor(
-                            event.currentTarget.selectionStart ?? event.currentTarget.value.length,
-                          )
-                        }
-                        onKeyDown={onComposerKeyDown}
-                      />
-                      {mentionListOpen && (
-                        <div className="rounded-xl border border-black/15 bg-white px-1.5 py-1">
-                          {directory === null ? (
-                            <p className="px-2 py-1.5 text-xs text-foreground/50" role="status">
-                              Finding teammates…
-                            </p>
-                          ) : (
-                            <ul id="bulk-comment-mentions" role="listbox" aria-label="Mention a teammate">
-                              {mentionSuggestions.map((candidate, index) => (
-                                <li
-                                  key={candidate.id}
-                                  id={`bulk-comment-mentions-${candidate.id}`}
-                                  role="option"
-                                  aria-selected={index === mentionIndex}
-                                >
-                                  <button
-                                    type="button"
-                                    className={`flex w-full items-center rounded-lg px-2 py-1.5 text-left text-sm transition-colors ${
-                                      index === mentionIndex
-                                        ? "bg-black/[0.04] font-bold"
-                                        : "hover:bg-black/[0.04]"
-                                    }`}
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={() => chooseMention(candidate)}
-                                    onMouseEnter={() => setMentionIndex(index)}
-                                  >
-                                    {candidate.fullName}
-                                  </button>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      )}
-                      <div className="flex flex-wrap items-center gap-3">
-                        <OriginButton
-                          type="button"
-                          variant="dark"
-                          size="sm"
-                          disabled={busy || !preparedComment.ok || overNoteLimit}
-                          onClick={() => setPending("comment")}
+                    <AnimatePresence mode="wait">
+                      <motion.div
+                        key={view}
+                        className="flex min-h-0 flex-1 flex-col px-5 pt-5 pb-3"
+                        variants={PANEL_STAGGER}
+                        initial="hidden"
+                        animate="show"
+                        exit={{ opacity: 0, y: -6, transition: { duration: 0.15, ease: EASE } }}
+                      >
+                        {renderView()}
+                      </motion.div>
+                    </AnimatePresence>
+                    <AnimatePresence initial={false}>
+                      {error && (
+                        <motion.p
+                          role="alert"
+                          aria-live="polite"
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.25, ease: EASE }}
+                          className="mx-5 mb-3 shrink-0 rounded-2xl bg-red-400/10 px-3.5 py-2 text-[13px] font-medium text-red-200"
                         >
-                          Comment on {count} client{count === 1 ? "" : "s"}
-                        </OriginButton>
-                        <span className="text-[11px] text-foreground/50">
-                          {comment.length} / {MAX_NOTE_LENGTH}
-                        </span>
-                        {overNoteLimit && (
-                          <span className="text-[11px] font-bold text-amber-700">
-                            One bulk action covers at most {MAX_BULK_NOTE_CLIENTS} — deselect some.
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                          {error}
+                        </motion.p>
+                      )}
+                    </AnimatePresence>
                   </motion.div>
                 )}
               </AnimatePresence>
 
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand/20 text-xs font-bold text-[#e6f5c0]">
-                    {count}
+              {/* CAPSULE — always the bottom row. */}
+              <div
+                className="relative z-20 flex shrink-0 items-center gap-3 rounded-full bg-black/20 pr-3 pl-6"
+                style={{ height: ROW }}
+              >
+                <p
+                  className="font-body flex min-w-0 flex-1 items-baseline gap-[0.4ch] text-[15px] whitespace-nowrap sm:text-base"
+                  aria-live="polite"
+                >
+                  <RollingCount value={count} reducedMotion={reducedMotion ?? false} />
+                  <span className="text-[#f4f4ef]">
+                    {count === 1 ? "client" : "clients"} selected
                   </span>
-                  <div className="min-w-0 leading-tight">
-                    <p className="text-sm font-bold text-white/90">
-                      {count} client{count === 1 ? "" : "s"} selected
-                    </p>
-                    <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-white/45">
-                      across all filters
-                    </p>
-                  </div>
-                </div>
-
-                {statusBlocked && (
-                  <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-[10px] font-bold text-amber-300">
-                    {statusBlockedCount} restricted
+                  <span className="hidden truncate text-[#f4f4ef]/55 sm:inline">
+                    across all filters
                   </span>
-                )}
+                </p>
 
-                <div className="ml-auto flex flex-wrap items-center gap-1.5">
-                  {/* Status picker */}
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <OriginButton
-                        size="xs"
-                        variant="ghost"
-                        className="text-white/70 hover:text-white"
-                        disabled={busy}
-                        title={
-                          overStatusLimit
-                            ? `A bulk status change covers at most ${MAX_BULK_STATUS_CLIENTS} clients`
-                            : undefined
-                        }
-                      >
-                        Status{status !== PLACEHOLDER ? ` · ${label}` : ""}
-                      </OriginButton>
-                    </PopoverTrigger>
-                    <PopoverContent align="end" className="w-56 p-2" sideOffset={8}>
-                      <p className="px-2 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/45">
-                        Change status to
-                      </p>
-                      <div className="mt-1 space-y-0.5">
-                        {PIPELINE_STATUSES.map((option) => (
-                          <button
-                            key={option}
-                            type="button"
-                            disabled={busy || overStatusLimit}
-                            onClick={() => setStatus(option)}
-                            aria-pressed={status === option}
-                            className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm transition-colors disabled:opacity-40 ${
-                              status === option
-                                ? "bg-brand/10 font-bold text-brand"
-                                : "hover:bg-black/[0.04]"
-                            }`}
-                          >
-                            {formatOutreachStatus(option)}
-                          </button>
-                        ))}
-                      </div>
-                      {(statusBlocked || overStatusLimit) && (
-                        <div className="mt-2 border-t border-black/[0.06] pt-2 text-[11px] leading-[1.6] text-amber-700">
-                          {statusBlocked ? (
-                            <>
-                              <span className="font-bold">
-                                {statusBlockedCount} of {count} are not yours to change.
-                              </span>{" "}
-                              The change is all-or-nothing —{" "}
-                              <button
-                                type="button"
-                                className="font-bold underline underline-offset-2"
-                                disabled={busy}
-                                onClick={deselectStatusBlocked}
-                              >
-                                deselect {statusBlockedCount === 1 ? "it" : "those"}
-                              </button>{" "}
-                              or ask an admin.
-                            </>
-                          ) : (
-                            `Covers at most ${MAX_BULK_STATUS_CLIENTS} clients. Deselect some to continue.`
-                          )}
-                        </div>
-                      )}
-                      {status !== PLACEHOLDER && (
-                        <OriginButton
-                          type="button"
-                          size="sm"
-                          variant="default"
-                          className="mt-2 w-full"
-                          disabled={busy}
-                          onClick={() => setPending("status")}
-                        >
-                          Update {count} client{count === 1 ? "" : "s"}
-                        </OriginButton>
-                      )}
-                    </PopoverContent>
-                  </Popover>
-
-                  {/* Comment composer toggle */}
-                  <OriginButton
-                    size="xs"
-                    variant="ghost"
-                    className="text-white/70 hover:text-white"
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <BarIcon
+                    label={activePanel === "status" ? "Close status options" : "Change status"}
+                    expanded={activePanel === "status"}
+                    active={activePanel === "status"}
                     disabled={busy}
-                    aria-expanded={commentOpen}
-                    onClick={() => {
-                      setError(null);
-                      setCommentOpen((open) => !open);
-                    }}
+                    onClick={() => togglePanel("status")}
+                    marker={
+                      status !== PLACEHOLDER ? "lime" : statusBlocked ? "amber" : undefined
+                    }
                   >
-                    Comment
-                  </OriginButton>
-
-                  {/* Tags picker — applies immediately, no confirm step (F063). */}
+                    <Workflow size={18} />
+                  </BarIcon>
+                  <BarIcon
+                    label={activePanel === "note" ? "Close note composer" : "Add a note"}
+                    expanded={activePanel === "note"}
+                    active={activePanel === "note"}
+                    disabled={busy}
+                    onClick={() => togglePanel("note")}
+                    marker={comment.trim().length > 0 ? "lime" : undefined}
+                  >
+                    <MessageSquarePlus size={18} />
+                  </BarIcon>
                   {canTag && (
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <OriginButton
-                          size="xs"
-                          variant="ghost"
-                          className="text-white/70 hover:text-white"
-                          disabled={busy || overTagLimit || tags.length === 0}
-                          title={
-                            tags.length === 0
-                              ? "No tags exist yet — create them under Admin → Tags first."
-                              : undefined
-                          }
-                        >
-                          Tags{selectedTagIds.size > 0 ? ` (${selectedTagIds.size})` : ""}
-                        </OriginButton>
-                      </PopoverTrigger>
-                      <PopoverContent align="end" className="w-60 p-2" sideOffset={8}>
-                        <p className="px-2 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/45">
-                          Tags to apply
-                        </p>
-                        <div className="mt-1 max-h-48 space-y-0.5 overflow-y-auto">
-                          {tags.map((tag) => (
-                            <label
-                              key={tag.id}
-                              className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-black/[0.04]"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selectedTagIds.has(tag.id)}
-                                onChange={() => toggleTag(tag.id)}
-                              />
-                              {tag.name}
-                            </label>
-                          ))}
-                        </div>
-                        <div className="mt-2 flex items-center justify-end gap-2 border-t border-black/[0.06] pt-2">
-                          <OriginButton
-                            type="button"
-                            size="xs"
-                            variant="ghost"
-                            disabled={busy}
-                            onClick={() => setSelectedTagIds(new Set())}
-                          >
-                            Clear
-                          </OriginButton>
-                          <OriginButton
-                            type="button"
-                            size="xs"
-                            variant="default"
-                            disabled={busy || selectedTagIds.size === 0}
-                            loading={busy}
-                            onClick={applyTags}
-                          >
-                            Apply
-                          </OriginButton>
-                        </div>
-                        {overTagLimit && (
-                          <p className="mt-2 text-[11px] font-bold text-amber-700">
-                            One bulk action covers at most {MAX_BULK_TAG_CLIENTS} — deselect some.
-                          </p>
-                        )}
-                      </PopoverContent>
-                    </Popover>
-                  )}
-
-                  {/* Assign owner — dialogs (F253) */}
-                  {canAssign && (
-                    <OriginButton
-                      size="xs"
-                      variant="ghost"
-                      className="text-white/70 hover:text-white"
-                      disabled={busy}
-                      onClick={() => {
-                        setError(null);
-                        setPending("assign");
-                      }}
+                    <BarIcon
+                      label={activePanel === "tag" ? "Close tags" : "Apply tags"}
+                      expanded={activePanel === "tag"}
+                      active={activePanel === "tag"}
+                      disabled={busy || overTagLimit || tags.length === 0}
+                      onClick={() => togglePanel("tag")}
+                      marker={selectedTagIds.size > 0 ? "lime" : undefined}
                     >
-                      Assign owner
-                    </OriginButton>
+                      <Tag size={18} />
+                    </BarIcon>
+                  )}
+                  {canAssign && (
+                    <BarIcon
+                      label={activePanel === "assign" ? "Close assign owner" : "Assign owner"}
+                      expanded={activePanel === "assign"}
+                      active={activePanel === "assign"}
+                      disabled={busy}
+                      onClick={() => togglePanel("assign")}
+                      marker={assignOwnerId ? "lime" : undefined}
+                    >
+                      <User size={18} />
+                    </BarIcon>
                   )}
 
-                  <span className="mx-0.5 h-6 w-px bg-white/15" />
+                  <span className="mx-1.5 h-5 w-px bg-white/15" aria-hidden="true" />
 
-                  <OriginButton
-                    size="xs"
-                    variant="ghost"
-                    className="text-white/70 hover:text-white"
+                  <BarIcon
+                    label="Clear selection"
                     disabled={busy}
                     onClick={() => {
                       clear();
                       resetTransients();
                     }}
                   >
-                    Clear
-                  </OriginButton>
+                    <XIcon size={18} />
+                  </BarIcon>
                 </div>
               </div>
-
-              {error && (
-                <p
-                  aria-live="polite"
-                  role="alert"
-                  className="border-t border-white/10 px-4 py-2 text-xs font-bold text-red-300"
-                >
-                  {error}
-                </p>
-              )}
-            </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {showResult && (
-        <div className="pointer-events-none fixed bottom-6 inset-x-0 z-40 flex justify-center px-4">
-          <p className="rounded-full bg-[#1c1a18]/90 px-5 py-2.5 text-sm font-bold text-[#f4f4ef] shadow-2xl ring-1 ring-white/25 backdrop-blur-md">
-            {result}
-          </p>
-        </div>
-      )}
-
-      {pending !== null && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6"
-          onClick={() => !busy && setPending(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="bulk-confirm-heading"
-            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
-            onClick={(event) => event.stopPropagation()}
+      <AnimatePresence>
+        {showResult && (
+          <motion.div
+            key="bulk-result"
+            className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4"
+            initial={reducedMotion ? false : { opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.35, ease: EASE, delay: reducedMotion ? 0 : 0.15 }}
           >
-            <h2 id="bulk-confirm-heading" className="text-lg font-black tracking-[-0.02em]">
-              {pending === "status"
-                ? `Change ${count} client${count === 1 ? "" : "s"} to ${label}?`
-                : pending === "comment"
-                  ? `Comment on ${count} client${count === 1 ? "" : "s"}?`
-                  : `Assign ${count} client${count === 1 ? "" : "s"} to a CAM?`}
-            </h2>
-
-            {pending === "status" ? (
-              <>
-                <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
-                  This applies to all {count} selected client{count === 1 ? "" : "s"} in one action,
-                  including any that the current filter is not showing. Each change is recorded in the
-                  audit log against your account. There is no bulk undo — reversing it means changing
-                  each client back.
-                </p>
-                <p className="mt-2 text-sm leading-[1.7] text-foreground/65">
-                  Clients already on {label} are left alone.
-                </p>
-                {statusBlocked && (
-                  <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm leading-[1.7] text-amber-800">
-                    <span className="font-bold">
-                      {statusBlockedCount} of these {count}{" "}
-                      {statusBlockedCount === 1 ? "is" : "are"} not yours to change status.
-                    </span>{" "}
-                    The change is all-or-nothing, so either{" "}
-                    <button
-                      type="button"
-                      className="font-bold underline underline-offset-2 disabled:opacity-50"
-                      disabled={busy}
-                      onClick={deselectStatusBlocked}
-                    >
-                      deselect {statusBlockedCount === 1 ? "it" : "those"}
-                    </button>{" "}
-                    or ask an admin.
-                  </p>
-                )}
-              </>
-            ) : pending === "comment" ? (
-              <>
-                <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
-                  Each of the {count} selected client{count === 1 ? "" : "s"} gets its own copy of
-                  this comment, saved against your name and the current time, including any that the
-                  current filter is not showing. Each client&apos;s owner is notified, and anyone you
-                  @mention is notified too. There is no bulk undo — removing it means deleting
-                  the note on each client.
-                </p>
-                <p className="mt-3 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg bg-black/[0.03] px-3 py-2 text-sm leading-[1.7]">
-                  {preparedComment.ok ? preparedComment.content : comment}
-                </p>
-              </>
-            ) : (
-              <div className="mt-3 space-y-4">
-                <p className="text-sm leading-[1.7] text-foreground/65">
-                  Assigning {count} client{count === 1 ? "" : "s"} in one action. Provide a reason
-                  for the audit log.
-                </p>
-                <label className="flex flex-col gap-1.5 text-sm">
-                  <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/50">
-                    Assign to CAM
-                  </span>
-                  <select
-                    value={assignOwnerId}
-                    onChange={(e) => setAssignOwnerId(e.target.value)}
-                    className="w-full rounded-xl border border-black/15 bg-white px-3 py-2 text-sm"
-                  >
-                    <option value="">Choose a CAM</option>
-                    {team.map((member) => (
-                      <option key={member.id} value={member.id}>
-                        {member.full_name ?? "Unnamed CAM"}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm">
-                  <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/50">
-                    Reason
-                  </span>
-                  <Input
-                    type="text"
-                    value={assignReason}
-                    onChange={(e) => setAssignReason(e.target.value)}
-                    placeholder="e.g. Workload redistribution"
-                    className="rounded-xl border border-black/15 bg-white text-sm"
-                  />
-                  <span className="text-[11px] text-foreground/40">
-                    Recorded in the audit log for each client
-                  </span>
-                </label>
-                <div className="flex items-center gap-2 text-xs text-foreground/60">
-                  <UsersGroupIcon className="h-4 w-4" />
-                  <span>Reassigns ownership and moves open actions</span>
-                </div>
-              </div>
-            )}
-
-            <div className="mt-6 flex justify-end gap-3">
-              <OriginButton
-                ref={cancelRef}
-                type="button"
-                variant="ghost"
-                className="border border-black/10"
-                disabled={busy}
-                onClick={() => setPending(null)}
-              >
-                Cancel
-              </OriginButton>
-              <OriginButton
-                type="button"
-                variant="default"
-                loading={busy}
-                disabled={busy}
-                onClick={() => apply(pending)}
-              >
-                {busy
-                  ? pending === "status"
-                    ? "Updating…"
-                    : pending === "comment"
-                      ? "Adding…"
-                      : "Assigning…"
-                  : pending === "status"
-                    ? `Yes, update ${count}`
-                    : pending === "comment"
-                      ? `Yes, comment on ${count}`
-                      : `Yes, assign ${count}`}
-              </OriginButton>
-            </div>
-          </div>
-        </div>
-      )}
+            <p
+              role="status"
+              className="font-body flex items-center gap-3 rounded-full py-2 pr-5 pl-2 text-[15px] text-[#f4f4ef] ring-1 ring-white/25 backdrop-blur-[20px]"
+              style={{
+                backgroundColor: SEARCH_GLASS_OPEN,
+                boxShadow: `${LIP}, 0 20px 40px -15px rgba(0, 0, 0, 0.6)`,
+              }}
+            >
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e6f5c0] text-[#1a1a1a]">
+                <Check className="h-4 w-4" />
+              </span>
+              {result}
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
+  );
+}
+
+/* ─── Pieces ─────────────────────────────────────────────────────────────── */
+
+/**
+ * A bare icon on the glass — no chip behind it. Active reads as lime ink plus
+ * a dot that glides between icons (shared layoutId), so switching panels shows
+ * *where* you moved rather than one chip blinking off and another on.
+ */
+function BarIcon({
+  label,
+  expanded,
+  active = false,
+  disabled,
+  onClick,
+  marker,
+  children,
+}: {
+  label: string;
+  expanded?: boolean;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  /** Something is staged in this panel (lime) or needs attention (amber). */
+  marker?: "lime" | "amber";
+  children: React.ReactNode;
+}) {
+  return (
+    <InfoTooltip
+      title={label}
+      side="top"
+      sideOffset={10}
+      contentClassName="px-3 py-1.5 text-xs font-semibold"
+    >
+      <button
+        type="button"
+        aria-label={label}
+        aria-expanded={expanded}
+        aria-controls={expanded ? "bulk-actions-panel" : undefined}
+        disabled={disabled}
+        onClick={onClick}
+        className={`relative grid h-9 w-9 place-items-center rounded-full transition-colors duration-200 disabled:pointer-events-none disabled:opacity-30 ${OUTLINE} ${
+          active ? "text-[#e6f5c0]" : "text-[#f4f4ef]/70 hover:text-white"
+        }`}
+      >
+        <AnimateIcon animateOnHover className="flex size-full items-center justify-center">
+          {children}
+        </AnimateIcon>
+        {marker && !active && (
+          <span
+            aria-hidden="true"
+            className={`absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full ${
+              marker === "lime" ? "bg-[#e6f5c0]" : "bg-amber-300"
+            }`}
+          />
+        )}
+        {active && (
+          <motion.span
+            layoutId="bulk-bar-active-dot"
+            aria-hidden="true"
+            className="absolute bottom-0 left-1/2 -ml-0.5 h-1 w-1 rounded-full bg-[#e6f5c0]"
+            transition={{ duration: 0.4, ease: EASE }}
+          />
+        )}
+      </button>
+    </InfoTooltip>
+  );
+}
+
+/** The count rolls rather than blinks when rows are ticked on and off. */
+function RollingCount({ value, reducedMotion }: { value: number; reducedMotion: boolean }) {
+  return (
+    <span className="relative inline-flex overflow-hidden font-medium text-[#e6f5c0] tabular-nums">
+      <AnimatePresence initial={false} mode="popLayout">
+        <motion.span
+          key={value}
+          initial={reducedMotion ? false : { y: "80%", opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={reducedMotion ? { opacity: 0 } : { y: "-80%", opacity: 0 }}
+          transition={{ duration: 0.35, ease: EASE }}
+        >
+          {value}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  );
+}
+
+function PanelHeader({ title, meta }: { title: string; meta?: string }) {
+  return (
+    <motion.div
+      variants={GLASS_ITEM}
+      className="flex shrink-0 items-baseline justify-between gap-3 px-1"
+    >
+      <p className="font-body text-lg font-medium text-white">{title}</p>
+      {meta && <p className="font-body text-[13px] text-[#f4f4ef]/60">{meta}</p>}
+    </motion.div>
+  );
+}
+
+function PanelSearch({
+  label,
+  placeholder,
+  value,
+  onChange,
+}: {
+  label: string;
+  placeholder: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <motion.label
+      variants={GLASS_ITEM}
+      className={`mt-3 flex shrink-0 items-center gap-2.5 rounded-xl bg-white/10 px-3.5 py-2 transition-shadow ${FIELD_FOCUS}`}
+    >
+      <Search aria-hidden="true" className="h-4 w-4 shrink-0 text-[#f4f4ef]/45" />
+      <input
+        type="search"
+        aria-label={label}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="font-body min-w-0 flex-1 bg-transparent text-[15px] text-[#f4f4ef] caret-[#e6f5c0] outline-none placeholder:text-[#f4f4ef]/40 [&::-webkit-search-cancel-button]:hidden"
+      />
+    </motion.label>
+  );
+}
+
+function OptionRow({
+  index,
+  selected,
+  disabled,
+  onClick,
+  children,
+}: {
+  index: number;
+  selected: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <motion.li variants={GLASS_OPTION} custom={index} className="min-w-0">
+      <button
+        type="button"
+        aria-pressed={selected}
+        disabled={disabled}
+        onClick={onClick}
+        className={`font-body flex w-full items-center justify-between gap-2 rounded-2xl px-3 py-2 text-left text-[15px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${OUTLINE} ${
+          selected ? "bg-white/15 text-[#e6f5c0]" : "text-white hover:bg-white/10"
+        }`}
+      >
+        <span className="flex min-w-0 items-center gap-2.5">{children}</span>
+        {selected && <Check aria-hidden="true" className="h-4 w-4 shrink-0 text-[#e6f5c0]" />}
+      </button>
+    </motion.li>
+  );
+}
+
+function EmptyRow({ children }: { children: React.ReactNode }) {
+  return (
+    <motion.li
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.2, ease: EASE }}
+      className="font-body px-3 py-3 text-[15px] text-[#f4f4ef]/60"
+      role="status"
+    >
+      {children}
+    </motion.li>
+  );
+}
+
+function PanelFooter({ hint, children }: { hint: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <motion.div
+      variants={GLASS_ITEM}
+      className="mt-auto flex shrink-0 items-center justify-between gap-3 pt-3"
+    >
+      <p className="font-body min-w-0 truncate px-1 text-[13px] text-[#f4f4ef]/60">{hint}</p>
+      {children}
+    </motion.div>
+  );
+}
+
+function PrimaryPill({
+  busy = false,
+  disabled,
+  onClick,
+  children,
+}: {
+  busy?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`font-body inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-[#e6f5c0] pr-3 pl-4 text-[13px] font-semibold text-[#1a1a1a] transition-colors hover:bg-[#d4e5a0] disabled:cursor-not-allowed disabled:opacity-40 ${OUTLINE}`}
+    >
+      {children}
+      {busy ? (
+        <span
+          aria-hidden="true"
+          className="ml-0.5 h-3.5 w-3.5 animate-spin rounded-[3px] bg-[#1a1a1a]"
+          style={{ animationDuration: "2.5s" }}
+        />
+      ) : (
+        <ArrowRight aria-hidden="true" className="h-4 w-4" />
+      )}
+    </button>
+  );
+}
+
+function GhostButton({
+  ref,
+  disabled,
+  onClick,
+  children,
+}: {
+  ref?: React.Ref<HTMLButtonElement>;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      ref={ref}
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`font-body h-9 rounded-full px-4 text-[13px] font-semibold text-[#f4f4ef]/70 transition-colors hover:bg-white/10 hover:text-[#f4f4ef] disabled:opacity-40 ${OUTLINE}`}
+    >
+      {children}
+    </button>
   );
 }

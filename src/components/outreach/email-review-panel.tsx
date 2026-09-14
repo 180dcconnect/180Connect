@@ -20,6 +20,7 @@ import {
   saveEmailDraft,
   scheduleReviewedEmail,
   sendReviewedEmail,
+  updateScheduledEmail,
 } from "@/app/clients/[id]/outreach-actions";
 
 /**
@@ -102,7 +103,7 @@ export function EmailReviewPanel({
   onDraftSaved,
   clientAttachments = [],
   initialScheduledAt = null,
-  preview = false,
+  editingScheduled = false,
 }: {
   organisationId: string;
   draft: EmailReviewDraft;
@@ -143,13 +144,14 @@ export function EmailReviewPanel({
    */
   initialScheduledAt?: string | null;
   /**
-   * Example preview for design-fill threads: renders the full review UI —
-   * recipient, subject, body editor, approval gate — but every committing
-   * action (save, send, schedule, discard) stays disabled and the attachment
-   * picker is omitted, so a preview can never read from or write to a real
-   * draft. The banner says so plainly.
+   * The draft is an email that is already scheduled, opened for editing in its
+   * thread (pass its time as `initialScheduledAt`). The same approval gate
+   * applies, but the commit is updateScheduledEmail — "Save changes" — and the
+   * draft-only actions go: there is no draft to save or discard, and sending
+   * now is not what an edit asks for. Attachments show read-only, since the
+   * attachment links can only change on a draft row.
    */
-  preview?: boolean;
+  editingScheduled?: boolean;
 }) {
   const [recipient, setRecipient] = useState(
     draft.savedRecipient ?? draft.recipientOnFile ?? "",
@@ -280,7 +282,7 @@ export function EmailReviewPanel({
     setScheduledAt(when);
     setScheduling(true);
     setSendMessage(null);
-    const result = await scheduleReviewedEmail({
+    const payload = {
       organisationId,
       messageId: draft.id,
       recipient,
@@ -288,13 +290,16 @@ export function EmailReviewPanel({
       body,
       explicitlyApproved: approved,
       scheduledAt: when.toISOString(),
-    });
+    };
+    const result = editingScheduled
+      ? await updateScheduledEmail(payload)
+      : await scheduleReviewedEmail(payload);
     setSendFailed(!result.ok);
     setSendMessage(result.message);
     setScheduling(false);
     if (!result.ok) return false;
     onCommitted?.({ kind: "scheduled", scheduledFor: when.toISOString() });
-    onDraftCleared?.();
+    if (!editingScheduled) onDraftCleared?.();
     return true;
   }
 
@@ -324,15 +329,6 @@ export function EmailReviewPanel({
 
   return (
     <div className={`space-y-3 ${className}`}>
-      {preview && (
-        <p
-          className="rounded-inset bg-paper-sunk px-3 py-2 text-xs leading-[1.55] font-semibold text-dim"
-          role="note"
-        >
-          Example preview — this is design fill, so sending, scheduling, saving
-          and attaching are disabled. Nothing here leaves the page.
-        </p>
-      )}
       <div>
         <h3 className="text-sm font-semibold" id={headingId}>
           {heading}
@@ -435,7 +431,7 @@ export function EmailReviewPanel({
         </div>
       </div>
 
-      {!preview && (
+      {!editingScheduled && (
         <AttachmentPicker
           clientAttachments={clientAttachments}
           messageId={draft.id}
@@ -457,15 +453,16 @@ export function EmailReviewPanel({
         {/* F119: saving has none of sending's requirements — no approval
             checkbox, no valid recipient, not even a non-empty subject or
             body — a work-in-progress draft is exactly what this is for. */}
-        <OriginButton
-          disabled={savingDraft || sending || discarding || preview}
-          onClick={saveDraft}
-          title={preview ? "Disabled in the example preview" : undefined}
-          type="button"
-          variant="outline"
-        >
-          {savingDraft ? "Saving…" : "Save draft"}
-        </OriginButton>
+        {!editingScheduled && (
+          <OriginButton
+            disabled={savingDraft || sending || discarding}
+            onClick={saveDraft}
+            type="button"
+            variant="outline"
+          >
+            {savingDraft ? "Saving…" : "Save draft"}
+          </OriginButton>
+        )}
         {/* The one action on this screen that actually leaves the building, so
             it is the one place the paper-plane button is spent. Everything
             beside it stays an OriginButton. */}
@@ -475,16 +472,16 @@ export function EmailReviewPanel({
              rather than sending now — pressing "Send reviewed email" here
              would quietly ignore the CAM's answer to "when?". */
           <SendButton
-            disabled={cannotCommit || scheduling || preview}
-            label={`Schedule send · ${formatScheduleLong(scheduledAt)}`}
+            disabled={cannotCommit || scheduling}
+            label={`${editingScheduled ? "Save changes" : "Schedule send"} · ${formatScheduleLong(scheduledAt)}`}
             onClick={() => void schedule(scheduledAt)}
             pending={scheduling}
-            pendingLabel="Scheduling…"
+            pendingLabel={editingScheduled ? "Saving…" : "Scheduling…"}
             type="button"
           />
         ) : (
           <SendButton
-            disabled={cannotCommit || sending || preview}
+            disabled={cannotCommit || sending}
             label="Send reviewed email"
             onClick={() => setConfirmSendOpen(true)}
             pending={sending}
@@ -493,15 +490,16 @@ export function EmailReviewPanel({
         )}
         {/* F120: same drafts-only reach as Save — a sent email is never
             reachable here, so there is no "discard a sent email" case to guard. */}
-        <button
-          className="shrink-0 rounded-full border border-stop/25 px-4 py-2 text-xs font-semibold text-stop transition-colors hover:bg-stop-wash disabled:opacity-60"
-          disabled={savingDraft || sending || discarding || preview}
-          onClick={discardDraft}
-          title={preview ? "Disabled in the example preview" : undefined}
-          type="button"
-        >
-          {discarding ? "Discarding…" : "Discard draft"}
-        </button>
+        {!editingScheduled && (
+          <button
+            className="shrink-0 rounded-full border border-stop/25 px-4 py-2 text-xs font-semibold text-stop transition-colors hover:bg-stop-wash disabled:opacity-60"
+            disabled={savingDraft || sending || discarding}
+            onClick={discardDraft}
+            type="button"
+          >
+            {discarding ? "Discarding…" : "Discard draft"}
+          </button>
+        )}
       </div>
 
       {saveMessage && (
@@ -520,18 +518,17 @@ export function EmailReviewPanel({
           edited. Its confirm step does. */}
       <div className="flex flex-wrap items-end gap-2">
         <OriginButton
-          disabled={cannotCommit || preview}
+          disabled={cannotCommit}
           onClick={() => setScheduleOpen(true)}
-          title={preview ? "Disabled in the example preview" : undefined}
           type="button"
           variant="outline"
         >
           <CalendarClock aria-hidden="true" className="size-4" />
           {scheduledAt ? "Change the time" : "Schedule for later"}
         </OriginButton>
-        {scheduledAt && (
+        {scheduledAt && !editingScheduled && (
           <OriginButton
-            disabled={sending || scheduling || preview}
+            disabled={sending || scheduling}
             onClick={() => setScheduledAt(null)}
             type="button"
             variant="outline"
@@ -560,9 +557,10 @@ export function EmailReviewPanel({
         className={`text-xs font-semibold ${sendFailed ? "text-stop" : "text-hold"}`}
         role={sendFailed ? "alert" : "status"}
       >
-        {preview
-          ? "Example preview — nothing here sends."
-          : (sendMessage ?? "Not sent — explicit human review and send are required.")}
+        {sendMessage ??
+          (editingScheduled
+            ? "Still scheduled as it was — these edits are not saved until you approve them and save."
+            : "Not sent — explicit human review and send are required.")}
       </p>
     </div>
   );

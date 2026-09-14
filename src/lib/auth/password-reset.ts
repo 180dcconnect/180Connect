@@ -68,6 +68,21 @@ export type ResetPasswordState = {
 export const RECOVERY_COOKIE_NAME = "180connect-password-recovery";
 
 /**
+ * Reads a deferred invite token out of the submitted form (or the landing
+ * redirect), or null where there is none. Invite links verify at submit time
+ * rather than on open (see `/auth/confirm`), so the token rides the form as
+ * a hidden field and only a present, non-blank value takes the
+ * verify-at-submit branch — recovery submissions carry no such field and keep
+ * the marker-cookie path. Trimming only: `verifyOtp` is the validator, and it
+ * must see the token exactly as issued.
+ */
+export function inviteTokenFromForm(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const token = value.trim();
+  return token ? token : null;
+}
+
+/**
  * How long the marker lives when `PASSWORD_RESET_WINDOW_SECONDS` is unusable.
  * 24 hours, matching the shared Supabase `otp_expiry` (F010) — see
  * `invite-expiry.ts` for why recovery and invite links cannot have different

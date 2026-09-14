@@ -63,6 +63,12 @@ export type BookletOrganisationInput = {
   // the two to stay distinguishable. A charity with both gets both — they are
   // different claims, not two spellings of one.
   charity_activities: string | null;
+  // The CIC's own filed community-interest statement (CIC36, Sections A and B,
+  // OCR-transcribed — 20260923141000_add_cic_community_statement.sql). The
+  // company-side equivalent of charity_activities: register-filed purpose text
+  // for rows that can never have charity_activities. Sent as its own line for
+  // the same PRD §7.8 reason. Null for charities and for ordinary companies.
+  cic_community_statement: string | null;
   // The registrar's industry classification for a company, already resolved to
   // the register's own wording by the caller (sicTitles() in
   // src/lib/companies-register/sqlite.ts) — this module takes no filesystem
@@ -280,6 +286,7 @@ export function buildBookletPrompt(
     `- Website: ${displayValue(organisation.website)}`,
     `- Mission (enrichment): ${displayValue(enrichment?.mission_statement)}`,
     `- Activities as filed with the register: ${displayValue(organisation.charity_activities)}`,
+    `- Community purpose as filed (CIC statement): ${displayValue(organisation.cic_community_statement)}`,
     `- Registered nature of business (SIC classification, not a mission): ${displayList(organisation.sic_titles)}`,
     `- Mission keywords: ${displayList(enrichment?.mission_keywords)}`,
     `- Sector: ${preferCanonical(organisation.sector, enrichment?.sector)}`,

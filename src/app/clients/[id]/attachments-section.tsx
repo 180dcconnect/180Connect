@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Attachment } from "@/lib/attachments";
 import { textExtractionFailureCopy } from "@/lib/attachments";
 import { LinkAttachmentForm, type TimelineLinkOption } from "./link-attachment-form";
+import { DeleteAttachmentButton } from "./delete-attachment-button";
 import { extractAttachmentTextForm } from "./attachment-actions";
 
 /**
@@ -10,7 +11,9 @@ import { extractAttachmentTextForm } from "./attachment-actions";
  * states, retry, and text search layered on top. No client-side state, so this
  * stays a server component: the "Open" link is a plain anchor to the download
  * route (which does the signed-URL exchange and redirects), the timeline link
- * and extraction actions are server actions, and the text search below is a
+ * and extraction actions are server actions, the per-row delete control is a
+ * small client island (it needs a confirm step plus per-file busy/error
+ * state), and the text search below is a
  * plain GET form whose results come back through the page's searchParams.
  *
  * F220 follow-up — attachment text search: the search box submits
@@ -30,6 +33,7 @@ export function AttachmentsSection({
   error,
   canExtract,
   canLink,
+  canDelete,
   timelineOptions,
 }: {
   organisationId: string;
@@ -41,6 +45,7 @@ export function AttachmentsSection({
   error: boolean;
   canExtract: boolean;
   canLink: boolean;
+  canDelete: boolean;
   timelineOptions: readonly TimelineLinkOption[];
 }) {
   if (error) {
@@ -130,7 +135,7 @@ export function AttachmentsSection({
                 key={attachment.id}
                 className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3 first:pt-0 last:pb-0"
               >
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   {/* AC2: opens (new tab) or downloads from this one link — the route
                       behind it exchanges the row for a short-lived signed URL, since
                       the bucket is private. */}
@@ -185,6 +190,13 @@ export function AttachmentsSection({
                     </form>
                   )}
                 </div>
+                {canDelete && (
+                  <DeleteAttachmentButton
+                    organisationId={organisationId}
+                    attachmentId={attachment.id}
+                    filename={attachment.filename}
+                  />
+                )}
               </li>
             ))}
           </ul>

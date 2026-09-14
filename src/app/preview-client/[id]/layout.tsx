@@ -1,6 +1,7 @@
 import { Suspense, type ReactNode } from "react";
 
 import { Rise, Stage } from "@/components/dashboard-stage";
+import { Skeleton, SkeletonPriorityDial } from "@/components/ui/skeleton";
 
 import {
   loadClient,
@@ -54,8 +55,21 @@ async function SuppressionBanner({ organisationId }: { organisationId: string })
   );
 }
 
+/**
+ * Holds the header's shape while it streams.
+ *
+ * The preview header is deliberately stripped — an h1 and the priority dial, no
+ * card around them (see `./record-header.tsx`) — so this mirrors exactly that:
+ * the title at its own clamp and the dial at its column width. It used to be a
+ * 64px grey bar, which is roughly a tenth of what the header occupies.
+ */
 function RecordHeaderSkeleton() {
-  return <div className="h-16 animate-pulse rounded-xl bg-black/[0.06]" />;
+  return (
+    <div className="relative flex items-center justify-between gap-4">
+      <Skeleton className="h-[1em] w-3/4 max-w-full text-[clamp(2rem,4.5vw,3.25rem)] leading-[1.02]" />
+      <SkeletonPriorityDial className="hidden lg:flex" />
+    </div>
+  );
 }
 
 export default async function PreviewClientRecordLayout({

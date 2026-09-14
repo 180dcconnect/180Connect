@@ -357,7 +357,7 @@ describe("validateAssignAction (F169 AC1)", () => {
   it("rejects a missing or malformed assignee id", () => {
     const result = validateAssignAction({ ...validInput, assigneeUserId: "" });
     assert.equal(result.success, false);
-    if (!result.success) assert.match(result.message, /CAM/i);
+    if (!result.success) assert.match(result.message, /team member/i);
   });
 
   it("rejects a blank title", () => {

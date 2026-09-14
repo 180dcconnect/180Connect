@@ -37,6 +37,7 @@ function getDatabaseSync(): (new (path: string, options?: { readOnly?: boolean }
 
 import { COMPANIES_SCHEMA_VERSION } from "./sqlite-schema.ts";
 import {
+  companySearchQuery,
   countQuery,
   previewQuery,
   selectionQuery,
@@ -298,6 +299,31 @@ export function isRegisteredCic(companyNumber: string): boolean | null {
   return row.is_cic === 1;
 }
 
+/**
+ * One company by its registration number, with its SIC codes attached.
+ *
+ * The same pair `selectCompanies` returns, for one row instead of a filter set.
+ * Added for the add-a-client lookup, so a company chosen from a search box is
+ * staged through exactly the same `toRawPayload` the bulk path uses.
+ *
+ * Null means the file does not hold that number — which, given this file is a
+ * filtered ~12% of the register, is not evidence the company does not exist.
+ * The caller has to say so in those words rather than "no such company".
+ */
+export function companyByNumber(
+  companyNumber: string,
+): { company: RegisterCompany; sicCodes: string[] } | null {
+  const handle = open();
+  if (!handle) return null;
+
+  const company = handle.db
+    .prepare("select * from company where number = ? limit 1")
+    .get(companyNumber) as RegisterCompany | undefined;
+  if (!company) return null;
+
+  return { company: { ...company }, sicCodes: companySicCodes(companyNumber) };
+}
+
 /** The SIC codes one company carries, in code order. */
 export function companySicCodes(companyNumber: string): string[] {
   const handle = open();
@@ -306,4 +332,69 @@ export function companySicCodes(companyNumber: string): string[] {
     .prepare("select sic from company_sic where number = ? order by sic")
     .all(companyNumber) as { sic: string }[];
   return rows.map((row) => row.sic);
+}
+
+/**
+ * One candidate from a name search, in the shape the add-a-client screen needs.
+ *
+ * The charity register's twin (`RegisterCharityMatch`), kept aligned field for
+ * field so the two can be rendered by one component without the caller
+ * branching on which file answered.
+ */
+export type RegisterCompanyMatch = {
+  number: string;
+  name: string;
+  /** The register's own status wording — "Active", "Liquidation", "Dissolved". */
+  statusNorm: string | null;
+  statusRaw: string | null;
+  incorpDate: string | null;
+  postcode: string | null;
+  town: string | null;
+  addressLine1: string | null;
+  /** True for a Community Interest Company — the register's own flag. */
+  isCic: boolean;
+  /** The registrar's SIC codes, in code order. Principal activity first. */
+  sicCodes: string[];
+};
+
+/**
+ * Finds companies by name, postcode, or both — the Companies House half of the
+ * add-a-client lookup.
+ *
+ * The clause rules, escaping, relevance ordering and the measurements live in
+ * `companySearchQuery` (sqlite-query.ts), which is pure and has its own tests.
+ * This function only opens the file, runs the query and shapes the rows.
+ */
+export function searchCompanies(
+  input: Parameters<typeof companySearchQuery>[0],
+  limit = 8,
+): RegisterCompanyMatch[] {
+  const handle = open();
+  if (!handle) return [];
+
+  const { sql, params } = companySearchQuery(input, limit);
+  const rows = handle.db.prepare(sql).all(...params) as Array<{
+    number: string;
+    name: string;
+    status_raw: string | null;
+    status_norm: string | null;
+    incorp_date: string | null;
+    postcode: string | null;
+    town: string | null;
+    address_line_1: string | null;
+    is_cic: number | null;
+  }>;
+
+  return rows.map((row) => ({
+    number: row.number,
+    name: row.name,
+    statusNorm: row.status_norm?.trim() || null,
+    statusRaw: row.status_raw?.trim() || null,
+    incorpDate: row.incorp_date?.slice(0, 10) || null,
+    postcode: row.postcode?.trim() || null,
+    town: row.town?.trim() || null,
+    addressLine1: row.address_line_1?.trim() || null,
+    isCic: row.is_cic === 1,
+    sicCodes: companySicCodes(row.number),
+  }));
 }

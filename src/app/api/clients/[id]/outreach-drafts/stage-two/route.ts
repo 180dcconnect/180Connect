@@ -12,7 +12,13 @@ import {
 } from "@/lib/outreach/stage-two-generation";
 import { buildStageTwoGenerationInsert } from "@/lib/outreach/stage-two-persistence";
 import { emailHtmlToPlainText } from "@/lib/outreach/email-html";
-import { CLOSING_APPROACHES, EMAIL_LENGTHS, EMAIL_REGISTERS } from "@/lib/outreach/stage-one-prompt";
+import { stripQuotedReply } from "@/lib/gmail/reply-message";
+import { EMAIL_LENGTHS, EMAIL_REGISTERS } from "@/lib/outreach/stage-one-prompt";
+import {
+  STAGE_TWO_CLOSINGS,
+  type ReplyIntent,
+  type ReplySentiment,
+} from "@/lib/outreach/stage-two-prompt";
 import {
   checkSuppressionBeforeSend,
   suppressionBlockedMessage,
@@ -24,6 +30,7 @@ import { loadModelRate } from "@/lib/ai/model-rate";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
 import { buildAttachmentEmailContext } from "@/lib/attachments";
 import { lookupLiveNewsHook } from "@/lib/outreach/news-hook";
+import { resolveMissionText } from "@/lib/mission";
 
 export const maxDuration = 60;
 
@@ -48,7 +55,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const parsed = z.object({
     length: z.enum(EMAIL_LENGTHS).default("standard"),
     register: z.enum(EMAIL_REGISTERS).default("professional"),
-    closing: z.enum(CLOSING_APPROACHES).default("soft_cta"),
+    closing: z.enum(STAGE_TWO_CLOSINGS).default("soft_cta"),
     replyEventId: z.uuid().optional(),
   }).safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) {
@@ -64,7 +71,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { data: organisation, error: organisationError } = await supabase
     .from("organisations")
     .select(
-      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name)",
+      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, charity_activities, cic_community_statement, owner:users!organisations_owner_id_fkey(full_name)",
     )
     .eq("id", organisationId)
     .maybeSingle<{
@@ -76,8 +83,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       city: string | null;
       country_code: string | null;
       geographic_reach: string | null;
+      sector: string | null;
+      sub_sector: string | null;
       outreach_status: string;
       owner_id: string | null;
+      charity_activities: string | null;
+      cic_community_statement: string | null;
       owner: { full_name: string | null } | null;
     }>();
   if (organisationError || !organisation) {
@@ -88,14 +99,28 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     id: string;
     outreach_message_id: string | null;
     reply_body: string;
+    /** Populated at capture when the sender's address matched a contact. */
+    contact_id: string | null;
+    /** The classifier's read of the reply — computed when it arrived, never here. */
+    sentiment: ReplySentiment | null;
+    intent: ReplyIntent | null;
+    received_at: string;
   } | null = null;
   if (parsed.data.replyEventId) {
     const { data, error } = await supabase
       .from("reply_events")
-      .select("id, outreach_message_id, reply_body")
+      .select("id, outreach_message_id, reply_body, contact_id, sentiment, intent, received_at")
       .eq("id", parsed.data.replyEventId)
       .eq("organisation_id", organisationId)
-      .maybeSingle<{ id: string; outreach_message_id: string | null; reply_body: string }>();
+      .maybeSingle<{
+        id: string;
+        outreach_message_id: string | null;
+        reply_body: string;
+        contact_id: string | null;
+        sentiment: ReplySentiment | null;
+        intent: ReplyIntent | null;
+        received_at: string;
+      }>();
     if (error) {
       await reportError(error, {
         operation: "outreach.stage_two.load_reply",
@@ -217,6 +242,34 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     );
   }
 
+  // Who actually wrote in. Named only when the capture could match the sender's
+  // address to a contact on the record; when it could not, the greeting falls
+  // back to the team form rather than to the primary contact, who is a
+  // different person often enough to matter in a live thread.
+  let replyAuthorName: string | null = null;
+  if (replyEvent?.contact_id) {
+    const { data: author, error: authorError } = await supabase
+      .from("contacts")
+      .select("first_name, last_name")
+      .eq("id", replyEvent.contact_id)
+      .maybeSingle<{ first_name: string | null; last_name: string | null }>();
+    if (authorError) {
+      await reportError(authorError, { operation: "outreach.stage_two.load_reply_author", organisationId });
+    }
+    replyAuthorName = [author?.first_name, author?.last_name].filter(Boolean).join(" ") || null;
+  }
+
+  // A reply keeps the thread's subject. The model is not asked for one (see
+  // StageTwoDraft) — composing it here is what makes the reviewed draft, the
+  // saved outreach_messages row and the email the client receives all carry the
+  // same subject, instead of a generated line that was stored and then ignored.
+  const threadSubject = previousMessage.subject?.trim() ?? "";
+  const replySubject = threadSubject
+    ? /^re:/i.test(threadSubject)
+      ? threadSubject
+      : `Re: ${threadSubject}`
+    : "Re:";
+
   // F103 AC1 parity with Stage 1: the client's saved booklet (latest version per
   // F085/F086) is passed to generation as additional context. A missing booklet
   // is not an error — a follow-up still has the previous email to build on — so
@@ -301,10 +354,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       incomeBand: financialPeriod?.income_band,
       contactName: contact ? [contact.first_name, contact.last_name].filter(Boolean).join(" ") : null,
       contactJobTitle: contact?.job_title,
-      missionStatement: enrichment?.mission_statement,
+      // Canonical register purpose first, enrichment mission as the fallback —
+      // the same resolution Stage 1 applies. Sector likewise prefers the
+      // canonical column, matching both Stage 1 routes.
+      missionStatement: resolveMissionText({
+        charity_activities: organisation.charity_activities,
+        cic_community_statement: organisation.cic_community_statement,
+        enrichment_mission: enrichment?.mission_statement,
+      }),
       missionKeywords: enrichment?.mission_keywords,
-      sector: enrichment?.sector,
-      subSector: enrichment?.sub_sector,
+      sector: organisation.sector?.trim() || enrichment?.sector,
+      subSector: organisation.sub_sector?.trim() || enrichment?.sub_sector,
       newsHooks,
       booklet: savedBooklet?.booklet_text ?? null,
       attachmentText,
@@ -314,7 +374,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       // before this feature) — either way the model prompt wants readable
       // plain text, not markup.
       previousBody: emailHtmlToPlainText(previousMessage.body),
-      replyBody: replyEvent?.reply_body ?? null,
+      // Stripped rather than passed raw: a normal Gmail reply carries our own
+      // previous email quoted underneath it, so the un-stripped text puts our
+      // words inside the block the model is told to read as the client's. Rows
+      // captured before this stripping existed are the reason it is applied
+      // here as well as at capture time.
+      replyBody: replyEvent?.reply_body ? stripQuotedReply(replyEvent.reply_body) : null,
+      replyAuthorName,
+      replyReceivedAt: replyEvent?.received_at ?? null,
+      replySentiment: replyEvent?.sentiment ?? null,
+      replyIntent: replyEvent?.intent ?? null,
     },
     callModel,
     {
@@ -337,7 +406,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       organisation_id: organisationId,
       contact_id: contact?.id ?? null,
       sent_by_user_id: authorization.actor.id,
-      subject: result.draft.subject,
+      subject: replySubject,
       body: result.draft.body,
       send_status: "draft",
       news_source: liveNews ? "live" : null,
@@ -374,6 +443,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .insert(
       buildStageTwoGenerationInsert({
         outreachMessageId: message.id,
+        subject: replySubject,
         draft: result.draft,
         model,
         activity: "follow_up_email",
@@ -403,7 +473,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   return NextResponse.json(
     {
       id: message.id,
-      ...result.draft,
+      subject: replySubject,
+      body: result.draft.body,
       newsSource,
       newsHook: liveNews?.text ?? null,
       newsUrl: liveNews?.url ?? null,

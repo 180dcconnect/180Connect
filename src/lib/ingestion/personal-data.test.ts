@@ -83,6 +83,21 @@ describe("isPersonalEmail", () => {
     assert.equal(isPersonalEmail("anything@acme.org", new Set()), true);
   });
 
+  it("keeps an address named after the organisation's own domain", () => {
+    assert.equal(isPersonalEmail("wakamate@wakamate.ng", ROLE_PARTS), false);
+    assert.equal(isPersonalEmail("WakaMate@wakamate.co.uk", ROLE_PARTS), false);
+    assert.equal(isPersonalEmail("waka.mate@wakamate.co.uk", ROLE_PARTS), false);
+    assert.equal(isPersonalEmail("acme.sheffield@acme.org", ROLE_PARTS), false);
+  });
+
+  it("does not let a person or a generic domain label through on the domain rule", () => {
+    assert.equal(isPersonalEmail("jane@wakamate.ng", ROLE_PARTS), true);
+    // The TLD and short or generic labels are never the organisation's name.
+    assert.equal(isPersonalEmail("com@example.com", ROLE_PARTS), true);
+    assert.equal(isPersonalEmail("co@wakamate.co.uk", ROLE_PARTS), true);
+    assert.equal(isPersonalEmail("www@www.wakamate.org", ROLE_PARTS), true);
+  });
+
   it("has no opinion about a string that is not an address", () => {
     assert.equal(isPersonalEmail("not an email", ROLE_PARTS), false);
     assert.equal(isPersonalEmail("@acme.org", ROLE_PARTS), false);

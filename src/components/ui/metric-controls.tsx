@@ -5,6 +5,7 @@ import { Activity, BarChart3, CalendarRange, Check, ChevronDown } from "lucide-r
 import { AnimatePresence, motion } from "motion/react";
 import { EASE } from "@/components/brand/motion";
 import { isCompleteRange, type RangeSelection } from "@/lib/date-range";
+import { cn } from "@/lib/utils";
 import { DateRangeCalendar } from "./date-range-calendar";
 import type { ChartView } from "./metric-chart";
 
@@ -261,7 +262,7 @@ export function PeriodSelect({
 
   return (
     <div
-      className="relative"
+      className={cn("relative", open && "z-50")}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
       }}
@@ -306,7 +307,7 @@ export function PeriodSelect({
              * max-width is the viewport guard: the popover is anchored `right-0`
              * and grows leftwards, and this keeps it on screen on a narrow phone.
              */
-            className="pointer-events-auto absolute right-0 top-full z-40 mt-1.5 w-max min-w-[10.5rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-black/[0.08] dark:border-white/[0.12] bg-popover/95 p-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur-md"
+            className="pointer-events-auto absolute right-0 top-full z-50 mt-1.5 w-max min-w-[10.5rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-black/[0.08] dark:border-white/[0.12] bg-popover/95 p-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur-md"
           >
             {options.map((option) => {
               const isSelected = option.label === value;

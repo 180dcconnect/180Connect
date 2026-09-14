@@ -35,6 +35,13 @@ export type RawCharityCommissionBulkRecord = {
     charity_is_cio?: boolean | null;
     /** The charity's own filed description of its work. Externally authored free text. */
     charity_activities?: string | null;
+    /**
+     * The regulator's solvency flags. Absent on payloads written before the
+     * register import carried them, and null when the extract published no
+     * flag — both mean "not known", never "solvent".
+     */
+    charity_insolvent?: boolean | null;
+    charity_in_administration?: boolean | null;
   };
   annual_returns?: Record<string, unknown>[];
   matched_classifications?: string[];

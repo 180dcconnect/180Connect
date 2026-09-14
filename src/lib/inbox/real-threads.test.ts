@@ -7,7 +7,6 @@ import {
   deriveFolder,
   deriveSector,
   hydrateInboxThread,
-  mergeWithMockFill,
   sortInboxThreads,
   type InboxContactRow,
   type InboxOrganisationRow,
@@ -18,6 +17,7 @@ import type { InboxThreadView } from "../inbox-thread-view.ts";
 
 const ORG_A = "11111111-1111-4111-8111-111111111111";
 const ORG_B = "22222222-2222-4222-8222-222222222222";
+const OWNER_ADA = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
 
 function organisation(overrides: Partial<InboxOrganisationRow> = {}): InboxOrganisationRow {
   return {
@@ -29,7 +29,9 @@ function organisation(overrides: Partial<InboxOrganisationRow> = {}): InboxOrgan
     contact_email: "info@testcharity.org",
     sector: null,
     sub_sector: null,
+    outreach_status: "initial_outreach_sent",
     owner: { full_name: "Ada Lovelace", email: "ada.lovelace@180dc.org" },
+    owner_id: OWNER_ADA,
     ...overrides,
   };
 }
@@ -139,6 +141,24 @@ describe("buildRealInboxThreads", () => {
     // No per-user read state exists, so an unanswered reply is the one thing
     // that reads as unread.
     assert.equal(thread.isRead, false);
+  });
+
+  it("keeps hasSentMessage true once a reply arrives, even though status moves off 'sent'", () => {
+    // The Sent mailbox folder (gmail-inbox-shell.tsx) must keep a thread once
+    // it has sent mail, the same way Gmail's own Sent folder does — a client
+    // reply flips `status` to "replied" (who sent last) but must not evict
+    // the thread from Sent.
+    const [thread] = buildRealInboxThreads({
+      messages: [sentMessage()],
+      replies: [reply()],
+      pending: [],
+      organisations: [organisation()],
+      contacts: [],
+      now: NOW,
+    });
+
+    assert.equal(thread.status, "replied");
+    assert.equal(thread.hasSentMessage, true);
   });
 
   it("surfaces a draft-only organisation, which the sent-events pipeline cannot", () => {
@@ -269,31 +289,27 @@ describe("buildRealInboxThreads", () => {
     assert.equal(thread.notesCount, 3);
     assert.equal(thread.handoversCount, 1);
   });
-});
 
-describe("mergeWithMockFill", () => {
-  const fill = (id: string): InboxThreadView =>
-    ({ id, orgName: `Fill ${id}`, lastActivityAt: "2026-01-01T00:00:00.000Z" }) as InboxThreadView;
+  it("carries the pipeline status onto the thread for the triage tabs", () => {
+    const [thread] = buildRealInboxThreads({
+      messages: [sentMessage()],
+      replies: [],
+      pending: [],
+      organisations: [organisation({ outreach_status: "converted" })],
+      contacts: [],
+      now: NOW,
+    });
+    assert.equal(thread.outreachStatus, "converted");
 
-  it("lets a real thread win an id clash with the fill", () => {
-    const real = [
-      { id: ORG_A, orgName: "The real client", lastActivityAt: "2026-09-01T00:00:00.000Z" },
-    ] as InboxThreadView[];
-
-    const merged = mergeWithMockFill(real, [fill(ORG_A), fill("mock-org-other")]);
-
-    assert.equal(merged.length, 2);
-    assert.equal(merged.find((thread) => thread.id === ORG_A)?.orgName, "The real client");
-    assert.ok(merged.some((thread) => thread.id === "mock-org-other"));
-  });
-
-  it("adds fill without reordering — sorting is the caller's job", () => {
-    const real = [{ id: ORG_B, lastActivityAt: "2020-01-01T00:00:00.000Z" }] as InboxThreadView[];
-    const merged = mergeWithMockFill(real, [fill("mock-org-newer")]);
-    assert.deepEqual(
-      merged.map((thread) => thread.id),
-      [ORG_B, "mock-org-newer"],
-    );
+    const [unknown] = buildRealInboxThreads({
+      messages: [sentMessage()],
+      replies: [],
+      pending: [],
+      organisations: [organisation({ outreach_status: null })],
+      contacts: [],
+      now: NOW,
+    });
+    assert.equal(unknown.outreachStatus, null);
   });
 });
 
@@ -655,5 +671,66 @@ describe("buildAddressableClients", () => {
       clients.map((c) => c.orgName),
       ["Alpha Trust", "Zebra Trust"],
     );
+  });
+
+  it("skips seed rows by default", () => {
+    const clients = buildAddressableClients({
+      organisations: [organisation({ is_seed: true })],
+      contacts: [],
+    });
+    assert.deepEqual(clients, []);
+  });
+
+  it("addresses a deep-linked seed row named in includeSeedIds", () => {
+    const clients = buildAddressableClients({
+      organisations: [organisation({ is_seed: true })],
+      contacts: [],
+      includeSeedIds: [ORG_A],
+    });
+    assert.equal(clients.length, 1);
+    assert.equal(clients[0].orgName, "Test Charity");
+    assert.equal(clients[0].primaryContact.email, "info@testcharity.org");
+  });
+
+  it("still drops a named seed with no address at all", () => {
+    // The exception lifts the seed skip, not the address requirement — there
+    // is still nothing to write into a To: field.
+    const clients = buildAddressableClients({
+      organisations: [organisation({ is_seed: true, contact_email: null })],
+      contacts: [],
+      includeSeedIds: [ORG_A],
+    });
+    assert.deepEqual(clients, []);
+  });
+
+  it("keeps skipping seeds not named in includeSeedIds", () => {
+    const clients = buildAddressableClients({
+      organisations: [
+        organisation({ is_seed: true }),
+        organisation({ id: ORG_B, legal_name: "Zebra Trust", contact_email: "info@zebra.org" }),
+      ],
+      contacts: [],
+      includeSeedIds: [ORG_B],
+    });
+    assert.deepEqual(
+      clients.map((c) => c.orgName),
+      ["Zebra Trust"],
+    );
+  });
+
+  it("carries the owner id through, null when unowned", () => {
+    // The compose window's send gate reads ownerId — never the display name —
+    // to decide whether sending needs the take-ownership confirmation.
+    const [owned] = buildAddressableClients({
+      organisations: [organisation()],
+      contacts: [],
+    });
+    assert.equal(owned?.ownerId, OWNER_ADA);
+
+    const [unowned] = buildAddressableClients({
+      organisations: [organisation({ owner_id: null, owner: null })],
+      contacts: [],
+    });
+    assert.equal(unowned?.ownerId, null);
   });
 });

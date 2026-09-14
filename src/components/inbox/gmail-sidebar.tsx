@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { ReactElement } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -11,10 +12,18 @@ import {
   StickyNote,
   Trash2,
   Plus,
-  CheckCircle2,
+  CircleX,
+  TriangleAlert,
+  Info,
 } from "lucide-react";
 import { OriginButton } from "@/components/ui/origin-button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/animate-ui/components/radix/tooltip";
 import { TAG_COLOURS } from "@/lib/tags/tag-colours";
+import type { OutreachEngineHealth } from "@/lib/gmail/engine-status.ts";
 
 export type GmailFolder =
   | "inbox"
@@ -79,6 +88,118 @@ export function getSectorTagStyle(
   };
 }
 
+/** Status badge for the Active card: green disc, white tick — the same check
+    path and pathLength draw as the thread list's row checkbox
+    (gmail-thread-row.tsx). The draw plays once on mount, which is the page
+    opening, because the animation is initial/animate rather than
+    state-driven. */
+function EngineActiveBadge() {
+  return (
+    <motion.span
+      initial={{ opacity: 0, scale: 0.5 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.2 }}
+      aria-hidden="true"
+      className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-emerald-600 text-white"
+    >
+      <motion.svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3.5"
+        aria-hidden="true"
+        className="h-2.5 w-2.5"
+      >
+        <motion.path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M4.5 12.75l6 6 9-13.5"
+          initial={{ pathLength: 0, opacity: 0 }}
+          animate={{ pathLength: 1, opacity: 1 }}
+          transition={{ duration: 0.25, delay: 0.15, ease: "easeOut" }}
+        />
+      </motion.svg>
+    </motion.span>
+  );
+}
+
+/** Styled hover hint for the status card's info mark — the same radix tooltip
+    the compose modal uses instead of the native `title` (gmail-compose-modal.tsx).
+
+    Deliberately no width cap: these hints are whole sentences explaining what a
+    check does and what it last found, and a `max-w-*` was wrapping them into a
+    narrow column mid-sentence. The tooltip sizes to its content. */
+function EngineHint({ label, children }: { label: string; children: ReactElement }) {
+  return (
+    <Tooltip delayDuration={120}>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent
+        side="top"
+        showArrow={false}
+        className="bg-slate-900 text-[11px] font-medium text-white"
+      >
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** The info mark sitting right of the status title. Hovering (or focusing) it
+    repeats the card's detail line for that state. A span, not a button: a
+    button would swallow the hover events the tooltip needs. */
+function EngineInfoMark({ label }: { label: string }) {
+  return (
+    <EngineHint label={label}>
+      <span
+        tabIndex={0}
+        aria-label="About this status"
+        className="inline-flex shrink-0 cursor-help items-center rounded-full text-slate-400 transition-colors outline-none hover:text-slate-600 focus-visible:ring-2 focus-visible:ring-lead"
+      >
+        <Info className="h-3.5 w-3.5" aria-hidden="true" />
+      </span>
+    </EngineHint>
+  );
+}
+
+/** One row of the outreach-engine status card. Same badge/X/warning language
+    as the old single-check card, now repeated once per check so a broken
+    scheduler shows up instead of hiding behind a healthy Gmail transport. */
+function EngineCheckRow({
+  label,
+  status,
+  detail,
+}: {
+  label: string;
+  status: "active" | "degraded" | "reauth-required" | "unconfigured";
+  detail: string;
+}) {
+  const titleColour =
+    status === "active"
+      ? "text-emerald-700"
+      : status === "reauth-required"
+        ? "text-red-700"
+        : status === "degraded"
+          ? "text-amber-700"
+          : "text-slate-600";
+  return (
+    <div className="flex items-center justify-between gap-2 text-xs font-semibold">
+      <div className="flex items-center gap-2 min-w-0">
+        {status === "active" ? (
+          <EngineActiveBadge />
+        ) : status === "reauth-required" ? (
+          <CircleX className="h-3.5 w-3.5 text-red-600 shrink-0" />
+        ) : status === "degraded" ? (
+          <TriangleAlert className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+        ) : (
+          <CircleX className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+        )}
+        <span className={titleColour}>{label}</span>
+      </div>
+      <EngineInfoMark label={detail} />
+    </div>
+  );
+}
+
 export type GmailSidebarProps = {
   activeFolder: GmailFolder;
   onSelectFolder: (folder: GmailFolder) => void;
@@ -105,6 +226,23 @@ export type GmailSidebarProps = {
     name: string,
     colour: string | null,
   ) => Promise<{ ok: boolean; message?: string }>;
+  /**
+   * Live health for the three outreach-engine checks, from the page's server
+   * checks (`getOutreachEngineHealth`): Gmail transport, reply sync, and
+   * scheduled send. Only `active` renders a tick for a row — every other
+   * value renders an X or warning, so the card can never claim Active on a
+   * deployment whose Gmail is unconfigured, revoked, or down, or whose
+   * schedulers have stopped running. Defaults to `unconfigured` on every
+   * row (fail-closed) so a caller that forgets the prop shows Xs rather
+   * than a lie.
+   */
+  engineHealth?: OutreachEngineHealth;
+};
+
+const DEFAULT_ENGINE_HEALTH: OutreachEngineHealth = {
+  transport: { status: "unconfigured", sender: null, detail: "Not checked." },
+  replySync: { status: "unconfigured", detail: "Not checked." },
+  scheduledSend: { status: "unconfigured", detail: "Not checked." },
 };
 
 /** A label created without a colour falls back to lead — the app's deep
@@ -130,6 +268,7 @@ export function GmailSidebar({
   customLabels = [],
   onAddCustomLabel,
   onCreateLabel,
+  engineHealth = DEFAULT_ENGINE_HEALTH,
 }: GmailSidebarProps) {
   // User-created labels, added through the + next to the heading.
   const [localCustomLabels, setLocalCustomLabels] = useState<SidebarLabel[]>([]);
@@ -158,6 +297,38 @@ export function GmailSidebar({
 
   const labels: SidebarLabel[] = [...SECTORS, ...effectiveCustomLabels];
 
+  /** The Gmail row's title + detail for the current transport state. */
+  const transportStatus = engineHealth.transport.status;
+  const transportLabel =
+    transportStatus === "active"
+      ? "Gmail Connected"
+      : transportStatus === "reauth-required"
+        ? "Gmail Needs Re-authorisation"
+        : transportStatus === "degraded"
+          ? "Gmail Degraded"
+          : "Gmail Not Configured";
+  const transportDetail =
+    transportStatus === "active"
+      ? `${engineHealth.transport.sender ? `${engineHealth.transport.sender} connected via Gmail API.` : "Mailbox connected via Gmail API."}`
+      : transportStatus === "reauth-required"
+        ? "Google rejected the mailbox credentials. Sending and reply sync are paused until it is reconnected."
+        : transportStatus === "degraded"
+          ? "Gmail is temporarily unreachable."
+          : "No branch mailbox is wired up, so nothing can send or sync yet.";
+
+  const replySyncLabel =
+    engineHealth.replySync.status === "active"
+      ? "Reply Sync Active"
+      : engineHealth.replySync.status === "degraded"
+        ? "Reply Sync Degraded"
+        : "Reply Sync Not Configured";
+  const scheduledSendLabel =
+    engineHealth.scheduledSend.status === "active"
+      ? "Scheduled Send Active"
+      : engineHealth.scheduledSend.status === "degraded"
+        ? "Scheduled Send Degraded"
+        : "Scheduled Send Not Configured";
+
   const closeCreatePanel = useCallback(() => {
     setIsCreateOpen(false);
     setDraftName("");
@@ -168,7 +339,7 @@ export function GmailSidebar({
   const openCreatePanel = useCallback(() => {
     const rect = createButtonRef.current?.getBoundingClientRect();
     setPanelAnchor(
-      rect ? { top: rect.bottom + 8, right: rect.right } : { top: 64, right: 240 },
+      rect ? { top: rect.bottom + 8, right: rect.right } : { top: 64, right: 256 },
     );
     setDraftName("");
     setDraftColour(null);
@@ -280,7 +451,7 @@ export function GmailSidebar({
   ];
 
   return (
-    <aside className="flex w-56 flex-col shrink-0 min-h-0 overflow-y-auto pr-3 select-none">
+    <aside className="flex w-64 flex-col shrink-0 min-h-0 overflow-y-auto pr-3 select-none">
       {/* Main Folder Navigation */}
       <nav className="space-y-0.5">
         {folders.map((folder) => {
@@ -444,16 +615,30 @@ export function GmailSidebar({
         </div>
       </div>
 
-      {/* Bottom Status / Quota */}
-      <div className="mt-auto pt-6 px-3">
-        <div className="rounded-xl border border-slate-200/90 bg-white/70 p-3 shadow-xs">
-          <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-            <span>Outreach Engine Active</span>
-          </div>
-          <p className="mt-1 text-[11px] text-slate-500 leading-tight">
-            180DC Sheffield Mailbox connected via Gmail API.
+      {/* Bottom Status / Quota — three independent checks driven by the
+          server's live checks, not hardcoded: Gmail transport, reply sync,
+          and scheduled send. Each proves itself separately, so a broken
+          scheduler shows an X/warning instead of hiding behind a healthy
+          Gmail transport. The info mark repeats each row's detail on hover. */}
+      <div className="mt-auto pt-6 pl-3 pr-0">
+        <div
+          role="status"
+          className="rounded-xl border border-slate-200/90 bg-white/70 p-3 shadow-xs space-y-2"
+        >
+          <p className="text-[10px] font-semibold tracking-wide text-slate-400 uppercase">
+            Outreach Engine
           </p>
+          <EngineCheckRow label={transportLabel} status={transportStatus} detail={transportDetail} />
+          <EngineCheckRow
+            label={replySyncLabel}
+            status={engineHealth.replySync.status}
+            detail={engineHealth.replySync.detail}
+          />
+          <EngineCheckRow
+            label={scheduledSendLabel}
+            status={engineHealth.scheduledSend.status}
+            detail={engineHealth.scheduledSend.detail}
+          />
         </div>
       </div>
 

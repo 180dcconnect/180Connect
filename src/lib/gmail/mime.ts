@@ -101,8 +101,12 @@ export function createGmailMime(message: GmailMimeMessage): string {
   // F217: attachments wrap the existing body (plain or multipart/alternative)
   // as the first part of an outer multipart/mixed envelope — bodyPart's
   // self-contained header+blank+content shape is exactly what a nested MIME
-  // part looks like, so it drops in unchanged after the boundary marker. No
-  // attachments, no change to the pre-F217 shape.
+  // part looks like, so it drops in unchanged after the boundary marker.
+  // Unlike the no-attachments path, the outer Content-Type header here is
+  // the last top-level header — the header block needs its own \r\n\r\n
+  // terminator before the first boundary, or the whole envelope is unparsed
+  // body text with no attachment part. No attachments, no change to the
+  // pre-F217 shape.
   if (message.attachments?.length) {
     const boundary = `outreach-mixed-${randomUUID()}`;
     lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
@@ -113,7 +117,7 @@ export function createGmailMime(message: GmailMimeMessage): string {
       ...message.attachments.flatMap((attachment) => [`--${boundary}`, buildAttachmentPart(attachment), ""]),
       `--${boundary}--`,
     ].join("\r\n");
-    return `${lines.join("\r\n")}\r\n${parts}`;
+    return `${lines.join("\r\n")}\r\n\r\n${parts}`;
   }
 
   return `${lines.join("\r\n")}\r\n${bodyPart}`;

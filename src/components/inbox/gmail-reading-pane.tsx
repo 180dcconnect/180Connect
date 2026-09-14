@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -19,9 +19,7 @@ import {
   Ban,
   MoreVertical,
   Building2,
-  UserRound,
   StickyNote,
-  Plus,
   X,
   CalendarClock,
 } from "lucide-react";
@@ -36,9 +34,15 @@ import {
   getSectorColor,
   getSectorTagStyle,
 } from "./gmail-sidebar";
-import { isDesignFillThread } from "@/lib/inbox-mock-data";
 import { InboxAttachmentCard } from "./inbox-attachment-card";
 import { ReplyComposer } from "@/components/outreach/reply-composer";
+import { EmailReviewPanel } from "@/components/outreach/email-review-panel";
+import { ScheduleSendDialog, formatScheduleLong } from "@/components/outreach/schedule-send-dialog";
+import { ThreadNotesDrawer } from "./thread-notes-drawer";
+import type { PendingSendRequest } from "./gmail-compose-modal";
+import { emailHtmlToPlainText, isRichEmailHtml, sanitizeEmailHtml } from "@/lib/outreach/email-html";
+import { StatusSelect } from "@/app/clients/[id]/status-select";
+import { formatOutreachStatus } from "@/lib/organisation-format";
 
 export type GmailReadingPaneProps = {
   thread: InboxThreadView;
@@ -47,56 +51,32 @@ export type GmailReadingPaneProps = {
   onDelete: (threadId: string) => void;
   onMarkUnread: (threadId: string) => void;
   /**
+   * Whether the viewer may move this client's pipeline status (owning CAM or
+   * admin — the shell computes the same gate as the client record header).
+   * Absent, the status renders read-only.
+   */
+  canSetStatus?: boolean;
+  /**
    * Scheduled threads only. Resolves with an error message to show, or null
    * on success (the shell refreshes and moves on). Absent, the banner is
-   * read-only — the design fill has no row behind it to cancel.
+   * read-only.
    */
   onCancelScheduled?: (messageId: string) => Promise<string | null>;
-  /** Same contract: cancels the schedule, then reopens the text in Compose. */
-  onEditScheduled?: (messageId: string) => Promise<string | null>;
+  /** Same contract: moves the scheduled email to a new time, content untouched. */
+  onRescheduleScheduled?: (messageId: string, when: Date) => Promise<string | null>;
+  /**
+   * The scheduled email was edited in place and saved. The shell refreshes so
+   * the thread shows the saved content and time; the thread stays open.
+   */
+  onScheduledEdited?: () => void;
+  /** Hands a prepared send to the shell for the delayed-commit Undo window. */
+  onSend?: (request: PendingSendRequest) => void;
 };
 
 function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 0) return "U";
   return parts.slice(0, 2).map((p) => p[0].toUpperCase()).join("");
-}
-
-/** A CAM note against the client behind this thread. Mock-only — the inbox
-    preview has no notes store, so these live in component state. */
-type ClientNote = {
-  id: string;
-  author: string;
-  body: string;
-  createdAt: string;
-};
-
-function formatNoteDate(iso: string): string {
-  const d = new Date(iso);
-  return `${d.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-  })} · ${d.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit" })}`;
-}
-
-/** Fills the panel with `thread.notesCount` plausible notes so the feature can
-    be seen without a backing table. Deterministic per thread. */
-function seedNotes(thread: InboxThreadView): ClientNote[] {
-  const bodies = [
-    `Left a voicemail for ${thread.primaryContact.name}. Follow up Thursday if no reply.`,
-    `${thread.orgName} confirmed budget sign-off sits with their trustees — expect a 2–3 week turnaround.`,
-    "Scoping call went well. They want help with fundraising strategy and volunteer operations.",
-    "Sent the engagement letter. Awaiting countersignature.",
-    `Flagged to ${thread.camOwner.name}: another 180DC branch may already be engaged here — check before proceeding.`,
-  ];
-  const count = Math.min(Math.max(thread.notesCount ?? 0, 0), bodies.length);
-  const baseTime = new Date(thread.lastActivityAt).getTime();
-  return Array.from({ length: count }, (_, i) => ({
-    id: `${thread.id}-note-${i}`,
-    author: thread.camOwner.name,
-    body: bodies[i],
-    createdAt: new Date(baseTime - (i + 1) * 37 * 60 * 60 * 1000).toISOString(),
-  }));
 }
 
 /** One header-icon button in the reading pane's top bar. */
@@ -207,6 +187,8 @@ function SuppressClientDialog({
             <div className="mt-4 flex items-center justify-center gap-2">
               <Link
                 href={`/clients/${organisationId}`}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="rounded-inset bg-ink px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-ink/90"
               >
                 Open client record
@@ -282,7 +264,6 @@ function SingleMessageCard({
   isCollapsedByDefault,
   onReply,
   onSuppressClient,
-  suppressUnavailableReason,
   forceExpanded = false,
 }: {
   message: InboxEmailMessage;
@@ -292,8 +273,6 @@ function SingleMessageCard({
   onReply: (message: InboxEmailMessage) => void;
   /** Opens the pane-level suppress-client dialog. */
   onSuppressClient: () => void;
-  /** Non-null disables the suppress item with this explanation (design fill). */
-  suppressUnavailableReason: string | null;
   /** Printing expands every message: a collapsed card would print its
       100-character snippet instead of the email body. */
   forceExpanded?: boolean;
@@ -338,7 +317,7 @@ function SingleMessageCard({
         (att) => `X-Attachment: ${att.filename}`,
       ),
       "",
-      message.body,
+      emailHtmlToPlainText(message.body),
       "",
     ];
     const blob = new Blob([lines.join("\r\n")], { type: "message/rfc822" });
@@ -355,7 +334,7 @@ function SingleMessageCard({
 
   async function copyMessageText() {
     try {
-      await navigator.clipboard.writeText(message.body);
+      await navigator.clipboard.writeText(emailHtmlToPlainText(message.body));
       setMenuFeedback("Copied to clipboard.");
     } catch {
       setMenuFeedback("Copy failed in this browser.");
@@ -378,7 +357,7 @@ function SingleMessageCard({
             {message.senderName}
           </span>
           <span className="truncate text-[13px] text-dim">
-            {message.body.slice(0, 100)}…
+            {emailHtmlToPlainText(message.body).slice(0, 100)}…
           </span>
         </div>
         <span className="shrink-0 text-[12px] text-faint" suppressHydrationWarning>
@@ -523,8 +502,6 @@ function SingleMessageCard({
                 <div className="my-1 border-t border-rule-soft" />
                 <button
                   type="button"
-                  disabled={suppressUnavailableReason !== null}
-                  title={suppressUnavailableReason ?? undefined}
                   onClick={() => {
                     setMenuOpen(false);
                     onSuppressClient();
@@ -545,10 +522,19 @@ function SingleMessageCard({
         </div>
       </div>
 
-      {/* Body */}
-      <div className="mt-4 text-sm leading-[1.65] text-ink whitespace-pre-wrap font-body">
-        {message.body}
-      </div>
+      {/* Body — outgoing mail is stored as editor HTML (F117), client replies
+          as plain text. HTML is re-sanitized on every render, the same rule
+          the client record's outreach history follows. */}
+      {isRichEmailHtml(message.body) ? (
+        <div
+          className="mt-4 text-sm leading-[1.65] text-ink font-body [&_a]:text-lead [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-rule [&_blockquote]:pl-3 [&_blockquote]:text-dim [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:list-disc [&_ul]:pl-5"
+          dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(message.body) }}
+        />
+      ) : (
+        <div className="mt-4 text-sm leading-[1.65] text-ink whitespace-pre-wrap font-body">
+          {message.body}
+        </div>
+      )}
 
       {/* Attachments */}
       {message.attachments && message.attachments.length > 0 && (
@@ -585,18 +571,99 @@ export function GmailReadingPane({
   onToggleStar,
   onDelete,
   onMarkUnread,
+  canSetStatus = false,
   onCancelScheduled,
-  onEditScheduled,
+  onRescheduleScheduled,
+  onScheduledEdited,
+  onSend,
 }: GmailReadingPaneProps) {
+  // Real conversation messages: drafts are intentions, not history. Drafts
+  // belong exclusively in the reply composer, never rendered as sent email
+  // cards in the thread history above it.
+  const existingDraft = thread.messages.find((msg) => msg.pendingKind === "draft");
+  const messages = thread.messages.filter((msg) => msg.pendingKind !== "draft");
+
   const [replyOpen, setReplyOpen] = useState(false);
   /** The message a per-message Reply is answering; null answers the latest
       client reply (the bottom Reply button's meaning). */
   const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null);
   const [suppressOpen, setSuppressOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
-  const [notes, setNotes] = useState<ClientNote[]>(() => seedNotes(thread));
-  const [draftNote, setDraftNote] = useState("");
+  const [notesCount, setNotesCount] = useState<number>(0);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const replyBoxRef = useRef<HTMLDivElement>(null);
+
+  /** Smoothly scrolls the reading pane container so the reply composer and its input
+      field are comfortably and naturally visible in the viewport. */
+  const scrollReplyIntoView = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const container = scrollContainerRef.current;
+    const box = replyBoxRef.current;
+    if (!container || !box) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const boxRect = box.getBoundingClientRect();
+
+    if (boxRect.height >= containerRect.height - 48) {
+      // Box is very tall or screen is short: align near top of the container
+      const topDiff = boxRect.top - containerRect.top - 16;
+      container.scrollBy({ top: topDiff, behavior });
+    } else {
+      // Box fits within container: bring bottom comfortably into view with 28px breathing room
+      const bottomOverflow = boxRect.bottom - containerRect.bottom + 28;
+      if (bottomOverflow > 0) {
+        container.scrollBy({ top: bottomOverflow, behavior });
+      }
+    }
+  }, []);
+
+  // When reply opens or switches target, glide smoothly down into view
+  useEffect(() => {
+    if (!replyOpen) return;
+
+    const frameId = requestAnimationFrame(() => {
+      scrollReplyIntoView("smooth");
+    });
+
+    return () => {
+      cancelAnimationFrame(frameId);
+    };
+  }, [replyOpen, replyToMessageId, scrollReplyIntoView]);
+
+  // If composer expands while open (e.g. switching from AI settings to manual draft, or streaming draft text),
+  // keep the action dialogue comfortably in view if the user is currently looking at it.
+  useEffect(() => {
+    if (!replyOpen) return;
+    const box = replyBoxRef.current;
+    const container = scrollContainerRef.current;
+    if (!box || !container) return;
+
+    let initial = true;
+    let prevHeight = box.offsetHeight;
+
+    const ro = new ResizeObserver((entries) => {
+      if (initial) {
+        initial = false;
+        return;
+      }
+      for (const entry of entries) {
+        const newHeight = entry.contentRect.height;
+        if (newHeight - prevHeight > 20) {
+          prevHeight = newHeight;
+          const distFromBottom =
+            container.scrollHeight - container.scrollTop - container.clientHeight;
+          if (distFromBottom < 350) {
+            scrollReplyIntoView("smooth");
+          }
+        } else if (newHeight < prevHeight) {
+          prevHeight = newHeight;
+        }
+      }
+    });
+
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, [replyOpen, scrollReplyIntoView]);
+
   // True only while the browser's print dialog is open. Every message card
   // renders expanded for the printout — a collapsed card would print its
   // one-line snippet instead of the email.
@@ -611,78 +678,98 @@ export function GmailReadingPane({
       window.removeEventListener("afterprint", after);
     };
   }, []);
-  // Scheduled-send controls: which action is in flight, and the last refusal.
-  const [scheduledBusy, setScheduledBusy] = useState<"cancel" | "edit" | null>(null);
-  const [scheduledError, setScheduledError] = useState<string | null>(null);
 
-  // The pane instance is reused as the reader moves between threads — reseed the
+  useEffect(() => {
+    let cancelled = false;
+    async function loadNotesCount() {
+      try {
+        const res = await fetch(`/api/clients/${thread.id}/notes`);
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { notes?: unknown[] };
+        if (Array.isArray(data.notes) && !cancelled) {
+          setNotesCount(data.notes.length);
+        }
+      } catch {
+        // ignore
+      }
+    }
+    void loadNotesCount();
+    return () => {
+      cancelled = true;
+    };
+  }, [thread.id]);
+
+  // Scheduled-send controls: a cancel in flight, the last refusal, and the two
+  // in-thread changes — editing the email in place, or picking a new time.
+  const [scheduledBusy, setScheduledBusy] = useState<"cancel" | null>(null);
+  const [scheduledError, setScheduledError] = useState<string | null>(null);
+  const [editingScheduled, setEditingScheduled] = useState(false);
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [rescheduling, setRescheduling] = useState(false);
+
+  // The pane instance is reused as the reader moves between threads — clear the
   // notes and drop any open sheet / half-typed note when the client changes.
   // Adjusting state during render (React's documented pattern) rather than in an
   // effect, so there is no extra commit with stale notes on screen.
   const [seededFor, setSeededFor] = useState(thread.id);
   if (seededFor !== thread.id) {
     setSeededFor(thread.id);
-    setNotes(seedNotes(thread));
+    setNotesCount(0);
     setNotesOpen(false);
     setReplyOpen(false);
     setReplyToMessageId(null);
     setSuppressOpen(false);
-    setDraftNote("");
     setScheduledBusy(null);
     setScheduledError(null);
+    setEditingScheduled(false);
+    setRescheduleOpen(false);
   }
 
-  function handleAddNote() {
-    const body = draftNote.trim();
-    if (!body) return;
-    setNotes((prev) => [
-      {
-        id: `${thread.id}-note-${Date.now()}`,
-        author: thread.camOwner.name,
-        body,
-        createdAt: new Date().toISOString(),
-      },
-      ...prev,
-    ]);
-    setDraftNote("");
-  }
-
-  const messages = thread.messages;
-  const isDesignFill = isDesignFillThread(thread.id);
   const latestReply = lastClientReply(thread);
   const replyTarget = messages.find((msg) => msg.id === replyToMessageId) ?? null;
 
+  function handleOpenReply() {
+    setReplyToMessageId(null);
+    setReplyOpen(true);
+  }
+
   /** A per-message Reply opens the composer answering that message (when it is
-      the client's) and scrolls it into view. Answering our own sent mail falls
-      back to the latest client reply — there is nothing to answer in it. */
+      the client's) and smoothly brings it into view. */
   function handleMessageReply(msg: InboxEmailMessage) {
     setReplyToMessageId(msg.isFromClient ? msg.id : null);
     setReplyOpen(true);
-    setTimeout(() => {
-      replyBoxRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }, 60);
   }
   // The queued send the banner below manages, if the thread carries one.
-  // Design fill has bodies but no rows behind them, so its banner stays
-  // read-only.
-  const scheduledMessage = isDesignFill
-    ? undefined
-    : messages.find((message) => message.pendingKind === "scheduled");
+  const scheduledMessage = thread.messages.find(
+    (message) => message.pendingKind === "scheduled",
+  );
 
-  async function runScheduledAction(
-    kind: "cancel" | "edit",
-    action: ((messageId: string) => Promise<string | null>) | undefined,
-  ) {
-    if (!scheduledMessage || !action || scheduledBusy) return;
-    setScheduledBusy(kind);
+  async function runCancelScheduled() {
+    if (!scheduledMessage || !onCancelScheduled || scheduledBusy) return;
+    setScheduledBusy("cancel");
     setScheduledError(null);
-    const error = await action(scheduledMessage.id);
+    const error = await onCancelScheduled(scheduledMessage.id);
     // Null means the shell handled it (refreshed, moved on); a string stays
     // here, on the banner the CAM was reading.
     if (error) {
       setScheduledError(error);
       setScheduledBusy(null);
     }
+  }
+
+  /** The time picker's confirm. True shows its "done" step; false keeps it open. */
+  async function confirmReschedule(when: Date): Promise<boolean> {
+    if (!scheduledMessage || !onRescheduleScheduled) return false;
+    setRescheduling(true);
+    setScheduledError(null);
+    const error = await onRescheduleScheduled(scheduledMessage.id, when);
+    setRescheduling(false);
+    if (error) {
+      setScheduledError(error);
+      setRescheduleOpen(false);
+      return false;
+    }
+    return true;
   }
 
   return (
@@ -745,15 +832,17 @@ export function GmailReadingPane({
           >
             <StickyNote className="h-3.5 w-3.5" />
             <span>Notes</span>
-            {notes.length > 0 && (
+            {notesCount > 0 && (
               <span className="font-mono text-[10.5px] tabular-nums text-faint">
-                {notes.length}
+                {notesCount}
               </span>
             )}
           </button>
           <Link
             href={`/clients/${thread.id}`}
             title="Open client record"
+            target="_blank"
+            rel="noopener noreferrer"
             className="flex items-center gap-1.5 rounded-inset px-2.5 py-1 text-[13px] font-semibold text-lead transition-colors hover:bg-lead-wash"
           >
             <span>Client record</span>
@@ -768,6 +857,7 @@ export function GmailReadingPane({
           notes drawer. */}
       <div
         id="inbox-print-region"
+        ref={scrollContainerRef}
         className="flex-1 space-y-5 overflow-y-auto px-8 py-6"
       >
         {/* Headline */}
@@ -787,12 +877,48 @@ export function GmailReadingPane({
             </span>
           </div>
 
-          <div className="flex items-center gap-2 text-[13px] text-dim">
-            <Building2 className="h-[15px] w-[15px] text-faint" />
-            <span className="font-medium text-ink">{thread.orgName}</span>
-            <span className="text-faint">·</span>
-            <UserRound className="h-[15px] w-[15px] text-faint" />
-            <span>CAM: {thread.camOwner.name}</span>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-dim">
+            <div className="flex items-center gap-1.5 font-medium text-ink">
+              <Building2 className="h-[15px] w-[15px] text-faint shrink-0" />
+              <span>{thread.orgName}</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="font-body text-[12px] uppercase font-bold tracking-[-0.01em] text-ink">
+                Owner
+              </span>
+              <span className="inline-flex items-center gap-2 rounded-full border border-rule bg-white px-2.5 py-1 text-[12px] font-medium text-dim">
+                <span
+                  aria-hidden="true"
+                  className="flex size-[22px] shrink-0 items-center justify-center rounded-full bg-ink font-mono text-[9.5px] font-semibold text-white"
+                >
+                  {getInitials(thread.camOwner.name)}
+                </span>
+                <span className="text-[13.5px] font-medium text-ink">
+                  {thread.camOwner.name}
+                </span>
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="font-body text-[12px] uppercase font-bold tracking-[-0.01em] text-ink">
+                Stage
+              </span>
+              {canSetStatus ? (
+                <StatusSelect
+                  organisationId={thread.id}
+                  currentStatus={thread.outreachStatus ?? "not_contacted"}
+                  idSuffix="inbox"
+                  showNudge={false}
+                />
+              ) : (
+                thread.outreachStatus && (
+                  <span className="inline-flex items-center rounded-full border border-rule bg-white px-3 py-1 text-[13.5px] font-medium text-ink">
+                    {formatOutreachStatus(thread.outreachStatus)}
+                  </span>
+                )
+              )}
+            </div>
           </div>
         </div>
 
@@ -807,25 +933,41 @@ export function GmailReadingPane({
               <p className="font-semibold text-hold">Scheduled to be sent</p>
               <p className="text-dim" suppressHydrationWarning>
                 Goes out {formatScheduledFor(thread.scheduledFor)}. You can still
-                edit or cancel it until then.
+                edit it, change the time or cancel it until then.
               </p>
-              {scheduledMessage && (onCancelScheduled || onEditScheduled) && (
+              {scheduledMessage && (onCancelScheduled || onRescheduleScheduled || onScheduledEdited) && (
                 <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                  {onEditScheduled && (
+                  {onScheduledEdited && !editingScheduled && (
                     <button
                       type="button"
                       disabled={scheduledBusy !== null}
-                      onClick={() => void runScheduledAction("edit", onEditScheduled)}
+                      onClick={() => {
+                        setScheduledError(null);
+                        setEditingScheduled(true);
+                      }}
                       className="rounded-inset bg-ink px-3 py-1.5 text-[12px] font-semibold text-white transition-colors hover:bg-ink/90 disabled:opacity-50"
                     >
-                      {scheduledBusy === "edit" ? "Opening…" : "Edit"}
+                      Edit
+                    </button>
+                  )}
+                  {onRescheduleScheduled && !editingScheduled && (
+                    <button
+                      type="button"
+                      disabled={scheduledBusy !== null}
+                      onClick={() => {
+                        setScheduledError(null);
+                        setRescheduleOpen(true);
+                      }}
+                      className="rounded-inset border border-hold/30 px-3 py-1.5 text-[12px] font-semibold text-hold transition-colors hover:bg-hold/10 disabled:opacity-50"
+                    >
+                      Change time
                     </button>
                   )}
                   {onCancelScheduled && (
                     <button
                       type="button"
                       disabled={scheduledBusy !== null}
-                      onClick={() => void runScheduledAction("cancel", onCancelScheduled)}
+                      onClick={() => void runCancelScheduled()}
                       className="rounded-inset border border-hold/30 px-3 py-1.5 text-[12px] font-semibold text-hold transition-colors hover:bg-hold/10 disabled:opacity-50"
                     >
                       {scheduledBusy === "cancel" ? "Cancelling…" : "Cancel schedule"}
@@ -843,30 +985,110 @@ export function GmailReadingPane({
         )}
 
         {/* Messages — one uniform surface; a hairline between emails is the
-            only separator, sent and received alike. */}
-        <div className="divide-y divide-rule-soft">
-          {messages.map((msg, idx) => {
-            const isLatest = idx === messages.length - 1;
-            const isCollapsed = messages.length > 2 && idx < messages.length - 2;
+            only separator, sent and received alike. Bodies arrive per thread on
+            open (the list query omits them), so the first paint has headers but
+            no emails yet: skeletons hold the space rather than a blank gap that
+            then jumps when the conversation lands. */}
+        {messages.length === 0 ? (
+          <div
+            className="divide-y divide-rule-soft animate-pulse"
+            aria-label="Loading conversation…"
+          >
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                // `first:pt-1 last:pb-1` copied from the real message row, so the
+                // top and bottom of the conversation sit where they will.
+                className="bg-white px-1 py-6 first:pt-1 last:pb-1"
+                aria-hidden="true"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="h-10 w-10 shrink-0 rounded-full bg-paper-sunk" />
+                    <div className="min-w-0 space-y-2">
+                      <div className="h-3.5 w-36 rounded bg-paper-sunk" />
+                      <div className="h-3 w-52 max-w-full rounded bg-paper-sunk" />
+                    </div>
+                  </div>
+                  <div className="h-3 w-16 shrink-0 rounded bg-paper-sunk" />
+                </div>
+                <div className="mt-4 space-y-2 pl-[52px]">
+                  <div className="h-3.5 w-full rounded bg-paper-sunk" />
+                  <div className="h-3.5 w-11/12 rounded bg-paper-sunk" />
+                  <div className="h-3.5 w-2/3 rounded bg-paper-sunk" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="divide-y divide-rule-soft">
+            {messages.map((msg, idx) => {
+              const isLatest = idx === messages.length - 1;
+              const isCollapsed = messages.length > 2 && idx < messages.length - 2;
 
-            return (
-              <SingleMessageCard
-                key={msg.id}
-                message={msg}
-                isLatest={isLatest}
-                isCollapsedByDefault={isCollapsed}
-                forceExpanded={printing}
-                onReply={handleMessageReply}
-                onSuppressClient={() => setSuppressOpen(true)}
-                suppressUnavailableReason={
-                  isDesignFill
-                    ? "Unavailable on design fill — there is no client record to suppress."
-                    : null
-                }
-              />
-            );
-          })}
-        </div>
+              // Editing a scheduled email happens where the email is: its card
+              // becomes the review panel, formatting intact, and the schedule
+              // stays live until the edit is approved and saved.
+              if (msg.pendingKind === "scheduled" && editingScheduled && thread.scheduledFor) {
+                return (
+                  <div className="py-5" key={msg.id}>
+                    <div className="rounded-panel border border-rule bg-white p-4 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="text-[12px] text-dim" suppressHydrationWarning>
+                          Editing a scheduled email · still goes out{" "}
+                          {formatScheduledFor(thread.scheduledFor)} as it was until you save
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setEditingScheduled(false)}
+                          title="Stop editing — nothing changes"
+                          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper hover:text-ink"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <EmailReviewPanel
+                        className="mt-3"
+                        description="Change the wording or the time. Approve it again to save — it keeps its place in the schedule until you do."
+                        draft={{
+                          id: msg.id,
+                          subject: msg.subject || thread.subject,
+                          body: msg.body,
+                          recipientOnFile: thread.primaryContact.email || null,
+                          savedRecipient: msg.recipientEmail || null,
+                          newsSource: msg.newsSource,
+                          newsHook: msg.newsHook,
+                          newsUrl: msg.newsUrl,
+                        }}
+                        editingScheduled
+                        heading="Edit scheduled email"
+                        idPrefix={`scheduled-edit-${msg.id}`}
+                        initialScheduledAt={thread.scheduledFor}
+                        onCommitted={() => {
+                          setEditingScheduled(false);
+                          onScheduledEdited?.();
+                        }}
+                        organisationId={thread.id}
+                      />
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <SingleMessageCard
+                  key={msg.id}
+                  message={msg}
+                  isLatest={isLatest}
+                  isCollapsedByDefault={isCollapsed}
+                  forceExpanded={printing}
+                  onReply={handleMessageReply}
+                  onSuppressClient={() => setSuppressOpen(true)}
+                />
+              );
+            })}
+          </div>
+        )}
 
         {/* Reply — the real, approved send path.
             What used to sit here was a textarea whose Send only pushed a message
@@ -874,182 +1096,122 @@ export function GmailReadingPane({
             database, and skipped suppression, ownership and the human-review
             gate entirely. ReplyComposer generates a Stage 2 draft and hands it
             to EmailReviewPanel, which is the one component allowed to render
-            the approval control (see lib/outreach/human-send-control.test.ts).
-
-            Mock fill has no organisation behind it, so there is no draft row to
-            write: on design fill the composer mounts in preview mode — the same
-            current UI, generating a local example with sending disabled, rather
-            than a dead-end notice. */}
+            the approval control (see lib/outreach/human-send-control.test.ts). */}
         <div className="pt-4 print:hidden" ref={replyBoxRef}>
-          {!replyOpen ? (
-            <button
-              type="button"
-              onClick={() => {
-                setReplyToMessageId(null);
-                setReplyOpen(true);
-              }}
-              className="flex cursor-pointer items-center gap-2 rounded-inset bg-ink px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-ink/90"
-            >
-              <Reply className="h-4 w-4" />
-              <span>Reply to {thread.primaryContact.name}</span>
-            </button>
-          ) : (
-            <div className="rounded-panel border border-rule bg-white p-4">
-              <div className="flex items-start justify-between gap-3">
-                <p className="text-[12px] text-dim">
-                  Replying to{" "}
-                  <span className="font-semibold text-ink">{thread.primaryContact.name}</span>{" "}
-                  &lt;{thread.primaryContact.email}&gt;
-                  {replyTarget && replyTarget.id !== latestReply?.id && (
-                    <span className="text-faint">
-                      {" "}
-                      · answering {replyTarget.senderName} ·{" "}
-                      {new Date(replyTarget.sentAt).toLocaleDateString("en-GB", {
-                        day: "numeric",
-                        month: "short",
-                      })}
-                    </span>
-                  )}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
+          <AnimatePresence initial={false} mode="wait">
+            {!replyOpen ? (
+              <motion.button
+                key="reply-trigger-btn"
+                type="button"
+                onClick={handleOpenReply}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="flex cursor-pointer items-center gap-2 rounded-inset bg-ink px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-ink/90"
+              >
+                <Reply className="h-4 w-4" />
+                <span>Reply to {thread.primaryContact.name}</span>
+              </motion.button>
+            ) : (
+              <motion.div
+                key="reply-composer-card"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 8 }}
+                transition={{ duration: 0.26, ease: [0.16, 1, 0.3, 1] }}
+                className="rounded-panel border border-rule bg-white p-4 shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-[12px] text-dim">
+                    Replying to{" "}
+                    <span className="font-semibold text-ink">{thread.primaryContact.name}</span>{" "}
+                    &lt;{thread.primaryContact.email}&gt;
+                    {replyTarget && replyTarget.id !== latestReply?.id && (
+                      <span className="text-faint">
+                        {" "}
+                        · answering {replyTarget.senderName} ·{" "}
+                        {new Date(replyTarget.sentAt).toLocaleDateString("en-GB", {
+                          day: "numeric",
+                          month: "short",
+                        })}
+                      </span>
+                    )}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReplyOpen(false);
+                      setReplyToMessageId(null);
+                    }}
+                    title="Close the reply"
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper hover:text-ink cursor-pointer"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                {/* F135: the reply being answered is the message the CAM hit Reply
+                    on — a per-message Reply names it, otherwise the client's most
+                    recent one in this thread. The Stage 2 route loads that row's
+                    text itself; only its id travels from here. */}
+                <ReplyComposer
+                  className="mt-3"
+                  key={replyToMessageId ?? existingDraft?.id ?? "latest"}
+                  organisationId={thread.id}
+                  recipientOnFile={thread.primaryContact.email || null}
+                  ownerId={thread.ownerId}
+                  orgName={thread.orgName}
+                  replyEventId={replyTarget?.id ?? lastClientReply(thread)?.id}
+                  threadSubject={thread.subject}
+                  initialDraft={
+                    existingDraft
+                      ? {
+                          id: existingDraft.id,
+                          subject: existingDraft.subject,
+                          body: existingDraft.body ? emailHtmlToPlainText(existingDraft.body) : "",
+                          newsSource: existingDraft.newsSource,
+                          newsHook: existingDraft.newsHook,
+                          newsUrl: existingDraft.newsUrl,
+                        }
+                      : undefined
+                  }
+                  onSend={onSend}
+                  onClose={() => {
                     setReplyOpen(false);
                     setReplyToMessageId(null);
                   }}
-                  title="Close the reply"
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper hover:text-ink"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              {/* F135: the reply being answered is the message the CAM hit Reply
-                  on — a per-message Reply names it, otherwise the client's most
-                  recent one in this thread. The Stage 2 route loads that row's
-                  text itself; only its id travels from here. On design fill the
-                  composer previews instead: same UI, example draft, no send. */}
-               <ReplyComposer
-                 className="mt-3"
-                 key={replyToMessageId ?? "latest"}
-                 organisationId={thread.id}
-                 preview={isDesignFill}
-                 previewContext={{
-                   contactName: thread.primaryContact.name,
-                   orgName: thread.orgName,
-                   camName: thread.camOwner.name,
-                 }}
-                 previewSubject={thread.subject}
-                 recipientOnFile={thread.primaryContact.email || null}
-                 replyEventId={replyTarget?.id ?? lastClientReply(thread)?.id}
-               />
-            </div>
-          )}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
-      {/* Client notes — docks to the right at ~35% so the thread stays
-          visible alongside it. Mock-only: state lives in this component,
-          nothing is persisted. */}
+      {/* Change time — the same picker scheduling uses, so moving a send asks
+          the question the same way. The content is untouched, so no approval. */}
+      {onRescheduleScheduled && (
+        <ScheduleSendDialog
+          committing={rescheduling}
+          doneMessage={
+            thread.scheduledFor
+              ? `Moved from ${formatScheduleLong(new Date(thread.scheduledFor))}. It will send automatically at the new time.`
+              : "It will send automatically at the new time."
+          }
+          onClose={() => setRescheduleOpen(false)}
+          onConfirm={confirmReschedule}
+          open={rescheduleOpen}
+        />
+      )}
+
+      {/* Client notes drawer with @teammate mention support */}
       <AnimatePresence>
         {notesOpen && (
-          <motion.div
-            key="client-notes"
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
-            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-            className="absolute inset-y-0 right-0 z-30 flex w-[35%] min-w-[300px] flex-col border-l border-rule-soft bg-white shadow-[-18px_0_40px_-24px_rgba(15,23,42,0.25)]"
-          >
-            <div className="flex shrink-0 items-center gap-2 border-b border-rule-soft px-4 py-2.5">
-              <button
-                type="button"
-                onClick={() => setNotesOpen(false)}
-                title="Back to the thread"
-                className={HEADER_BTN}
-              >
-                <ArrowLeft className="h-4 w-4" />
-              </button>
-              <span className="flex items-center gap-2 text-[13px] font-semibold text-ink">
-                <StickyNote className="h-4 w-4 text-faint" />
-                Notes · {thread.orgName}
-              </span>
-              <button
-                type="button"
-                onClick={() => setNotesOpen(false)}
-                title="Close"
-                className={`${HEADER_BTN} ml-auto`}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* Add a note */}
-            <div className="shrink-0 border-b border-rule-soft px-6 py-4">
-              <textarea
-                value={draftNote}
-                onChange={(e) => setDraftNote(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                    e.preventDefault();
-                    handleAddNote();
-                  }
-                }}
-                placeholder="Add a note about this client…"
-                rows={3}
-                spellCheck
-                className="w-full resize-y rounded-inset border border-rule bg-paper px-3 py-2 text-[13px] leading-[1.6] text-ink placeholder:text-faint focus:border-lead focus:outline-none"
-              />
-              <div className="mt-2 flex items-center justify-between">
-                <span className="text-[11px] text-faint">⌘↵ to save</span>
-                <button
-                  type="button"
-                  onClick={handleAddNote}
-                  disabled={!draftNote.trim()}
-                  className="flex items-center gap-1.5 rounded-inset bg-ink px-3.5 py-1.5 text-[13px] font-semibold text-white transition-colors hover:bg-ink/90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add note
-                </button>
-              </div>
-            </div>
-
-            {/* Notes list */}
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              {notes.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <StickyNote className="mb-3 h-10 w-10 text-faint stroke-[1.5]" />
-                  <p className="text-[13px] font-semibold text-ink">No notes yet</p>
-                  <p className="mt-1 text-[12px] text-dim">
-                    Add the first note about {thread.orgName} above.
-                  </p>
-                </div>
-              ) : (
-                <ul className="space-y-3">
-                  {notes.map((note) => (
-                    <li
-                      key={note.id}
-                      className="rounded-panel border border-rule-soft bg-paper p-4"
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-lead text-[10px] font-semibold text-white">
-                          {getInitials(note.author)}
-                        </div>
-                        <span className="text-[12px] font-semibold text-ink">
-                          {note.author}
-                        </span>
-                        <span className="text-[11px] text-faint" suppressHydrationWarning>
-                          {formatNoteDate(note.createdAt)}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-[13px] leading-[1.6] text-ink whitespace-pre-wrap">
-                        {note.body}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </motion.div>
+          <ThreadNotesDrawer
+            isOpen={notesOpen}
+            onClose={() => setNotesOpen(false)}
+            thread={thread}
+            onNotesCountChange={setNotesCount}
+          />
         )}
       </AnimatePresence>
 

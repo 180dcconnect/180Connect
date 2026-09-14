@@ -7,12 +7,12 @@ import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { cn } from "@/lib/utils";
 
 /**
- * The completeness strip: four chips, each ticked or not.
+ * The completeness strip: five chips, each ticked or not.
  *
  * Missing signals stay on screen rather than being filtered out. That is the
  * point — a filtered strip would say "this record has a registration number"
  * and leave the CAM to notice, by absence, that nobody knows what the
- * organisation earns. An untickled box says it outright, and because the four
+ * organisation earns. An untickled box says it outright, and because the five
  * chips sit in the same order on every record, the shape of the strip is
  * comparable between two clients at a glance without reading a word of it.
  *

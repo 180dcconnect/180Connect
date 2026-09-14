@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { applyDataHandling, type DataHandlingPolicy } from "../ingestion/apply-data-handling.ts";
 import { hashPayload } from "../ingestion/checksum.ts";
 import type { CompanyRegisterFilters } from "./filters.ts";
-import { selectCompanies, type RegisterCompany } from "./sqlite.ts";
+import { companyByNumber, selectCompanies, type RegisterCompany } from "./sqlite.ts";
 
 /**
  * Copies the companies a filter set selects out of the register file and into
@@ -90,7 +90,41 @@ export async function importSelection(
   policy: DataHandlingPolicy,
   limit?: number,
 ): Promise<ImportOutcome | { error: string }> {
-  const selected = selectCompanies(filters, limit);
+  return importSelected(supabase, selectCompanies(filters, limit), ingestionRunId, policy);
+}
+
+/**
+ * One company, picked by hand on the add-a-client screen.
+ *
+ * The Companies House twin of `importCharityNumber`, and split out of
+ * `importSelection` for the same reason: the staging half is identical whether
+ * the selection came from a saved filter set or from a search box, and only the
+ * source of the list differs.
+ *
+ * Reading the company back from the file rather than trusting what the browser
+ * sent is the same rule the charity path follows — a browser-rendered result is
+ * not evidence of anything.
+ */
+export async function importCompanyNumber(
+  supabase: SupabaseClient,
+  companyNumber: string,
+  ingestionRunId: string,
+  policy: DataHandlingPolicy,
+): Promise<ImportOutcome | { error: string }> {
+  const row = companyByNumber(companyNumber);
+  if (!row) {
+    return { error: "That company is not in the register this deployment holds." };
+  }
+  return importSelected(supabase, [row], ingestionRunId, policy);
+}
+
+/** The staging half, over an already-chosen list — see `importCharityNumber`. */
+async function importSelected(
+  supabase: SupabaseClient,
+  selected: ReturnType<typeof selectCompanies>,
+  ingestionRunId: string,
+  policy: DataHandlingPolicy,
+): Promise<ImportOutcome | { error: string }> {
   if (selected.length === 0) return { selected: 0, written: 0, unchanged: 0 };
 
   const numbers = selected.map((row) => row.company.number);

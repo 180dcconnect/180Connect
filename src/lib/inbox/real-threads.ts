@@ -50,7 +50,22 @@ export type InboxOrganisationRow = {
   contact_email: string | null;
   sector: string | null;
   sub_sector: string | null;
+  /** Pipeline status. Carried so the triage tabs can retire decided outcomes
+      without a second query per organisation. */
+  outreach_status: string | null;
   owner: { full_name: string | null; email: string | null } | null;
+  /** Current owner id, null when unowned. The compose window's send gate
+      reads this (not the display name) to decide whether sending needs the
+      take-ownership confirmation. */
+  owner_id: string | null;
+  /**
+   * Seed marker (F233). Real-data-only views drop `is_seed` rows — the inbox
+   * page filters them in its query and both builders below skip them
+   * defensively, so `npm run seed` / `seed:demo` rows never read as mailbox
+   * threads or compose recipients. Optional so existing callers/tests without
+   * the column keep compiling; absent means "not seed".
+   */
+  is_seed?: boolean | null;
 };
 
 /** CONTACTS — the person a thread is addressed to. Names arrive split, as the
@@ -377,6 +392,9 @@ export type AddressableClient = {
   sector: Sector;
   primaryContact: InboxThreadView["primaryContact"];
   camOwner: InboxThreadView["camOwner"];
+  /** Current owner id, null when unowned — the send gate's signal, kept apart
+      from the display-only camOwner name. */
+  ownerId: string | null;
   contacts: InboxContactView[];
 };
 
@@ -393,13 +411,28 @@ export type AddressableClient = {
 export function buildAddressableClients({
   organisations,
   contacts,
+  includeSeedIds = [],
 }: {
   organisations: readonly InboxOrganisationRow[];
   contacts: readonly InboxContactRow[];
+  /**
+   * Narrow, id-scoped exception to the seed skip below: organisations asked
+   * for by id — the inbox page passes its ?compose= target — are addressable
+   * even when seeded. An explicit deep link from the record is a deliberate
+   * per-client action, not ambient mailbox browsing, so it does not undermine
+   * the rule's purpose (seed rows never reading as threads or appearing in
+   * recipient searches uninvited). Anything not named here is still skipped.
+   */
+  includeSeedIds?: readonly string[];
 }): AddressableClient[] {
+  const includeSeed = new Set(includeSeedIds);
   const clients: AddressableClient[] = [];
 
   for (const organisation of organisations) {
+    // Real data only: seed/demo organisations (is_seed) are never addressable
+    // recipients. The page also filters them in its query; this keeps direct
+    // callers honest too.
+    if (organisation.is_seed && !includeSeed.has(organisation.id)) continue;
     const own = contactsFor(organisation, contacts);
     if (own.length === 0) continue;
 
@@ -418,6 +451,7 @@ export function buildAddressableClients({
         name: organisation.owner?.full_name?.trim() || "Unassigned",
         email: organisation.owner?.email?.trim() || "",
       },
+      ownerId: organisation.owner_id ?? null,
       contacts: own,
     });
   }
@@ -451,6 +485,8 @@ export function buildRealInboxThreads({
   const threads: InboxThreadView[] = [];
 
   for (const organisation of organisations) {
+    // Real data only — see buildAddressableClients: seed rows are not threads.
+    if (organisation.is_seed) continue;
     const own = events.get(organisation.id) ?? [];
     const queued = pendingByOrg.get(organisation.id) ?? null;
     // An organisation nobody has touched is not a thread — it is a client, and
@@ -488,7 +524,10 @@ export function buildRealInboxThreads({
         name: organisation.owner?.full_name?.trim() || "Unassigned",
         email: organisation.owner?.email?.trim() || "",
       },
+      ownerId: organisation.owner_id ?? null,
       status: folder === "drafts" ? "draft" : status,
+      hasSentMessage: own.some((event) => event.type === "email_sent"),
+      outreachStatus: organisation.outreach_status ?? null,
       replyIntent: asReplyIntent(newest?.intent ?? null),
       subject,
       snippet: newest?.snippet ?? snippetFrom(queued?.subject ?? ""),
@@ -528,22 +567,6 @@ export function sortInboxThreads(
     if (aFresh !== bFresh) return aFresh ? -1 : 1;
     return a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0;
   });
-}
-
-/**
- * Mock threads fill in behind the real ones while the live database is thin.
- * A real organisation always wins its own id — the fill can add rows, never
- * shadow one.
- *
- * Pure set union, no sorting: ordering is `sortInboxThreads`'s job, and doing
- * it here would hide that the merged list needs re-sorting at all.
- */
-export function mergeWithMockFill(
-  real: readonly InboxThreadView[],
-  mock: readonly InboxThreadView[],
-): InboxThreadView[] {
-  const realIds = new Set(real.map((thread) => thread.id));
-  return [...real, ...mock.filter((thread) => !realIds.has(thread.id))];
 }
 
 /**

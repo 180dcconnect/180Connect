@@ -1,5 +1,8 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getOutreachEngineHealth, type OutreachEngineHealth } from "@/lib/gmail/engine-status.ts";
+import { fetchAdminQueueTally } from "@/lib/dashboard/admin-queue";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission } from "@/lib/auth/permissions";
@@ -33,7 +36,12 @@ import {
   type TeamUserRow,
 } from "@/lib/performance-metrics";
 import { formatTeamActivities, type FormattedTeamActivity, type RawTeamActivityRow } from "@/lib/team-activity";
-import { followUpRecommendations, DEFAULT_FOLLOW_UP_THRESHOLDS, type FollowUpRecommendation } from "@/lib/outreach/follow-up-recommendations";
+import {
+  followUpRecommendations,
+  FOLLOW_UP_TRIGGER_STATUSES,
+  DEFAULT_FOLLOW_UP_THRESHOLDS,
+  type FollowUpRecommendation,
+} from "@/lib/outreach/follow-up-recommendations";
 import {
   buildRecentUpdates,
   recentUpdatesCutoff,
@@ -47,11 +55,8 @@ import {
   type OrganisationPreview,
 } from "@/lib/recent-updates";
 import { myWorkSummary, type MyWorkSummary } from "@/lib/dashboard/my-work";
-import { replyQueueSummary, type ReplyQueueSummary } from "@/lib/dashboard/reply-queue";
 import { aiSpendSummary, type AiGenerationCostRow, type AiSpendSummary } from "@/lib/dashboard/ai-spend";
-import type { ConversionRow } from "@/lib/dashboard/conversions-over-time";
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
-import { AttentionList } from "@/components/attention-list";
 import { TeamActivityFeed } from "@/components/team-activity-feed";
 import { RecentUpdatesFeed } from "@/components/recent-updates-feed";
 import { FirstRunGuide } from "@/components/first-run-guide";
@@ -61,9 +66,7 @@ import { AdminActionCenter, type AdminQueueCounts } from "@/components/dashboard
 import { QueueQualityCard } from "@/components/dashboard/queue-quality-card";
 import { PerformanceSection } from "@/components/dashboard/performance-section";
 import { MyWorkStrip } from "@/components/dashboard/my-work-strip";
-import { FollowUpsDueCard } from "@/components/dashboard/follow-ups-due-card";
-import { ReplyQueueCard } from "@/components/dashboard/reply-queue-card";
-import { ConversionsOverTimeCard } from "@/components/dashboard/conversions-over-time-card";
+import { ActionCenterCard } from "@/components/dashboard/action-center-card";
 import { AiSpendCard } from "@/components/dashboard/ai-spend-card";
 import {
   REVIEW_CLIENTS_EMPTY_STATE,
@@ -79,6 +82,39 @@ import {
   type ReplyTrackingRow,
 } from "@/lib/reply-analytics";
 import { StatCard } from "@/components/stat-card";
+
+/**
+ * One outreach-engine check that is not reporting active.
+ *
+ * `stop` is something broken — a revoked Gmail connection, a scheduler that has
+ * stopped ticking. `hold` is something never set up, which on a staging
+ * deployment is expected and not an outage.
+ */
+type EngineIssue = { label: string; detail: string; severity: "stop" | "hold" };
+
+/**
+ * The engine's failing checks, in the order the inbox's status card lists them.
+ *
+ * Only what is *not* active becomes an issue: the dashboard has no room for a
+ * status strip that is green every day, and a row nobody reads is how the one
+ * day it matters gets missed. `getOutreachEngineHealth` never throws — each
+ * check degrades on its own — so there is nothing to catch here.
+ */
+function engineIssuesFrom(health: OutreachEngineHealth): EngineIssue[] {
+  const checks = [
+    { label: "Gmail connection", status: health.transport.status, detail: health.transport.detail },
+    { label: "Reply sync", status: health.replySync.status, detail: health.replySync.detail },
+    { label: "Scheduled send", status: health.scheduledSend.status, detail: health.scheduledSend.detail },
+  ];
+
+  return checks
+    .filter((check) => check.status !== "active")
+    .map((check) => ({
+      label: check.label,
+      detail: check.detail,
+      severity: check.status === "unconfigured" ? ("hold" as const) : ("stop" as const),
+    }));
+}
 
 /**
  * F021 — first screen after login. The sidebar (AppShell/F030) already wraps this
@@ -130,18 +166,22 @@ export default async function DashboardPage({
   let adminCounts: AdminQueueCounts | null = null;
   let trackedReplies: ReplyTrackingRow[] = [];
   let loadFailed = false;
+  // Clients nobody owns. Read for every role rather than inside the admin block
+  // below, because it is a CAM's only route into work when their own book is
+  // empty — see the empty-book card in the render.
+  let unassignedCount = 0;
+  // Actively-suppressed clients dropped from every total on this page.
+  let suppressedCount = 0;
+  // Outreach-engine checks that are not reporting active. Empty means the
+  // dashboard says nothing about the engine at all.
+  let engineIssues: EngineIssue[] = [];
+  // Owned organisations in `responded` status whose inbound reply has not been
+  // read yet by this actor (INBOX_THREAD_STATE.read_state !== 'read').
+  let unreadInboundOrgIds: Set<string> | undefined;
 
-  // F210 — its own 12-month window, wider than the Performance section's 90
-  // days, because progress against a target is a this-quarter / trailing-year
-  // question. Null when the read fails: the card simply doesn't render.
-  let conversionHistory: ConversionRow[] | null = null;
   // F213 — admin-only month-to-date AI spend, plus the equal-length prior
   // stretch it is compared against.
   let aiSpend: AiSpendSummary | null = null;
-  // The reply queue (clients whose newest event is their reply) is derived from
-  // the Performance section's already-fetched message and reply rows, so it
-  // costs no extra query — and is therefore null exactly when that read failed.
-  let replyQueue: ReplyQueueSummary | null = null;
 
   // Performance section state — null when its reads fail, so the rest of the
   // dashboard still renders (every section here fails independently).
@@ -259,6 +299,16 @@ export default async function DashboardPage({
       return { data: all, error: null };
     }
 
+    // Live sending health — the Gmail transport plus the reply-sync and
+    // scheduled-send cron jobs. Started here so it overlaps the mailbox reads
+    // (it caps itself at ~6s, so a sick Gmail cannot hold the dashboard open),
+    // but awaited separately: adding a ninth element to the tuple below pushes
+    // TypeScript off Promise.all's tuple signature, which silently widens every
+    // other result in it to a union and breaks the `.error` checks under it.
+    // Only for an actor who can actually send: a viewer has no outreach to be
+    // broken, and the check is a live Gmail round trip.
+    const engineHealthPromise = canWrite ? getOutreachEngineHealth(supabase) : null;
+
     const [organisations, openSuppressions, replyTracking, rawActivity, rawUpdateNotes, rawUpdateMessages, rawUpdateReplies, rawUpdateAudit] =
       await Promise.all([
         fetchAllOrganisations(),
@@ -330,8 +380,32 @@ export default async function DashboardPage({
       }
     }
 
+    // Reported whether or not the pipeline reads worked: a dead reply sync is
+    // exactly the sort of thing that should survive a failed query on this page.
+    const engineHealth = engineHealthPromise ? await engineHealthPromise : null;
+    engineIssues = engineHealth ? engineIssuesFrom(engineHealth) : [];
+
     if (!loadFailed) {
       rows = filterActiveSuppressed(organisations.data ?? [], openSuppressions.data ?? []);
+      unassignedCount = rows.filter((row) => row.owner_id === null).length;
+      // Pending suppressions are deliberately not counted here — they stay in
+      // the totals until approved, which is what filterActiveSuppressed just
+      // applied, so the two numbers tell one story instead of two.
+      suppressedCount = (organisations.data?.length ?? 0) - rows.length;
+
+      const respondedMineOrgIds = canViewClients
+        ? rows
+            .filter((row) => row.owner_id === actor.id && row.outreach_status === "responded")
+            .map((row) => row.id)
+        : [];
+
+      const threadStatesPromise = respondedMineOrgIds.length > 0
+        ? supabase
+            .from("inbox_thread_state")
+            .select("organisation_id, read_state")
+            .eq("user_id", actor.id)
+            .in("organisation_id", respondedMineOrgIds)
+        : null;
 
       // Performance section — one 90-day window, five reads. Every table here
       // is readable by every role (matrix §3.1, §3.4, §3.6), so this is not an
@@ -340,16 +414,7 @@ export default async function DashboardPage({
       // interpolates filter values raw, so a Date would 400 every query.
       const perfCutoff = trendWindowStart(new Date()).toISOString();
 
-      // F210 reads the same `outcomes` table as the Performance section but over
-      // a 12-month window rather than 90 days, so it gets its own cutoff. Start
-      // of the month 11 months back, matching `conversionRanges`' widest option
-      // — fetching to the day would leave the first monthly bucket partial.
-      const conversionWindowStart = (() => {
-        const now = new Date();
-        return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)).toISOString();
-      })();
-
-      const [perfMessages, perfReplies, perfConversions, perfScores, perfUsers, conversionYear] = await Promise.all([
+      const [perfMessages, perfReplies, perfConversions, perfScores, perfUsers] = await Promise.all([
         fetchAllRows<SentMessageRow>((from, to) =>
           supabase
             .from("outreach_messages")
@@ -397,28 +462,7 @@ export default async function DashboardPage({
             .range(from, to)
             .overrideTypes<TeamUserRow[], { merge: false }>(),
         ),
-        fetchAllRows<ConversionRow>((from, to) =>
-          supabase
-            .from("outcomes")
-            .select("created_at, recorded_by_user_id, organisation_id")
-            .eq("outcome_type", "converted")
-            .gte("created_at", conversionWindowStart)
-            .order("created_at", { ascending: true })
-            .range(from, to)
-            .overrideTypes<ConversionRow[], { merge: false }>(),
-        ),
       ]);
-
-      // F210 fails on its own, like every other section: a failed 12-month read
-      // hides that one card and leaves the 90-day Performance numbers standing.
-      if (conversionYear.error) {
-        await reportError(conversionYear.error, { operation: "dashboard.conversions_over_time" });
-      } else {
-        const visible = new Set(rows.map((row) => row.id));
-        conversionHistory = (conversionYear.data ?? []).filter((row) =>
-          visible.has(row.organisation_id),
-        );
-      }
 
       const perfErrors = [
         ["performance.messages", perfMessages.error],
@@ -451,21 +495,14 @@ export default async function DashboardPage({
           trend: pipelineTrendSeries(perfInput),
           sectors: sectorPerformance(perfInput, sectorByOrg),
           queue: queueBands(perfInput.scores),
+          // Owner-eligible roles: an active CAM or admin can own clients, so
+          // both appear here — same list the clients owner filter uses.
           cams: perfUsers.data
-            ?.filter((user) => user.role === "cam")
+            ?.filter((user) => user.role === "cam" || user.role === "admin")
             .sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? "")) ?? [],
           raw: perfInput,
           sectorByOrg,
         };
-
-        // The reply queue rides on the same rows — no extra read. It needs
-        // owners, which `perfInput` doesn't carry, so it takes `rows` directly.
-        replyQueue = replyQueueSummary(
-          perfInput.messages,
-          perfInput.replies,
-          rows.map((row) => ({ id: row.id, legal_name: row.legal_name, owner_id: row.owner_id })),
-          actor.id,
-        );
       }
 
       // The org-name map is built from the visible rows only, which is also
@@ -614,11 +651,11 @@ export default async function DashboardPage({
           return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString();
         })();
 
-        const [ownershipReqs, suppressions, edits, discrepancies, aiCosts] = await Promise.all([
-          supabase.from("ownership_requests").select("id", { count: "exact", head: true }).eq("status", "pending"),
-          supabase.from("suppressions").select("id", { count: "exact", head: true }).eq("status", "pending"),
-          supabase.from("edit_suggestions").select("id", { count: "exact", head: true }).eq("status", "pending"),
-          supabase.from("field_discrepancies").select("id", { count: "exact", head: true }).eq("status", "pending"),
+        const [queue, aiCosts] = await Promise.all([
+          // F181's approval queues, counted once for both screens
+          // (src/lib/dashboard/admin-queue.ts) — the admin dashboard prints
+          // these same numbers on its duty-queue card.
+          fetchAdminQueueTally(supabase),
           fetchAllRows<AiGenerationCostRow & { outreach_message_id: string | null }>((from, to) =>
           supabase
             .from("ai_generations")
@@ -633,13 +670,6 @@ export default async function DashboardPage({
         if (aiCosts.error) {
           await reportError(aiCosts.error, { operation: "dashboard.ai_spend" });
         } else {
-          const messageIds = (aiCosts.data ?? [])
-            .map((row) => row.outreach_message_id)
-            .filter((id): id is string => Boolean(id));
-          const { data: linkedMessages } = messageIds.length
-            ? await supabase.from("outreach_messages").select("id, created_at, organisation_id").in("id", messageIds)
-            : { data: [] as { id: string; created_at: string; organisation_id: string }[] };
-          const messageDates = new Map((linkedMessages ?? []).map((row) => [row.id, row.created_at]));
           const { data: booklets } = await supabase
             .from("booklet_generations")
             .select("created_at, cost_usd, total_tokens, model, input_tokens, output_tokens")
@@ -655,15 +685,36 @@ export default async function DashboardPage({
           ]);
         }
 
-        const unassignedOrgs = rows.filter(r => r.owner_id === null).length;
+        if (queue.error) {
+          // Reported rather than rendered as zeros: "0 ownership requests" and
+          // "that query broke" look identical on screen, and only one of them
+          // means the duty queue is clear.
+          await reportError(queue.error, { operation: "dashboard.admin_queues" });
+        }
 
         adminCounts = {
-          ownershipRequests: ownershipReqs.count ?? 0,
-          pendingSuppressions: suppressions.count ?? 0,
-          suggestedEdits: edits.count ?? 0,
-          discrepancies: discrepancies.count ?? 0,
-          unassignedOrgs,
+          ownershipRequests: queue.tally?.ownershipRequests ?? 0,
+          pendingSuppressions: queue.tally?.pendingSuppressions ?? 0,
+          suggestedEdits: queue.tally?.suggestedEdits ?? 0,
+          discrepancies: queue.tally?.discrepancies ?? 0,
+          unassignedOrgs: unassignedCount,
         };
+      }
+
+      if (threadStatesPromise) {
+        const threadStatesResult = await threadStatesPromise;
+        if (threadStatesResult.error) {
+          await reportError(threadStatesResult.error, { operation: "dashboard.inbox_thread_state" });
+        } else {
+          const readOrgIds = new Set(
+            (threadStatesResult.data ?? [])
+              .filter((s) => s.read_state === "read")
+              .map((s) => s.organisation_id),
+          );
+          unreadInboundOrgIds = new Set(
+            respondedMineOrgIds.filter((id) => !readOrgIds.has(id)),
+          );
+        }
       }
     }
   }
@@ -707,23 +758,13 @@ export default async function DashboardPage({
       }));
   }
 
-  let attentionItems = needsAttention(rows, actor.id, overdueActionCandidates);
-  // F160/F161 — the recommendations are now rendered as their own card
-  // (Follow-ups due) as well as decorating the Needs Attention rows, so they are
-  // hoisted out of the block that computes them.
-  //
-  // The `attentionItems.length > 0` guard below still holds for both readers:
-  // `NEEDS_ATTENTION_STATUSES` and `FOLLOW_UP_TRIGGER_STATUSES` are the same
-  // three statuses, so an empty attention list means there is nothing that could
-  // become a recommendation either, and skipping the two reads is correct rather
-  // than merely convenient.
   let followUps: FollowUpRecommendation[] = [];
-  if (!loadFailed && attentionItems.length > 0) {
-    const supabase = await createClient();
-    const myClients = rows
-      .filter((row) => row.owner_id === actor.id)
+  if (!loadFailed && canViewClients) {
+    const myCandidates = rows
+      .filter((row) => row.owner_id === actor.id && FOLLOW_UP_TRIGGER_STATUSES.has(row.outreach_status))
       .map((row) => ({ id: row.id, legal_name: row.legal_name, outreach_status: row.outreach_status }));
-    if (myClients.length > 0) {
+    if (myCandidates.length > 0) {
+      const supabase = await createClient();
       const [preferences, activity] = await Promise.all([
         supabase
           .from("outreach_preferences")
@@ -731,7 +772,7 @@ export default async function DashboardPage({
           .eq("user_id", actor.id)
           .maybeSingle(),
         supabase.rpc("get_clients_last_activity", {
-          p_organisation_ids: myClients.map((row) => row.id),
+          p_organisation_ids: myCandidates.map((row) => row.id),
         }),
       ]);
       if (activity.error) {
@@ -741,8 +782,8 @@ export default async function DashboardPage({
         await reportError(preferences.error, { operation: "dashboard.follow_up_preferences" });
       }
 
-      const recommendations: FollowUpRecommendation[] = followUpRecommendations(
-        myClients,
+      followUps = followUpRecommendations(
+        myCandidates,
         new Map(
           (activity.data ?? []).map(
             (row: {
@@ -765,19 +806,20 @@ export default async function DashboardPage({
           second: preferences.data?.second_follow_up_days ?? DEFAULT_FOLLOW_UP_THRESHOLDS.second,
         },
       );
-      followUps = recommendations;
-      const byOrganisation = new Map(recommendations.map((rec) => [rec.organisationId, rec]));
-      attentionItems = attentionItems.map((item) => {
-        const rec = byOrganisation.get(item.id);
-        return rec
-          ? { ...item, followUp: { daysWaiting: rec.daysWaiting, urgency: rec.urgency } }
-          : item;
-      });
     }
   }
+
+  const attentionItems = needsAttention(rows, actor.id, {
+    overdueActions: overdueActionCandidates,
+    followUps,
+    unreadOrgIds: unreadInboundOrgIds,
+  });
   // F022 — the total is now shown as a curve rather than a single number, so the
   // dashboard says how the pipeline got here, not only where it is.
   const growth = organisationGrowthSeries(rows);
+
+  // Whether the engine banner reads as "broken" or "not set up yet".
+  const engineStop = engineIssues.some((issue) => issue.severity === "stop");
 
   // The meters read as a share of the whole pipeline, so an empty pipeline has to
   // draw an empty bar rather than divide by zero.
@@ -794,16 +836,9 @@ export default async function DashboardPage({
   // that should be talking to a CAM with no clients.
   const myWork: MyWorkSummary | null = (() => {
     if (loadFailed || !canViewClients) return null;
-    const summary = myWorkSummary(rows, actor.id);
+    const summary = myWorkSummary(rows, actor.id, { unreadOrgIds: unreadInboundOrgIds });
     return summary.owned > 0 ? summary : null;
   })();
-
-  // The reply queue is shown when this actor has replies of their own waiting,
-  // and additionally to an admin when the *team* has some — an admin who owns no
-  // clients still needs to know that twelve replies are going unanswered.
-  const showReplyQueue =
-    replyQueue !== null &&
-    (replyQueue.mine > 0 || (actor.role === "admin" && replyQueue.team > 0));
 
   // F255 — the first-run guide. Read both halves of its state together: whether this
   // CAM is still eligible for it (users) and how far through they are
@@ -899,16 +934,18 @@ export default async function DashboardPage({
             
           </div>
 
-          {/* The one accent on the screen: a single pill, glass backdrop + lime hover fill, pointing at
-              the screen where the work actually happens. */}
           {canViewClients && (
-            <OriginButton
-              href="/clients"
-              size="md"
-              className="shrink-0"
-            >
-              View all clients
-            </OriginButton>
+            <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
+              {/* The one accent on the screen: a single pill, glass backdrop + lime hover fill, pointing at
+                  the screen where the work actually happens. */}
+              <OriginButton
+                href="/clients"
+                size="md"
+                className="shrink-0"
+              >
+                View all clients
+              </OriginButton>
+            </div>
           )}
         </Rise>
 
@@ -929,6 +966,46 @@ export default async function DashboardPage({
                 or send anything.
               </p>
             </div>
+          </Rise>
+        )}
+
+        {/* Sending health. The inbox owns the full three-check status card; this
+            speaks only when a check is not reporting active, because until now
+            silence here meant both "the engine is running" and "reply sync died
+            on Friday". */}
+        {engineIssues.length > 0 && (
+          <Rise>
+            <section
+              aria-labelledby="engine-health-heading"
+              className={`rounded-panel border px-5 py-4 ${
+                engineStop ? "border-stop/25 bg-stop-wash/50" : "border-hold/25 bg-hold-wash/50"
+              }`}
+            >
+              <h2
+                id="engine-health-heading"
+                className={`font-body text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] ${
+                  engineStop ? "text-stop" : "text-hold"
+                }`}
+              >
+                Outreach engine needs attention
+              </h2>
+              <ul className="mt-2 space-y-1">
+                {engineIssues.map((issue) => (
+                  <li
+                    key={issue.label}
+                    className="font-body text-[13px] leading-[1.55] text-dim"
+                  >
+                    <span className="font-semibold text-ink">{issue.label}</span> — {issue.detail}
+                  </li>
+                ))}
+              </ul>
+              <Link
+                href="/inbox"
+                className="mt-2 inline-block font-body text-[13px] font-semibold text-lead transition-colors hover:text-lead-mid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
+              >
+                Open the inbox →
+              </Link>
+            </section>
           </Rise>
         )}
 
@@ -966,48 +1043,56 @@ export default async function DashboardPage({
                 totals are the right numbers for a standup and the wrong ones for
                 the person who just logged in: nobody acts on "1,794
                 organisations". */}
-            {myWork && (
+            {myWork ? (
               <Group className="space-y-4">
-                <Rise className="flex items-baseline justify-between gap-4">
-                  <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">My work</h2>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                    Yours · right now
-                  </p>
-                </Rise>
 
                 <Rise>
                   <MyWorkStrip summary={myWork} actorId={actor.id} />
                 </Rise>
               </Group>
+            ) : (
+              /* A CAM whose book is empty got no strip and no explanation: the
+                 page started at platform totals and never mentioned them, so
+                 handing on your last client left the dashboard with nothing to
+                 say. CAMs only — a viewer cannot own a client, and an admin
+                 reads the same pool under their own duty queue. */
+              actor.role === "cam" &&
+              canWrite && (
+                <Rise>
+                  <section className="rounded-panel border border-rule bg-white px-5 py-4">
+                    <h2 className="font-body text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink">
+                      Nothing on your desk
+                    </h2>
+                    <p className="mt-1 max-w-[54ch] font-body text-[13px] leading-[1.55] text-dim">
+                      {unassignedCount > 0
+                        ? `${unassignedCount.toLocaleString()} ${unassignedCount === 1 ? "client has" : "clients have"} no owner yet. Claim one and the work appears here.`
+                        : "You do not own a client yet. Browse the pipeline and claim one to start."}
+                    </p>
+                    <div className="mt-3">
+                      <OriginButton
+                        href={unassignedCount > 0 ? "/clients?owner=unassigned" : "/clients"}
+                        size="md"
+                      >
+                        {unassignedCount > 0 ? "Find unassigned clients" : "Browse clients"}
+                      </OriginButton>
+                    </div>
+                  </section>
+                </Rise>
+              )
             )}
 
-            {/* F160/F161 and the reply queue: the two lists that are actually a
-                queue of work, side by side, above everything that is a reading
-                rather than a task. Either card renders alone if the other has
-                nothing to say — a CAM with no clients yet gets neither. */}
-            {(followUps.length > 0 || showReplyQueue) && (
+            {/* Unified Action Center: inbound replies, overdue actions, due follow-ups, stalled clients */}
+            {attentionItems.length > 0 && (
               <Group className="space-y-4">
-                <Rise className="flex items-baseline justify-between gap-4">
+                <Rise>
                   <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">
-                    Waiting on you
+                    Action Center
                   </h2>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                    Yours · most pressing first
-                  </p>
                 </Rise>
 
-                <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
-                  {followUps.length > 0 && (
-                    <Rise className="h-full">
-                      <FollowUpsDueCard recommendations={followUps} actorId={actor.id} />
-                    </Rise>
-                  )}
-                  {showReplyQueue && replyQueue && (
-                    <Rise className="h-full">
-                      <ReplyQueueCard summary={replyQueue} isAdmin={actor.role === "admin"} />
-                    </Rise>
-                  )}
-                </div>
+                <Rise className="h-full">
+                  <ActionCenterCard items={attentionItems} actorId={actor.id} />
+                </Rise>
               </Group>
             )}
 
@@ -1016,7 +1101,7 @@ export default async function DashboardPage({
               {/* Side-by-side row: Total Organisations curve + Customer Segmentation dial */}
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-12 items-stretch">
                 <div className="relative z-20 flex flex-col xl:col-span-8">
-                  <Rise className="h-full flex-1">
+                  <Rise glass className="h-full flex-1">
                     <ProgressMetricCard
                       size="lg"
                       title="Total Organisations"
@@ -1057,37 +1142,101 @@ export default async function DashboardPage({
                 </div>
               </div>
 
+              {/* What the totals above are missing, and why. F022 AC3 drops
+                  actively-suppressed clients from every number in this group,
+                  which is right — but the screen said nothing about it, so a
+                  suppression landing quietly shrank the pipeline and only the
+                  admin who approved it could explain why. The same sentence the
+                  admin dashboard prints, so the two cannot tell different
+                  stories about one filter. */}
+              {suppressedCount > 0 && (
+                <Rise>
+                  <p className="font-body text-[12.5px] leading-[1.55] text-dim">
+                    {suppressedCount.toLocaleString()} suppressed{" "}
+                    {suppressedCount === 1 ? "client" : "clients"} excluded from totals (active
+                    suppressions).
+                  </p>
+                </Rise>
+              )}
+
               {/* Contacted / responded / converted as counts, under the curve
                   they break down. Kept beside the new segmentation dial rather
                   than dropped with the old single-column layout: the response
                   card is the only place the average turnaround is read. */}
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                <Rise>
-                  <StatCard
-                    label="Contacted"
-                    value={metrics.contacted}
-                    share={share(metrics.contacted)}
-                    caption={shareCaption(metrics.contacted)}
-                  />
-                </Rise>
-                <Rise>
-                  <StatCard
-                    label="Responses received"
-                    value={metrics.responsesReceived}
-                    share={share(metrics.respondingClients)}
-                    caption={`${metrics.respondingClients.toLocaleString()} responding ${metrics.respondingClients === 1 ? "client" : "clients"} · Avg ${formatResponseTime(replyTracking.averageResponseTimeSeconds)}`}
-                  />
-                </Rise>
-                <Rise>
-                  <StatCard
-                    label="Converted"
-                    value={metrics.converted}
-                    share={share(metrics.converted)}
-                    caption={shareCaption(metrics.converted)}
-                    emphasis
-                  />
-                </Rise>
-              </div>
+              {(() => {
+                const dashNow = new Date();
+                const todayUtc = Date.UTC(dashNow.getUTCFullYear(), dashNow.getUTCMonth(), dashNow.getUTCDate());
+                const trailing7StartUtc = todayUtc - 6 * 24 * 60 * 60 * 1000;
+                const trailing7EndUtc = todayUtc + 24 * 60 * 60 * 1000;
+
+                const countTrailing7Days = (timestamps: (string | null | undefined)[]) => {
+                  const counts = [0, 0, 0, 0, 0, 0, 0];
+                  for (const ts of timestamps) {
+                    if (!ts) continue;
+                    const ms = Date.parse(ts);
+                    if (Number.isNaN(ms) || ms < trailing7StartUtc || ms >= trailing7EndUtc) continue;
+                    const dayIdx = Math.floor((ms - trailing7StartUtc) / (24 * 60 * 60 * 1000));
+                    if (dayIdx >= 0 && dayIdx < 7) {
+                      counts[dayIdx] += 1;
+                    }
+                  }
+                  return counts;
+                };
+
+                const contactedDaily = performance?.raw
+                  ? countTrailing7Days(performance.raw.messages.map((m) => m.sent_at))
+                  : undefined;
+                const repliesDaily = performance?.raw
+                  ? countTrailing7Days(performance.raw.replies.map((r) => r.received_at))
+                  : undefined;
+                const convertedDaily = performance?.raw
+                  ? countTrailing7Days(performance.raw.conversions.map((c) => c.created_at))
+                  : undefined;
+
+                return (
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    <Rise className="relative hover:z-30 focus-within:z-30">
+                      <StatCard
+                        label="Contacted"
+                        value={metrics.contacted}
+                        share={share(metrics.contacted)}
+                        caption={shareCaption(metrics.contacted)}
+                        data={contactedDaily}
+                        total={metrics.totalCharities}
+                        checked={metrics.contacted}
+                      />
+                    </Rise>
+                    <Rise className="relative hover:z-30 focus-within:z-30">
+                      <StatCard
+                        label="Responses received"
+                        value={metrics.responsesReceived}
+                        share={share(metrics.respondingClients)}
+                        showGauge={false}
+                        data={repliesDaily}
+                        footerBadge={
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-lead/8 px-2.5 py-0.5 text-[11px] font-semibold text-lead dark:bg-lead/15">
+                            <span className="h-1.5 w-1.5 rounded-full bg-lead" />
+                            <span>Avg turnaround · {formatResponseTime(replyTracking.averageResponseTimeSeconds)}</span>
+                          </span>
+                        }
+                        caption={`${metrics.respondingClients.toLocaleString()} responding ${metrics.respondingClients === 1 ? "client" : "clients"}`}
+                      />
+                    </Rise>
+                    <Rise className="relative hover:z-30 focus-within:z-30">
+                      <StatCard
+                        label="Converted"
+                        value={metrics.converted}
+                        share={share(metrics.converted)}
+                        caption={shareCaption(metrics.converted)}
+                        data={convertedDaily}
+                        total={metrics.totalCharities}
+                        checked={metrics.converted}
+                        emphasis
+                      />
+                    </Rise>
+                  </div>
+                );
+              })()}
             </Group>
 
             {performance && (
@@ -1107,41 +1256,6 @@ export default async function DashboardPage({
               </Group>
             )}
 
-            {/* F210 — conversions as a COUNT, next to (not instead of) the
-                conversion-rate curve inside Performance above. Halve the
-                outreach and the rate holds steady while this halves; a manager
-                needs to see that, so both readings stay on the page. */}
-            {conversionHistory && (
-              <Group className="space-y-4">
-                <Rise className="flex items-baseline justify-between gap-4">
-                  <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">
-                    Conversions over time
-                  </h2>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                    The team · how many, not how well
-                  </p>
-                </Rise>
-
-                <Rise>
-                  <ConversionsOverTimeCard conversions={conversionHistory} />
-                </Rise>
-              </Group>
-            )}
-
-            {attentionItems.length > 0 && (
-              <Group className="space-y-4">
-                <Rise className="flex items-baseline justify-between gap-4">
-                  <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">Needs attention</h2>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                    Yours · longest waiting first
-                  </p>
-                </Rise>
-
-                <Rise>
-                  <AttentionList items={attentionItems} />
-                </Rise>
-              </Group>
-            )}
 
             {actor.role === "admin" && (adminCounts || aiSpend) && (
               <Group className="space-y-4">

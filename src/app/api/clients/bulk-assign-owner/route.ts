@@ -5,7 +5,8 @@ import { reportError } from "@/lib/error-logging";
 import { assignOwnerRpcFailure, validateBulkReassignOwnership } from "@/lib/ownership";
 
 /**
- * F253 — admin assigns (or reassigns) multiple clients to a CAM in one action.
+ * F253 — admin assigns (or reassigns) multiple clients to a team member
+ * (an active CAM or admin) in one action.
  * Reuses reassign_ownership (matrix §3.11) with p_from_user_id = null (the bulk-assign path),
  * which processes the selected client IDs, updates their owner_id, moves open actions,
  * and writes one audit log entry per client.

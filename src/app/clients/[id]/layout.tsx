@@ -1,6 +1,7 @@
 import { Suspense, type ReactNode } from "react";
 
 import { Rise, Stage } from "@/components/dashboard-stage";
+import { SkeletonRecordHeader } from "@/components/ui/skeleton";
 
 import { loadClient, loadRecordStats, loadSuppression } from "./load-record";
 import { RecordHeader } from "./record-header";
@@ -67,11 +68,64 @@ async function SuppressionBanner({ organisationId }: { organisationId: string })
   );
 }
 
-/** Holds the header's height while it streams, so the tab bar does not jump. */
-function RecordHeaderSkeleton() {
+/**
+ * The regulator's solvency flags, when it has published them.
+ *
+ * Sits here rather than in the header for the same reason the suppression
+ * banner does: it governs whether this organisation is worth approaching at
+ * all, and a fact that decides the answer must not be reachable only by opening
+ * the tab that happens to render it. Up here it is on every tab.
+ *
+ * Only ever shown when the register actually flagged something. Null — the
+ * state of nine tenths of the client list, imported before these columns
+ * existed — renders nothing at all, because "we have never read the register for
+ * this organisation" is not a warning.
+ *
+ * No control and no dismissal: this is not our judgement to clear, and a CAM
+ * cannot make a charity solvent by clicking.
+ */
+function RegisterStatusBanner({
+  insolvent,
+  inAdministration,
+}: {
+  insolvent: boolean | null | undefined;
+  inAdministration: boolean | null | undefined;
+}) {
+  if (!insolvent && !inAdministration) return null;
+
+  const both = Boolean(insolvent) && Boolean(inAdministration);
+  const headline = both
+    ? "Insolvent and in administration"
+    : insolvent
+      ? "Insolvent"
+      : "In administration";
+
   return (
-    <div className="h-[21rem] animate-pulse rounded-panel border border-rule bg-white sm:h-[17rem]" />
+    <div role="alert" className="rounded-panel border border-stop/25 bg-stop-wash px-5 py-4">
+      <p className="text-[15px] font-semibold text-stop">{headline}</p>
+      <p className="mt-1.5 text-sm leading-[1.65] text-stop/90">
+        The Charity Commission publishes this on the charity&rsquo;s register
+        entry. It is the regulator&rsquo;s statement, not ours, and it is read
+        back from the register rather than set here.
+      </p>
+      <p className="mt-1 text-[13px] leading-[1.55] text-stop/70">
+        Worth confirming before any outreach — an organisation in administration
+        usually cannot enter new engagements.
+      </p>
+    </div>
   );
+}
+
+/**
+ * Holds the header's shape while it streams, so the tab bar does not jump.
+ *
+ * Used to be an empty white slab at a remembered height: the height was right,
+ * but the record arrived onto a blank card where its name, location, stage and
+ * status chips belong. The placeholder is the real header's geometry now (see
+ * `SkeletonRecordHeader`), so the two cannot drift apart.
+ */
+function RecordHeaderSkeleton() {
+  return <SkeletonRecordHeader />;
 }
 
 export default async function ClientRecordLayout({
@@ -90,7 +144,7 @@ export default async function ClientRecordLayout({
    * arrive. It costs nothing — `loadClient` is `cache()`d and `generateMetadata`
    * has already awaited it for this request.
    */
-  const [, stats] = await Promise.all([loadClient(id), loadRecordStats(id)]);
+  const [client, stats] = await Promise.all([loadClient(id), loadRecordStats(id)]);
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
@@ -104,6 +158,13 @@ export default async function ClientRecordLayout({
           <Suspense fallback={null}>
             <SuppressionBanner organisationId={id} />
           </Suspense>
+          {/* Not suspense-wrapped: the row is already awaited above, so there
+              is nothing left to stream and a boundary would only add a frame
+              in which a solvency warning is missing. */}
+          <RegisterStatusBanner
+            insolvent={client.insolvent}
+            inAdministration={client.in_administration}
+          />
         </Stage>
 
         {/* Deliberately outside Stage/Rise. `entranceSoft` settles on

@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { NoteListItem } from "@/lib/note-history";
 import { splitNoteContentMentions } from "@/lib/note-mentions";
+import { MentionTag } from "@/components/ui/mention-tag";
 
 import { formatShortDate } from "@/lib/display-format";
 
@@ -20,9 +21,7 @@ function NoteContent({ content, mentionNames }: { content: string; mentionNames:
     <p className="mt-2.5 whitespace-pre-wrap text-sm leading-[1.65] text-ink">
       {parts.map((part, index) =>
         part.mention ? (
-          <span key={index} className="font-semibold text-lead">
-            {part.text}
-          </span>
+          <MentionTag key={index} text={part.text} variant="light" animate={false} />
         ) : (
           <span key={index}>{part.text}</span>
         ),

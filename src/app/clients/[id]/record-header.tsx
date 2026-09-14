@@ -7,6 +7,7 @@ import { formatCityWithRegion, formatOrganisationType } from "@/lib/organisation
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import type { OwnershipRequestStatus } from "@/lib/ownership-requests";
 import { buildCompleteness } from "@/lib/client-completeness";
+import { resolveMissionText } from "@/lib/mission";
 import { BackButton } from "@/components/ui/back-button";
 import { VerifiedCheck } from "@/components/verified-check";
 
@@ -274,14 +275,15 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
 
   const supabase = await createClient();
 
-  // F163: admin's CAM picker. Only fetched for an admin — nobody else can reach
+  // F163: admin's owner picker. Only fetched for an admin — nobody else can reach
   // the assign form, so the query would be wasted on every other page view.
-  let team: { id: string; full_name: string | null }[] = [];
+  let team: { id: string; full_name: string | null; role?: string | null }[] = [];
   if (isAdmin) {
     const { data, error } = await supabase
       .from("users")
-      .select("id, full_name")
-      .eq("role", "cam")
+      .select("id, full_name, role")
+      .in("role", ["cam", "admin"])
+      .eq("is_active", true)
       .order("full_name");
     if (error) {
       await reportError(error, { operation: "clients.detail_team", organisationId });
@@ -312,10 +314,30 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
     ownershipDecisionNote = data?.decision_note ?? null;
   }
 
-  // How deep the dossier goes, in four ticks. Every input is already loaded
-  // above, so the strip adds nothing to this render's query budget.
+  // How deep the dossier goes, in five ticks. Everything except the mission
+  // enrichment row is already loaded above; that one extra latest-row read is
+  // what the Mission tick costs, shared with the Overview tab's own read.
+  const { data: headerEnrichment, error: headerEnrichmentError } = await supabase
+    .from("enrichment_results")
+    .select("mission_statement")
+    .eq("organisation_id", organisationId)
+    .order("enriched_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ mission_statement: string | null }>();
+  if (headerEnrichmentError) {
+    await reportError(headerEnrichmentError, {
+      operation: "clients.detail_header_enrichment",
+      organisationId,
+    });
+  }
   const completeness = buildCompleteness({
     identifierCount: identifiers.length,
+    hasMission:
+      resolveMissionText({
+        charity_activities: client.charity_activities,
+        cic_community_statement: client.cic_community_statement,
+        enrichment_mission: headerEnrichment?.mission_statement,
+      }) !== null,
     filingCount: stats.filings,
     headcountFilingCount: stats.headcountFilings,
     grantCount: stats.grants,

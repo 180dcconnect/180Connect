@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { Check, MapPin, Undo2, X } from "lucide-react";
+import { Check, Globe, MapPin, Undo2, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
 import { GooeyTextInput } from "@/components/ui/gooey-text-input";
@@ -68,6 +68,7 @@ export function InlineFieldInput({
   onSubmit,
   pending,
   error,
+  onReadFromWebsite,
 }: {
   fieldName: string;
   label: string;
@@ -79,10 +80,40 @@ export function InlineFieldInput({
   onSubmit: () => void;
   pending: boolean;
   error?: string;
+  /**
+   * Present only where the organisation's own website can fill the field —
+   * today just the mission. Returns the text the site publishes about itself,
+   * or the reason it could not be read; the caller does the fetching, this only
+   * renders the control. Nothing is saved by it: the value lands in the draft,
+   * for the person to read and submit like anything they had typed.
+   */
+  onReadFromWebsite?: () => Promise<{ text: string } | { error: string }>;
 }) {
   const textareaId = useId();
   const max = maxLengthFor(fieldName);
   const multiline = isLongFormField(fieldName);
+  const [reading, setReading] = useState(false);
+  const [readMessage, setReadMessage] = useState("");
+
+  async function readFromWebsite() {
+    if (!onReadFromWebsite) return;
+    setReading(true);
+    setReadMessage("");
+    try {
+      const result = await onReadFromWebsite();
+      if ("text" in result) {
+        onChange(result.text);
+        setReadMessage("Read from the website. Check it reads right, then save.");
+      } else {
+        setReadMessage(result.error);
+      }
+    } catch {
+      setReadMessage("The website could not be read. Check the address, or write the mission by hand.");
+    } finally {
+      setReading(false);
+    }
+  }
+
   const warnings = fieldWarnings(fieldName, value);
   const note = normalisationNote(fieldName, value);
   const unchanged =
@@ -143,6 +174,23 @@ export function InlineFieldInput({
           <X aria-hidden="true" className="size-3.5" />
         </button>
       </div>
+
+      {onReadFromWebsite && (
+        <div className="flex flex-col gap-1 pl-1">
+          <button
+            type="button"
+            onClick={readFromWebsite}
+            disabled={reading || pending}
+            className="inline-flex w-fit items-center gap-1.5 rounded-inset border border-rule px-2 py-1 text-[12.5px] text-lead transition-colors hover:bg-paper focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none disabled:opacity-60"
+          >
+            <Globe aria-hidden="true" className="size-3.5" />
+            {reading ? "Reading the website…" : "Read from website"}
+          </button>
+          {readMessage && (
+            <p className="text-[12px] leading-[1.45] text-dim">{readMessage}</p>
+          )}
+        </div>
+      )}
 
       {(error || note || unchanged || showCount || warnings.length > 0) && (
         <div className="-mt-1 flex flex-col gap-0.5 pl-1 text-[12px] leading-[1.45]">

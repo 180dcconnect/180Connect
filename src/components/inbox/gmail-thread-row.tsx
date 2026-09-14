@@ -19,6 +19,7 @@ import {
   getSectorColor,
   getSectorTagStyle,
 } from "./gmail-sidebar";
+import { emailHtmlToPlainText } from "@/lib/outreach/email-html";
 
 export type GmailThreadRowProps = {
   thread: InboxThreadView;
@@ -147,7 +148,9 @@ export function GmailThreadRow({
       : [...thread.messages].reverse().find((m) => m.isFromClient) ??
         thread.messages[thread.messages.length - 1];
 
-    const bodyText = activeMessage?.body?.replace(/\s+/g, " ").trim();
+    const bodyText = activeMessage?.body
+      ? emailHtmlToPlainText(activeMessage.body).replace(/\s+/g, " ").trim()
+      : undefined;
     if (bodyText && bodyText.length > thread.snippet.length) {
       return bodyText;
     }

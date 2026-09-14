@@ -37,9 +37,6 @@ import {
 import { threadMatchesLabels } from "@/lib/inbox/label-filter";
 import { InflightRequests } from "@/lib/inbox/inflight";
 import { createTagAction } from "@/lib/tags/tag-actions";
-import {
-  mockFillThreads,
-} from "@/lib/inbox-mock-data";
 import type { AddressableClient } from "@/lib/inbox/real-threads";
 import { DEFAULT_FOLLOW_UP_THRESHOLDS } from "@/lib/outreach/follow-up-recommendations";
 import {
@@ -57,13 +54,20 @@ import {
   type InboxThreadFlagUpdate,
 } from "@/app/inbox/actions";
 import { GmailSidebar, SECTORS, type GmailFolder, type SidebarLabel } from "./gmail-sidebar";
+import type { OutreachEngineHealth } from "@/lib/gmail/engine-status.ts";
 import { GmailActionBar, type SelectionState } from "./gmail-action-bar";
 import { GmailThreadRow } from "./gmail-thread-row";
 import { GmailReadingPane } from "./gmail-reading-pane";
-import { cancelScheduledEmail } from "@/app/clients/[id]/outreach-actions";
+import { cancelScheduledEmail, discardEmailDraft, rescheduleEmail, scheduleReviewedEmail, sendReviewedEmail } from "@/app/clients/[id]/outreach-actions";
 import { GmailComposeModal } from "./gmail-compose-modal";
+import type {
+  ComposerSnapshot,
+  PendingDiscardRequest,
+  PendingSendRequest,
+} from "./gmail-compose-modal";
 import { emailHtmlToPlainText } from "@/lib/outreach/email-html";
 import { BrandSearchBar } from "@/components/brand/search-bar";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import {
   PRIORITY_SCORE_FILTERS,
   SECTOR_FILTER_OPTIONS,
@@ -72,14 +76,18 @@ import {
   ORGANISATION_TYPES,
   formatOrganisationType,
 } from "@/lib/organisation-format";
+import {
+  isClosedPipelineStatus,
+  isFollowUpExcludedPipelineStatus,
+  parseCategoryTabParam,
+  type InboxCategoryTab,
+} from "@/lib/inbox/category-tabs.ts";
 
-export type GmailCategoryTab =
-  | "primary"
-  | "inbound"
-  | "awaiting"
-  | "followup"
-  | "starred"
-  | "sent";
+/** Kept for existing importers; the vocabulary lives in
+    @/lib/inbox/category-tabs.ts so the server page can derive it too. The
+    `sent` member is unrendered (no tab shows it) but kept so the filter's dead
+    branch still typechecks until it is removed. */
+export type GmailCategoryTab = InboxCategoryTab | "sent";
 
 const PAGE_SIZE = 50;
 
@@ -178,6 +186,10 @@ function daysSilent(thread: InboxThreadView): number {
 
 function isFollowUpDue(thread: InboxThreadView, thresholdDays: number): boolean {
   if (thread.status !== "awaiting" && thread.status !== "sent") return false;
+  // Decided and parked outcomes never count, however silent: nudging a
+  // converted — or deliberately parked — client contradicts the decision.
+  // `no_response` stays eligible, matching the dashboard engine.
+  if (isFollowUpExcludedPipelineStatus(thread.outreachStatus)) return false;
   return daysSilent(thread) >= thresholdDays;
 }
 
@@ -253,6 +265,14 @@ type ComposeWindow = {
   minimised: boolean;
 };
 
+/** Fail-closed default when the page omits engineHealth: every row reads
+    unconfigured (X), never a lie about a check that never ran. */
+const DEFAULT_ENGINE_HEALTH: OutreachEngineHealth = {
+  transport: { status: "unconfigured", sender: null, detail: "Not checked." },
+  replySync: { status: "unconfigured", detail: "Not checked." },
+  scheduledSend: { status: "unconfigured", detail: "Not checked." },
+};
+
 /** Two fit beside the sidebar on a laptop; a third does not. */
 const MAX_EXPANDED_COMPOSERS = 2;
 
@@ -262,14 +282,33 @@ const COMPOSER_MINIMISED_WIDTH_PX = 320;
 const COMPOSER_GAP_PX = 12;
 const COMPOSER_EDGE_PX = 32;
 
+/** Gmail-style Undo window: how long a send/schedule/discard waits behind its
+    toast before committing. Dismissing the toast does NOT cancel — only Undo
+    does — and navigating away flushes pendings at once (see the shell). */
+const UNDO_WINDOW_MS = 5000;
+
+/** One shell toast. `actionLabel`/`onAction` turn a confirmation into an Undo
+    toast: the button beside the message that cancels the pending commit. */
+type ShellToast = {
+  key: number;
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+};
+
 export function GmailInboxShell({
-  initialThreads = mockFillThreads(),
+  initialThreads = [],
   initialThreadId,
   initialComposeClientId = null,
+  initialComposeRecipient = null,
+  initialTab = "primary",
+  viewerEmail = null,
+  viewerIsAdmin = false,
   addressableClients,
   initialTags = [],
   followUpDays = DEFAULT_FOLLOW_UP_THRESHOLDS.first,
   initialThreadFlags = [],
+  engineHealth = DEFAULT_ENGINE_HEALTH,
   className = "h-[calc(100vh-1.5rem)]",
 }: {
   initialThreads?: InboxThreadView[];
@@ -277,18 +316,32 @@ export function GmailInboxShell({
   /** Organisation id from ?compose=, opened as an addressed compose window. */
   initialComposeClientId?: string | null;
   /**
+   * On-file address from ?to=, travelling alongside ?compose=. Fallback only:
+   * the directory hit wins whenever the id resolves (primary contact first),
+   * so addressable clients open exactly as before; this covers the ids the
+   * directory cannot resolve — seed rows are excluded from it by design —
+   * which otherwise opened a blank window. Send still needs a resolvable
+   * directory client, so a prefilled pill alone can never send.
+   */
+  initialComposeRecipient?: string | null;
+  /**
+   * The tab the shell mounts on: an explicit ?tab=, else the queue the
+   * deep-linked ?thread= belongs to, else Primary. After mount the tab is
+   * client state, written back to ?tab= on every click, so Back, refresh and
+   * shares all land where the CAM was.
+   */
+  initialTab?: InboxCategoryTab;
+  /** The viewer's login email, for the per-thread status-control gate. */
+  viewerEmail?: string | null;
+  /** Whether the viewer is an admin (same rule as the client record header). */
+  viewerIsAdmin?: boolean;
+  /**
    * Every tag (TAGS) in play across the loaded threads, de-duplicated and
    * name-sorted by the page. Seeds the sidebar's custom-label rows and the
    * compose window's "Add label" picker — the mailbox does not invent a
    * label concept, it shows the client record's tags.
    */
   initialTags?: InboxThreadTag[];
-  /**
-   * The subset of `initialThreads` that came from Supabase rather than the
-   * design fill. Compose can only send to these — their ids are organisation
-   * ids — so it is passed through rather than derived here, where the two
-   * kinds are already merged and indistinguishable by design.
-   */
   /**
    * Every client Compose may address — see `buildAddressableClients`. Distinct
    * from the thread list on purpose: a client with no outreach yet has no
@@ -306,6 +359,13 @@ export function GmailInboxShell({
    * way.
    */
   initialThreadFlags?: InboxThreadStateRow[];
+  /**
+   * Live outreach-engine health from the page's server checks (Gmail
+   * transport, reply-sync and scheduled-send pg_cron jobs). Passed straight
+   * through to the sidebar's status card; fails closed to `unconfigured`
+   * (X, not tick) on every row when the page omits it.
+   */
+  engineHealth?: OutreachEngineHealth;
   className?: string;
 }) {
   const reduceMotion = useReducedMotion();
@@ -351,7 +411,7 @@ export function GmailInboxShell({
     [],
   );
   const [activeFolder, setActiveFolder] = useState<GmailFolder>("inbox");
-  const [activeCategoryTab, setActiveCategoryTab] = useState<GmailCategoryTab>("primary");
+  const [activeCategoryTab, setActiveCategoryTab] = useState<GmailCategoryTab>(initialTab);
   // Unstar inside the Starred tab is not an instant vanish. The row stays put,
   // showing its now-empty star, for a grace beat; then it is dropped from the
   // list and AnimatePresence collapses it out. `graceUnstarIds` is the set
@@ -395,22 +455,70 @@ export function GmailInboxShell({
   const [flagError, setFlagError] = useState<string | null>(null);
   // One-shot confirmations that outlive the window that earned them — a saved
   // draft closes its compose window, which would take a modal-local message
-  // down with it. Bottom-left, auto-dismissed, latest wins.
-  const [toast, setToast] = useState<string | null>(null);
+  // down with it. Bottom-left, auto-dismissed, latest wins. A toast dismisses
+  // only its own key, so a rapid second toast never eats the first one's tail.
+  const [toast, setToast] = useState<ShellToast | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastSeq = useRef(0);
   useEffect(() => {
     return () => {
       if (toastTimer.current) clearTimeout(toastTimer.current);
     };
   }, []);
-  function showToast(message: string) {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToast(message);
-    toastTimer.current = setTimeout(() => {
-      setToast(null);
-      toastTimer.current = null;
-    }, 3500);
+  function dismissToastKey(key: number) {
+    setToast((current) => (current?.key === key ? null : current));
   }
+  function showToast(
+    message: string,
+    opts?: { actionLabel?: string; onAction?: () => void; durationMs?: number },
+  ) {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastSeq.current += 1;
+    const key = toastSeq.current;
+    setToast({ key, message, actionLabel: opts?.actionLabel, onAction: opts?.onAction });
+    toastTimer.current = setTimeout(() => {
+      dismissToastKey(key);
+      toastTimer.current = null;
+    }, opts?.durationMs ?? 3500);
+  }
+  // Pending delayed commits (send / schedule / discard), keyed by toast key so
+  // Undo cancels exactly the action its toast names. Latest toast wins the
+  // display; earlier pendings still commit on their own timers.
+  const pendingCommits = useRef(
+    new Map<number, { commit: () => void; timer: ReturnType<typeof setTimeout> }>(),
+  );
+  function stagePending(commit: () => void): number {
+    toastSeq.current += 1;
+    const key = toastSeq.current;
+    const timer = setTimeout(() => {
+      pendingCommits.current.delete(key);
+      commit();
+    }, UNDO_WINDOW_MS);
+    pendingCommits.current.set(key, { commit, timer });
+    return key;
+  }
+  function showUndoToast(key: number, message: string, snapshot: ComposerSnapshot) {
+    showToast(message, {
+      actionLabel: "Undo",
+      onAction: () => undoPending(key, snapshot),
+      durationMs: UNDO_WINDOW_MS,
+    });
+  }
+  // Undo windows must not die with the screen: navigating away mid-window
+  // commits every pending action at once, so an email never silently
+  // never-sends and a discard never silently un-discards. The map is a ref,
+  // so this subscribes once and only ever fires on a real unmount (an empty
+  // map makes it a no-op, including under StrictMode's mount simulation).
+  useEffect(() => {
+    const pending = pendingCommits.current;
+    return () => {
+      pending.forEach(({ timer, commit }) => {
+        clearTimeout(timer);
+        commit();
+      });
+      pending.clear();
+    };
+  }, []);
   // The mailbox's custom labels ARE tags (TAGS/ORG_TAGS). Seeded from the
   // page's server read and grown in place when the sidebar's + creates one, so
   // a new tag shows without a full refresh. A refresh re-seeds it (below).
@@ -423,15 +531,35 @@ export function GmailInboxShell({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // Active thread ID initialized from props, never from window during SSR/initial render
   const [activeThreadId, setActiveThreadId] = useState<string | null>(initialThreadId ?? null);
+  // A link to /inbox?thread=… followed while the mailbox is already open (a
+  // notification, a client record) no longer remounts the shell — see the note
+  // where page.tsx renders it — so the new param is picked up here. Only a new
+  // thread id acts: the shell's own URL sync hands back the thread already
+  // open, and a param that went away means a thread was closed here, not a
+  // request to close one.
+  const [seenThreadParam, setSeenThreadParam] = useState<string | null>(initialThreadId ?? null);
+  if ((initialThreadId ?? null) !== seenThreadParam) {
+    setSeenThreadParam(initialThreadId ?? null);
+    if (initialThreadId) setActiveThreadId(initialThreadId);
+  }
   // Threads whose bodies are already in flight, so re-opening one mid-fetch
   // does not fire a second request for the same conversation.
   const inflightRef = useRef(new InflightRequests());
+  // Fetched bodies, by thread, so a reseed never blanks the open pane (see
+  // the activeThread memo below). Warmed whenever a merge lands bodies and
+  // pruned for threads that left the list — a ref rather than state, because
+  // the pane reads it only as a fallback and it must never render by itself.
+  const messageCacheRef = useRef(new Map<string, InboxThreadView["messages"]>());
 
   // Sync state on popstate (browser back/forward button)
   useEffect(() => {
     const handlePopState = () => {
-      const thread = new URLSearchParams(window.location.search).get("thread");
-      setActiveThreadId(thread);
+      const params = new URLSearchParams(window.location.search);
+      setActiveThreadId(params.get("thread"));
+      const tab = parseCategoryTabParam(params.get("tab"));
+      // An entry without a tab (old links, back past the first click) leaves
+      // the current tab alone rather than yanking it to Primary.
+      if (tab) setActiveCategoryTab(tab);
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
@@ -502,18 +630,37 @@ export function GmailInboxShell({
   /**
    * ?compose=<organisation id> arrives from the client record's "Write to this
    * client" link. Resolved against the addressable directory so the window
-   * opens with a real recipient already saved rather than a raw id; an id that
-   * matches nothing the viewer can email opens a blank window instead of
-   * silently doing nothing.
+   * opens with a real recipient already saved rather than a raw id — the page
+   * tops the directory up with the named client when it is missing from it,
+   * so this usually hits. An id that still matches nothing falls back to the
+   * ?to= address the record sent along, and only opens blank when neither has
+   * an address.
    */
+  const openedComposeClientId = useRef<string | null>(null);
   useEffect(() => {
     if (!initialComposeClientId) return;
+    // Strict Mode double-invokes mount effects, and every router.refresh
+    // passes the same param back in; openComposer's dedupe only matches on
+    // draftId, which is null here, so guard on the param or it opens again.
+    if (openedComposeClientId.current === initialComposeClientId) return;
+    openedComposeClientId.current = initialComposeClientId;
     const client = addressableClients?.find((c) => c.id === initialComposeClientId);
-    openComposer({ draftId: null, recipient: client?.primaryContact?.email ?? undefined });
-    // Deliberately once per mount: the page remounts on a new ?compose= (its
-    // key includes the param), so this must not reopen on every render.
+    const recipient =
+      client?.primaryContact?.email?.trim() || initialComposeRecipient?.trim() || undefined;
+    openComposer({ draftId: null, recipient });
+    // ?compose= is a one-time instruction, not a state of the mailbox. Left in
+    // the URL it reopened a compose window on reload, and — while the shell
+    // was keyed on it — on any refresh after opening a thread.
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("compose") || url.searchParams.has("to")) {
+      url.searchParams.delete("compose");
+      url.searchParams.delete("to");
+      window.history.replaceState(null, "", url);
+    }
+    // Keyed on the param: a later "Write to this client" link for another
+    // client arrives as a new value without remounting the shell.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialComposeClientId]);
 
   const composerOffsets = useMemo(() => {
     const offsets: number[] = [];
@@ -627,12 +774,13 @@ export function GmailInboxShell({
         // rather than misleading.
         if (thread.folder === "trash") return false;
       } else if (activeFolder === "sent") {
-        if (thread.folder === "trash" || thread.folder === "scheduled") return false;
-        const hasSent =
-          thread.folder === "sent" ||
-          thread.status === "sent" ||
-          thread.messages.some((m) => !m.isFromClient);
-        if (!hasSent) return false;
+        if (thread.folder === "trash" || thread.folder === "scheduled" || thread.folder === "drafts") return false;
+        // Sent keeps a thread forever once it has an outbound email, same as
+        // Gmail's own Sent folder — a client reply changes `status` (who sent
+        // last) but must not evict the thread from here. `hasSentMessage` is
+        // fixed at build time from the event stream, unlike `messages`, which
+        // is empty for every list-level thread until it is opened.
+        if (!thread.hasSentMessage) return false;
       } else if (activeFolder === "scheduled") {
         if (thread.folder !== "scheduled") return false;
       } else if (activeFolder === "drafts") {
@@ -640,9 +788,9 @@ export function GmailInboxShell({
       } else if (activeFolder === "trash") {
         if (thread.folder !== "trash") return false;
       } else {
-        // Inbox folder: exclude trash, and anything still waiting on its
-        // scheduled send — it has not been sent yet, so it is not a thread.
-        if (thread.folder === "trash" || thread.folder === "scheduled") return false;
+        // Inbox folder: only active conversation threads belong here —
+        // exclude drafts, scheduled sends, and trash.
+        if (thread.folder !== "inbox") return false;
       }
 
       // 2. Sector / Label filter (multi-select / additive). A built-in sector
@@ -651,11 +799,16 @@ export function GmailInboxShell({
       if (!threadMatchesLabels(thread, appliedLabels)) return false;
 
       // 3. Category Tab filter (only applies inside Inbox when no label filter is active)
+      // Triage queues retire human-closed outcomes (converted, hard_no,
+      // soft_no): a decided engagement stops nagging, while staying readable
+      // in Primary, Sent and search.
       if (activeFolder === "inbox" && appliedLabels.size === 0) {
         if (activeCategoryTab === "inbound") {
           if (thread.status !== "replied") return false;
+          if (isClosedPipelineStatus(thread.outreachStatus)) return false;
         } else if (activeCategoryTab === "awaiting") {
           if (thread.status !== "awaiting") return false;
+          if (isClosedPipelineStatus(thread.outreachStatus)) return false;
         } else if (activeCategoryTab === "followup") {
           if (!isFollowUpDue(thread, followUpDays)) return false;
         } else if (activeCategoryTab === "starred") {
@@ -706,15 +859,20 @@ export function GmailInboxShell({
     [threads, followUpDays]
   );
   // Category-tab counts mirror each tab's own filter (see the category filter
-  // block in filteredThreads): the Inbox view, trash/scheduled excluded.
-  const inboxScoped = (t: InboxThreadView) =>
-    t.folder !== "trash" && t.folder !== "scheduled";
+  // block in filteredThreads): only active inbox threads.
+  const inboxScoped = (t: InboxThreadView) => t.folder === "inbox";
   const inboundCount = useMemo(
-    () => threads.filter((t) => inboxScoped(t) && t.status === "replied").length,
+    () =>
+      threads.filter(
+        (t) => inboxScoped(t) && t.status === "replied" && !isClosedPipelineStatus(t.outreachStatus),
+      ).length,
     [threads]
   );
   const awaitingCount = useMemo(
-    () => threads.filter((t) => inboxScoped(t) && t.status === "awaiting").length,
+    () =>
+      threads.filter(
+        (t) => inboxScoped(t) && t.status === "awaiting" && !isClosedPipelineStatus(t.outreachStatus),
+      ).length,
     [threads]
   );
   const categoryBadgeCounts = useMemo<CategoryBadgeCounts>(
@@ -735,9 +893,8 @@ export function GmailInboxShell({
         (t) =>
           t.folder !== "trash" &&
           t.folder !== "scheduled" &&
-          (t.folder === "sent" ||
-            t.status === "sent" ||
-            t.messages.some((m) => !m.isFromClient))
+          t.folder !== "drafts" &&
+          t.hasSentMessage
       ).length,
     [threads]
   );
@@ -769,11 +926,50 @@ export function GmailInboxShell({
     return "some";
   }, [paginatedThreads, selectedIds]);
 
-  // Active Thread
-  const activeThread = useMemo(
-    () => threads.find((t) => t.id === activeThreadId),
-    [threads, activeThreadId]
-  );
+  // Active Thread — with stale-while-revalidate bodies. Every server action
+  // (mark-read on open, star, trash…) re-runs the page, which hands down
+  // fresh threads with `messages: []` (bodies are per-thread fetches), and the
+  // reseed above swaps them in. Without this the open pane would blank for one
+  // fetch roundtrip on every one of those writes — the emails visibly vanish
+  // and reappear. While the fresh fetch is in flight the pane keeps showing
+  // the previous bodies; the hydrate effect below still sees the thread's OWN
+  // messages as empty, so it refetches and the display always converges to
+  // fresh. Pass-through when hydrated, so the common case keeps a stable ref.
+  const activeThread = useMemo(() => {
+    const thread = threads.find((t) => t.id === activeThreadId);
+    if (!thread || thread.messages.length > 0) return thread;
+    const cached = messageCacheRef.current.get(thread.id);
+    if (!cached || cached.length === 0) return thread;
+    return { ...thread, messages: cached };
+  }, [threads, activeThreadId]);
+
+  // Warms and prunes the body cache above: every merge that lands bodies is
+  // kept, and threads that left the list stop being kept. An effect (not
+  // render) so StrictMode's double render can never corrupt it — and it only
+  // maintains, so the first paint after a reseed still finds the previous
+  // bodies warm.
+  useEffect(() => {
+    const cache = messageCacheRef.current;
+    const live = new Set<string>();
+    for (const thread of threads) {
+      live.add(thread.id);
+      if (thread.messages.length > 0) cache.set(thread.id, thread.messages);
+    }
+    for (const id of [...cache.keys()]) {
+      if (!live.has(id)) cache.delete(id);
+    }
+  }, [threads]);
+
+  // Same gate as the client record header (record-header.tsx: `isAdmin ||
+  // isSelf`): the owning CAM or an admin may move the pipeline status from
+  // the reading pane. The thread carries the owner's email, not their user
+  // id, so this matches on address; the set_outreach_status RPC re-checks
+  // server-side, so a stale address fails closed on save, never on read.
+  const viewerEmailLower = viewerEmail?.trim().toLowerCase() ?? "";
+  const canSetStatusForThread = (thread: InboxThreadView): boolean =>
+    viewerIsAdmin ||
+    (viewerEmailLower !== "" &&
+      thread.camOwner.email.trim().toLowerCase() === viewerEmailLower);
 
   // Keep `?thread=` in step with what is open, so the URL is always a link to
   // the current view — copyable, and what a new tab reads on load. `replace`,
@@ -795,8 +991,22 @@ export function GmailInboxShell({
 
   const threadHref = (threadId: string) => `?thread=${encodeURIComponent(threadId)}`;
 
+  // Keep `?tab=` in step with the tab bar, next to the `?thread=` sync above:
+  // opening threads uses `replace`, not `push`, so the tab is what makes
+  // Back, refresh and a copied URL land where the CAM was rather than on
+  // Primary. A separate effect from the thread one so the two params never
+  // fight over the same replaceState.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("tab") !== activeCategoryTab) {
+      url.searchParams.set("tab", activeCategoryTab);
+      window.history.replaceState(null, "", url);
+    }
+  }, [activeCategoryTab]);
+
   // Owner options for the search panel, derived from whoever holds threads
-  // right now — the mock set has no team endpoint, so the data is the list.
+  // right now — there is no separate team endpoint, so the data is the list.
   const ownerOptions = useMemo(() => {
     const seen = new Map<string, string>();
     threads.forEach((thread) => {
@@ -1031,10 +1241,11 @@ export function GmailInboxShell({
 
   /**
    * The reading pane's scheduled-send controls. Cancel returns the row to
-   * draft; edit cancels first (a schedule is a commitment to exact content —
-   * editing in place would break that) and reopens the text in Compose. Both
-   * resolve with an error to show or null: success closes the pane and
-   * refetches, since the thread just changed folders.
+   * draft, and success closes the pane and refetches, since the thread just
+   * changed folders. Reschedule and in-place edit keep the thread open — it is
+   * still scheduled — and only refetch. Editing no longer cancels first and
+   * reopens Compose: closing that window left the email silently unscheduled.
+   * See rescheduleEmail / updateScheduledEmail for how the change stays safe.
    */
   async function handleCancelScheduled(
     thread: InboxThreadView,
@@ -1047,25 +1258,20 @@ export function GmailInboxShell({
     return null;
   }
 
-  async function handleEditScheduled(
+  async function handleRescheduleScheduled(
     thread: InboxThreadView,
     messageId: string,
+    when: Date,
   ): Promise<string | null> {
-    const entry = thread.messages.find((message) => message.id === messageId);
-    const result = await cancelScheduledEmail({ organisationId: thread.id, messageId });
-    if (!result.ok) return result.message;
-    openComposer({
-      draftId: messageId,
-      recipient: thread.primaryContact?.email ?? undefined,
-      subject: thread.subject,
-      body: entry?.body ? emailHtmlToPlainText(entry.body) : undefined,
-      newsSource: entry?.newsSource,
-      newsHook: entry?.newsHook,
-      newsUrl: entry?.newsUrl,
+    const result = await rescheduleEmail({
+      organisationId: thread.id,
+      messageId,
+      scheduledAt: when.toISOString(),
     });
-    setActiveThreadId(null);
+    // A failure may still have changed the row (put back, or left a draft), so
+    // refresh either way and let the thread show what is true now.
     router.refresh();
-    return null;
+    return result.ok ? null : result.message;
   }
 
   // Bulk Handlers
@@ -1165,11 +1371,9 @@ export function GmailInboxShell({
    *
    * The list query deliberately does not select `outreach_messages.body` —
    * pulling every email's HTML for every organisation would move megabytes on
-   * every page load, to render subjects and one-line snippets. A real thread
+   * every page load, to render subjects and one-line snippets. A thread
    * therefore reaches the browser with `messages: []`, and an empty `messages`
-   * is exactly the signal that it has not been hydrated yet. Mock fill arrives
-   * with its conversation already attached, so it never asks the server for
-   * one that does not exist.
+   * is exactly the signal that it has not been hydrated yet.
    */
   async function hydrate(thread: InboxThreadView): Promise<InboxThreadView | null> {
     // Callers that need the bodies inline (resumeDraft) read the return value,
@@ -1209,61 +1413,105 @@ export function GmailInboxShell({
     if (thread) void hydrate(thread);
   }, [activeThreadId, threads]);
 
-  function handleSendNewOutreach(message: {
-    to: string;
-    subject: string;
-    body: string;
-    /** ISO instant when a scheduled send is due; absent means send now. */
-    scheduledFor?: string;
-  }) {
-    const now = new Date().toISOString();
-    const isScheduled = Boolean(message.scheduledFor);
-    const newThread: InboxThreadView = {
-      id: `new-thread-${Date.now()}`,
-      orgName: message.to.includes("@") ? message.to.split("@")[0].toUpperCase() : message.to,
-      orgType: "Partner Organisation",
-      city: "London",
-      country: "United Kingdom",
-      sector: "Charities & NGOs",
-      labelColor: "#0ea5e9",
-      primaryContact: {
-        name: message.to,
-        role: "Primary Contact",
-        email: message.to,
-      },
-      camOwner: {
-        name: "Ada Lovelace",
-        email: "ada.lovelace@180dc.org",
-      },
-      status: "sent",
-      subject: message.subject,
-      snippet: message.body.slice(0, 120),
-      lastActivityAt: now,
-      isRead: true,
-      isStarred: false,
-      isImportant: false,
-      folder: isScheduled ? "scheduled" : "sent",
-      scheduledFor: message.scheduledFor,
-      attachments: [],
-      notesCount: 0,
-      handoversCount: 0,
-      tags: [],
-      messages: [
-        {
-          id: `msg-${Date.now()}`,
-          senderName: "Ada Lovelace",
-          senderEmail: "ada.lovelace@180dc.org",
-          recipientName: message.to,
-          recipientEmail: message.to,
-          sentAt: now,
-          subject: message.subject,
-          body: message.body,
-          isFromClient: false,
-        },
-      ],
-    };
+  /**
+   * Cancels one pending commit and reopens its composer from the snapshot.
+   * The draft row was never sent or deleted, so it is still exactly what the
+   * snapshot describes — reopening resumes the same row (windows dedupe on
+   * draftId) and the refresh surfaces it in Drafts.
+   */
+  function undoPending(key: number, snapshot: ComposerSnapshot) {
+    const pending = pendingCommits.current.get(key);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingCommits.current.delete(key);
+    dismissToastKey(key);
+    openComposer({
+      draftId: snapshot.draftId,
+      recipient: snapshot.recipient,
+      subject: snapshot.subject,
+      body: snapshot.body,
+      newsSource: snapshot.newsSource,
+      newsHook: snapshot.newsHook,
+      newsUrl: snapshot.newsUrl,
+    });
+    router.refresh();
+  }
 
-    setServerThreads((prev) => [newThread, ...prev]);
+  /**
+   * Commits a held send: the actual Gmail send (or schedule) behind "Sending…
+   * · Undo". The draft row carries the content; the request carries the exact
+   * HTML captured at Send time. A refused send is not a lost email — the row
+   * is untouched, so the refresh parks it in Drafts and the toast says so.
+   */
+  async function commitSend(request: PendingSendRequest): Promise<void> {
+    try {
+      const input = {
+        organisationId: request.organisationId,
+        messageId: request.messageId,
+        recipient: request.to,
+        subject: request.subject,
+        body: request.bodyHtml,
+        explicitlyApproved: true as const,
+        attachFlyer: request.attachFlyer,
+      };
+      const result = request.scheduledFor
+        ? await scheduleReviewedEmail({ ...input, scheduledAt: request.scheduledFor })
+        : await sendReviewedEmail(input);
+      router.refresh();
+      showToast(
+        result.ok
+          ? request.scheduledFor
+            ? "Message scheduled"
+            : "Message sent"
+          : result.message || "The email could not be sent. The draft was kept.",
+      );
+    } catch {
+      router.refresh();
+      showToast("The network dropped before the email could be sent. The draft was kept.");
+    }
+  }
+
+  /**
+   * Commits a held discard: the audited discard RPC behind "Draft discarded ·
+   * Undo". Null ids mean a compose that never reached the server — nothing to
+   * remove, so the commit is a no-op by design rather than a call that must
+   * fail. A refused delete refreshes (the row is still there) and says so.
+   */
+  async function commitDiscard(request: PendingDiscardRequest): Promise<void> {
+    if (!request.organisationId || !request.messageId) return;
+    try {
+      const result = await discardEmailDraft({
+        organisationId: request.organisationId,
+        messageId: request.messageId,
+      });
+      router.refresh();
+      showToast(result.ok ? "Draft discarded" : result.message);
+    } catch {
+      router.refresh();
+      showToast("The draft could not be discarded. Refresh and try again.");
+    }
+  }
+
+  /**
+   * A prepared send arrives here and waits out the Undo window instead of
+   * sending at once — Gmail-style delayed commit. The composer is already
+   * closed; the toast is the only thing standing between the click and the
+   * Gmail API. Real data throughout: the commit refreshes from Supabase, so
+   * the list shows the row the server actually wrote.
+   */
+  function handleSendRequest(request: PendingSendRequest) {
+    const key = stagePending(() => void commitSend(request));
+    showUndoToast(key, request.scheduledFor ? "Scheduling…" : "Sending…", request.snapshot);
+  }
+
+  /**
+   * A discard arrives here and waits out the Undo window instead of deleting
+   * at once. The row still exists until the commit fires, which is what makes
+   * Undo a reopen rather than a resurrection.
+   */
+  function handleDiscardRequest(request: PendingDiscardRequest) {
+    const key = stagePending(() => void commitDiscard(request));
+    showUndoToast(key, "Draft discarded", request.snapshot);
   }
 
   return (
@@ -1272,7 +1520,7 @@ export function GmailInboxShell({
           mirrors the sidebar's width, so the search starts where the surface
           starts and the sidebar's Inbox row meets the surface top. */}
       <div className="flex items-center gap-2 shrink-0">
-        <div className="w-56 shrink-0 pr-3">
+        <div className="w-64 shrink-0 pr-3">
           <div className="px-1">
             <button
               onClick={() => openComposer({ draftId: null })}
@@ -1375,6 +1623,12 @@ export function GmailInboxShell({
           setSearchSectorLabels(new Set());
           setActiveFolder(folder);
           setActiveThreadId(null);
+          // A folder switch is a new list, not a new page of the old one: the
+          // inbox's page-2 offset must not follow into Starred (or vice versa),
+          // and a checkbox selection must not follow either — bulk actions act
+          // on selectedIds wherever they were picked.
+          setPageIndex(0);
+          setSelectedIds(new Set());
           listRef.current?.scrollTo({ top: 0 });
         }}
         selectedLabels={selectedLabels}
@@ -1389,13 +1643,14 @@ export function GmailInboxShell({
         labelCounts={labelCounts}
         customLabels={customLabels}
         onCreateLabel={handleCreateLabel}
+        engineHealth={engineHealth}
       />
 
       {/* Right Column: the mail surface fills the content row. */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      <div className="relative flex-1 flex flex-col min-w-0 min-h-0">
       {/* Main Mail Surface (borderless, shadowless) */}
       <div
-        className={`flex-1 flex flex-col min-w-0 min-h-0 bg-white rounded-t-panel overflow-hidden transition-[border-radius] duration-200 ${
+        className={`relative flex-1 flex flex-col min-w-0 min-h-0 bg-white rounded-t-panel overflow-hidden transition-[border-radius] duration-200 ${
           activeThread || isAtBottom ? "rounded-b-panel" : "rounded-b-none"
         }`}
       >
@@ -1404,6 +1659,7 @@ export function GmailInboxShell({
           <GmailReadingPane
             thread={activeThread}
             onBack={() => setActiveThreadId(null)}
+            canSetStatus={canSetStatusForThread(activeThread)}
             onToggleStar={handleToggleStar}
             onDelete={handleDeleteThread}
             onMarkUnread={(id) => {
@@ -1411,7 +1667,9 @@ export function GmailInboxShell({
               setActiveThreadId(null);
             }}
             onCancelScheduled={(messageId) => handleCancelScheduled(activeThread, messageId)}
-            onEditScheduled={(messageId) => handleEditScheduled(activeThread, messageId)}
+            onRescheduleScheduled={(messageId, when) => handleRescheduleScheduled(activeThread, messageId, when)}
+            onScheduledEdited={() => router.refresh()}
+            onSend={handleSendRequest}
           />
         ) : (
           <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -1471,51 +1729,87 @@ export function GmailInboxShell({
 
             {/* Gmail Category Tabs (Only on Inbox folder when no label filters are active) */}
             {activeFolder === "inbox" && appliedLabels.size === 0 && (
-              <div
-                role="tablist"
-                aria-label="Inbox categories"
-                className="flex items-center gap-1 border-b border-rule-soft px-1 text-xs select-none"
-              >
-                {CATEGORY_TABS.map((tab) => {
-                  const TabIcon = tab.icon;
-                  const isSelected = activeCategoryTab === tab.id;
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={isSelected}
-                      onClick={() => {
-                        if (activeCategoryTab !== tab.id) {
-                          setActiveCategoryTab(tab.id);
-                          setPageIndex(0);
-                        }
-                        listRef.current?.scrollTo({ top: 0 });
-                      }}
-                      className={`relative flex items-center gap-2.5 px-6 py-3 font-semibold font-body text-sm transition-colors cursor-pointer ${
-                        isSelected
-                          ? tab.activeTextClass
-                          : "text-dim hover:bg-paper hover:text-ink"
-                      }`}
-                    >
-                      <TabIcon className={`h-4 w-4 ${tab.iconClass ?? ""}`} />
-                      <span>{tab.label}</span>
-                      {tab.renderBadge?.(categoryBadgeCounts)}
-                      {isSelected && (
-                        <motion.span
-                          layoutId="activeCategoryTabIndicator"
-                          aria-hidden="true"
-                          className={`absolute inset-x-0 bottom-0 h-[3px] rounded-t-full ${tab.indicatorBg}`}
-                          transition={
-                            reduceMotion
-                              ? { duration: 0 }
-                              : { type: "spring", stiffness: 450, damping: 32 }
+              <div className="flex items-center justify-between border-b border-rule-soft px-1 text-xs select-none">
+                <div
+                  role="tablist"
+                  aria-label="Inbox categories"
+                  className="flex items-center gap-1"
+                >
+                  {CATEGORY_TABS.map((tab) => {
+                    const TabIcon = tab.icon;
+                    const isSelected = activeCategoryTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={isSelected}
+                        onClick={() => {
+                          if (activeCategoryTab !== tab.id) {
+                            setActiveCategoryTab(tab.id);
+                            setPageIndex(0);
                           }
-                        />
-                      )}
-                    </button>
-                  );
-                })}
+                          listRef.current?.scrollTo({ top: 0 });
+                        }}
+                        className={`relative flex items-center gap-2.5 px-6 py-3 font-semibold font-body text-sm transition-colors cursor-pointer ${
+                          isSelected
+                            ? tab.activeTextClass
+                            : "text-dim hover:bg-paper hover:text-ink"
+                        }`}
+                      >
+                        <TabIcon className={`h-4 w-4 ${tab.iconClass ?? ""}`} />
+                        <span>{tab.label}</span>
+                        {tab.renderBadge?.(categoryBadgeCounts)}
+                        {isSelected && (
+                          <motion.span
+                            layoutId="activeCategoryTabIndicator"
+                            aria-hidden="true"
+                            className={`absolute inset-x-0 bottom-0 h-[3px] rounded-t-full ${tab.indicatorBg}`}
+                            transition={
+                              reduceMotion
+                                ? { duration: 0 }
+                                : { type: "spring", stiffness: 450, damping: 32 }
+                            }
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="pr-3 flex items-center">
+                  <InfoTooltip
+                    side="bottom"
+                    align="end"
+                    sideOffset={8}
+                    label="About inbox triage categories"
+                    title="Inbox Triage Guide"
+                    triggerClassName="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                    contentClassName="w-80 max-w-[22rem] p-3 text-[12px] space-y-2.5"
+                    content={
+                      <div className="space-y-2 pt-1 text-[11.5px] leading-snug">
+                        <div>
+                          <span className="font-semibold text-emerald-400">Inbound Replies:</span>{" "}
+                          <span className="text-white/85">
+                            The client sent the newest message. Action is needed from our team to respond.
+                          </span>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-amber-400">Awaiting Response:</span>{" "}
+                          <span className="text-white/85">
+                            We sent the latest reply in an active thread. We are waiting for the client to reply back.
+                          </span>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-rose-400">Follow-up Due:</span>{" "}
+                          <span className="text-white/85">
+                            We sent the last email, but the client has remained silent past the follow-up threshold (time to nudge).
+                          </span>
+                        </div>
+                      </div>
+                    }
+                  />
+                </div>
               </div>
             )}
 
@@ -1525,7 +1819,14 @@ export function GmailInboxShell({
               onScroll={handleListScroll}
               className="flex-1 min-h-0 overflow-y-auto"
             >
-              <AnimatePresence mode="wait" initial={false}>
+              {/* No exit animation and no mode="wait" on purpose: the old list must
+                  unmount the same tick the folder/tab key changes. With an exit
+                  fade the previous folder's threads lingered ~160ms inside the
+                  new folder — an empty Starred briefly showing the inbox list —
+                  which reads as wrong data rather than motion polish. The new
+                  list still fades in; row-level delete animations below are
+                  untouched. */}
+              <AnimatePresence initial={false}>
                 <motion.div
                   key={
                     activeFolder === "inbox" && appliedLabels.size === 0
@@ -1534,7 +1835,6 @@ export function GmailInboxShell({
                   }
                   initial={reduceMotion ? false : { opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={reduceMotion ? undefined : { opacity: 0, y: -6 }}
                   transition={{ duration: 0.16, ease: "easeOut" }}
                   className="min-h-full"
                 >
@@ -1637,34 +1937,44 @@ export function GmailInboxShell({
           </div>
         )}
         </div>
-      </div>
-      </div>
 
-      {/* Floating compose windows, stacked bottom-right like Gmail's. */}
-      <AnimatePresence>
-        {toast && (
-          <motion.div
-            key="shell-toast"
-            role="status"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 12 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className="fixed bottom-5 left-5 z-[80] flex items-center gap-2 rounded-xl bg-ink px-4 py-2.5 text-sm font-medium text-white shadow-[0_18px_40px_-16px_rgba(15,23,42,0.6)]"
-          >
-            <Check className="h-4 w-4 text-emerald-300" aria-hidden="true" />
-            {toast}
-            <button
-              type="button"
-              aria-label="Dismiss"
-              onClick={() => setToast(null)}
-              className="ml-1 rounded-full p-0.5 text-white/60 transition-colors hover:text-white"
+        {/* Inline toast — anchored at the bottom-left of the mail surface,
+            not the viewport, so it sits below the category tabs / thread list. */}
+        <AnimatePresence>
+          {toast && (
+            <motion.div
+              key="shell-toast"
+              role="status"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="absolute bottom-5 left-5 z-[80] flex items-center gap-2 rounded-xl bg-ink px-4 py-2.5 text-sm font-medium text-white shadow-[0_18px_40px_-16px_rgba(15,23,42,0.6)]"
             >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              <Check className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+              {toast.message}
+              {toast.actionLabel && toast.onAction && (
+                <button
+                  type="button"
+                  onClick={toast.onAction}
+                  className="ml-1 cursor-pointer rounded-full px-2 py-0.5 text-[13px] font-semibold text-amber-300 transition-colors hover:bg-white/10 hover:text-amber-200"
+                >
+                  {toast.actionLabel}
+                </button>
+              )}
+              <button
+                type="button"
+                aria-label="Dismiss"
+                onClick={() => setToast(null)}
+                className="ml-1 rounded-full p-0.5 text-white/60 transition-colors hover:text-white"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+      </div>
       {composers.map((composer, index) => (
         <GmailComposeModal
           key={composer.key}
@@ -1683,8 +1993,9 @@ export function GmailInboxShell({
           directory={addressableClients}
           tags={tags}
           assignedTagsByClientId={tagsByClientId}
-          onSend={handleSendNewOutreach}
+          onSend={handleSendRequest}
           onDraftSaved={() => showToast("Draft saved")}
+          onDiscardRequest={handleDiscardRequest}
         />
       ))}
     </div>

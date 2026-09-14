@@ -15,7 +15,12 @@ import { assignOwnerRpcFailure } from "@/lib/ownership";
  */
 
 const Body = z.object({
-  ownerId: z.uuid(),
+  ownerId: z.union([
+    z.string().uuid(),
+    z.null(),
+    z.literal("").transform(() => null),
+    z.literal("unassigned").transform(() => null),
+  ]),
   reason: z.string().trim().min(1, "A reason is required so the handover can be understood later."),
 });
 
@@ -45,7 +50,7 @@ export async function POST(
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? "Choose a CAM and give a reason." },
+      { error: parsed.error.issues[0]?.message ?? "Choose a team member and give a reason." },
       { status: 400 },
     );
   }

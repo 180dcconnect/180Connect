@@ -328,6 +328,32 @@ const COUNTRY_TO_ISO: Record<string, string> = {
   zimbabwe: "ZW",
 };
 
+export type CountryOption = { code: string; name: string };
+
+/**
+ * Every country this module knows, as a picker list: one entry per ISO code,
+ * named in British English, the United Kingdom first and the rest by name.
+ *
+ * Built from the codes above rather than a second hand-kept list, so the picker
+ * and the flag lookup can never disagree about which countries exist. Names come
+ * from `Intl.DisplayNames`; a code it cannot name (an ISO user-assigned code) is
+ * left out rather than shown as two bare letters.
+ */
+export const COUNTRY_OPTIONS: readonly CountryOption[] = (() => {
+  const names =
+    typeof Intl !== "undefined" && "DisplayNames" in Intl
+      ? new Intl.DisplayNames(["en-GB"], { type: "region" })
+      : null;
+  const codes = new Set(Object.values(COUNTRY_TO_ISO));
+  codes.add("GB");
+  return Array.from(codes)
+    .map((code) => ({ code, name: names?.of(code) ?? code }))
+    .filter((option) => option.name !== option.code)
+    .sort((a, b) =>
+      a.code === "GB" ? -1 : b.code === "GB" ? 1 : a.name.localeCompare(b.name, "en-GB"),
+    );
+})();
+
 /**
  * Returns the ISO 3166-1 alpha-2 code for a country name if recognized.
  */

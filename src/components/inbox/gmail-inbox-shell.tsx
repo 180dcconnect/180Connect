@@ -10,6 +10,7 @@ import {
   useTransition,
 } from "react";
 import { useRouter } from "next/navigation";
+import type { AppRole } from "@/lib/auth/permissions";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   Inbox,
@@ -304,6 +305,8 @@ export function GmailInboxShell({
   initialTab = "primary",
   viewerEmail = null,
   viewerIsAdmin = false,
+  viewerId = null,
+  viewerRole = null,
   addressableClients,
   initialTags = [],
   followUpDays = DEFAULT_FOLLOW_UP_THRESHOLDS.first,
@@ -335,6 +338,9 @@ export function GmailInboxShell({
   viewerEmail?: string | null;
   /** Whether the viewer is an admin (same rule as the client record header). */
   viewerIsAdmin?: boolean;
+  /** The viewer's user id and role, for the reading pane's ownership banner. */
+  viewerId?: string | null;
+  viewerRole?: AppRole | null;
   /**
    * Every tag (TAGS) in play across the loaded threads, de-duplicated and
    * name-sorted by the page. Seeds the sidebar's custom-label rows and the
@@ -1670,6 +1676,9 @@ export function GmailInboxShell({
             onRescheduleScheduled={(messageId, when) => handleRescheduleScheduled(activeThread, messageId, when)}
             onScheduledEdited={() => router.refresh()}
             onSend={handleSendRequest}
+            viewerId={viewerId}
+            viewerRole={viewerRole}
+            onOwnershipChanged={() => router.refresh()}
           />
         ) : (
           <div className="flex-1 flex flex-col min-w-0 min-h-0">

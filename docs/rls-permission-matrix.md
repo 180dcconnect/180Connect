@@ -1222,6 +1222,17 @@ publication for live bell-panel delivery; publication membership grants nothing
 on its own — delivery is still filtered by the SELECT policy per subscriber
 (same mechanism as §3.8 / F075).
 
+**Producer: ownership change**
+(`20261004090000_notify_former_owner_on_reassignment.sql`). An `AFTER UPDATE OF
+owner_id` trigger on `organisations`, `notify_on_owner_change`, calls
+`create_notification` for the *former* owner with type
+`client_ownership_changed`, linking to `/clients/<id>`. It sits on the table
+rather than inside `reassign_ownership` so every audited door that moves
+`owner_id` (assign form, bulk assign, offboarding, request approval, the inbox
+banner's admin take-over) produces it. Claims of unowned clients tell nobody;
+`create_notification` skips deactivated former owners (offboarding) and
+self-moves. EXECUTE is revoked from every interactive role.
+
 **Producer: reply notifications** (F133 #128/#510 + F174 #170). The producer
 is F133's `notify_on_reply_event` AFTER INSERT trigger on `reply_events`
 (`supabase/migrations/20260912170300_notify_on_gmail_reply.sql`) — it runs in

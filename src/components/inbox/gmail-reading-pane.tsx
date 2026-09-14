@@ -39,6 +39,8 @@ import { ReplyComposer } from "@/components/outreach/reply-composer";
 import { EmailReviewPanel } from "@/components/outreach/email-review-panel";
 import { ScheduleSendDialog, formatScheduleLong } from "@/components/outreach/schedule-send-dialog";
 import { ThreadNotesDrawer } from "./thread-notes-drawer";
+import { ThreadOwnershipBanner } from "./thread-ownership-banner";
+import type { AppRole } from "@/lib/auth/permissions";
 import type { PendingSendRequest } from "./gmail-compose-modal";
 import { emailHtmlToPlainText, isRichEmailHtml, sanitizeEmailHtml } from "@/lib/outreach/email-html";
 import { StatusSelect } from "@/app/clients/[id]/status-select";
@@ -71,6 +73,15 @@ export type GmailReadingPaneProps = {
   onScheduledEdited?: () => void;
   /** Hands a prepared send to the shell for the delayed-commit Undo window. */
   onSend?: (request: PendingSendRequest) => void;
+  /**
+   * The viewer's user id and role. When both are present and someone else owns
+   * the client, the Reply control is replaced by the ownership banner (admin:
+   * change ownership; CAM: request it). Absent, Reply renders as before.
+   */
+  viewerId?: string | null;
+  viewerRole?: AppRole | null;
+  /** Ownership moved to the viewer from the banner; the shell refreshes. */
+  onOwnershipChanged?: () => void;
 };
 
 function getInitials(name: string): string {
@@ -576,7 +587,14 @@ export function GmailReadingPane({
   onRescheduleScheduled,
   onScheduledEdited,
   onSend,
+  viewerId = null,
+  viewerRole = null,
+  onOwnershipChanged,
 }: GmailReadingPaneProps) {
+  // Unowned threads keep the reply composer's claim-first dialog; only a client
+  // someone else owns swaps Reply for the banner.
+  const ownedByOther =
+    viewerId !== null && viewerRole !== null && thread.ownerId !== null && thread.ownerId !== viewerId;
   // Real conversation messages: drafts are intentions, not history. Drafts
   // belong exclusively in the reply composer, never rendered as sent email
   // cards in the thread history above it.
@@ -1098,6 +1116,15 @@ export function GmailReadingPane({
             to EmailReviewPanel, which is the one component allowed to render
             the approval control (see lib/outreach/human-send-control.test.ts). */}
         <div className="pt-4 print:hidden" ref={replyBoxRef}>
+          {ownedByOther && viewerRole && thread.ownerId ? (
+            <ThreadOwnershipBanner
+              organisationId={thread.id}
+              ownerId={thread.ownerId}
+              ownerName={thread.camOwner.name}
+              viewerRole={viewerRole}
+              onOwnershipChanged={() => onOwnershipChanged?.()}
+            />
+          ) : (
           <AnimatePresence initial={false} mode="wait">
             {!replyOpen ? (
               <motion.button
@@ -1184,6 +1211,7 @@ export function GmailReadingPane({
               </motion.div>
             )}
           </AnimatePresence>
+          )}
         </div>
       </div>
 

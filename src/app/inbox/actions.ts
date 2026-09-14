@@ -1,7 +1,10 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { getCurrentActor } from "@/lib/auth/actor";
 import { reportError } from "@/lib/error-logging";
+import { assignOwnerRpcFailure } from "@/lib/ownership";
+import type { OwnershipRequestStatus } from "@/lib/ownership-requests";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/validation";
 
@@ -102,4 +105,86 @@ export async function applyInboxThreadFlags(
   // a refresh would re-render the whole mailbox on every star. The next
   // navigation or Refresh reads the stored rows.
   return { ok: true };
+}
+
+/**
+ * The inbox ownership banner's admin path: move a client someone else owns to
+ * the admin reading its thread, so they can reply.
+ *
+ * Unlike the flags above, this changes ownership, so it goes through
+ * reassign_ownership — SECURITY DEFINER, re-checks app.is_admin(), writes the
+ * audit_log row. The owner-change trigger notifies the former owner.
+ * `expectedOwnerId` is the owner the thread showed; passed as p_from_user_id it
+ * makes a client that moved in the meantime a skip, not a seizure.
+ */
+export async function takeOverClientOwnership(
+  organisationId: string,
+  expectedOwnerId: string,
+): Promise<InboxThreadFlagResult> {
+  const authorization = await getCurrentActor("client:edit", { route: "/inbox" });
+  if (!authorization.ok) {
+    return { ok: false, message: "Your session has expired. Reload and try again." };
+  }
+  const actor = authorization.actor;
+  if (actor.role !== "admin") {
+    return { ok: false, message: "Only an admin can change a client's owner." };
+  }
+  if (!isUuid(organisationId) || !isUuid(expectedOwnerId)) {
+    return { ok: false, message: "That client could not be found." };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("reassign_ownership", {
+    p_organisation_ids: [organisationId],
+    p_new_owner_id: actor.id,
+    p_reason: "Taken over from the inbox to reply to the client",
+    p_from_user_id: expectedOwnerId,
+  });
+
+  if (error) {
+    await reportError(error, { operation: "inbox.take_over_ownership", organisationId });
+    return { ok: false, message: assignOwnerRpcFailure(error).error };
+  }
+
+  const moved = (data as { organisations_moved?: number } | null)?.organisations_moved ?? 0;
+  if (moved === 0) {
+    return {
+      ok: false,
+      message: "This client's owner changed since you opened the thread. Refresh and try again.",
+    };
+  }
+
+  revalidatePath("/inbox");
+  return { ok: true };
+}
+
+export type MyOwnershipRequest = {
+  status: OwnershipRequestStatus;
+  decisionNote: string | null;
+} | null;
+
+/**
+ * The viewer's most recent ownership request for a client, so the banner shows
+ * "already asked" instead of offering a request the RPC would refuse. RLS
+ * (ownership_requests_select_involved) already scopes rows to the requester.
+ */
+export async function getMyOwnershipRequest(organisationId: string): Promise<MyOwnershipRequest> {
+  const authorization = await getCurrentActor("client:view", { route: "/inbox" });
+  if (!authorization.ok || !isUuid(organisationId)) return null;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("ownership_requests")
+    .select("status, decision_note")
+    .eq("organisation_id", organisationId)
+    .eq("requested_by", authorization.actor.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ status: OwnershipRequestStatus; decision_note: string | null }>();
+
+  if (error) {
+    await reportError(error, { operation: "inbox.my_ownership_request", organisationId });
+    return null;
+  }
+  return data ? { status: data.status, decisionNote: data.decision_note } : null;
 }

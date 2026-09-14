@@ -54,7 +54,7 @@ export type SectorScoreResult = {
  * equals the neutral 0.5 default (so adding or removing a recorded sector
  * always moves the score).
  */
-const SECTOR_CATEGORY_SCORES = {
+export const DEFAULT_SECTOR_CATEGORY_SCORES = {
   "Health & Wellbeing": 0.7,
   "Education & Youth": 0.65,
   "Poverty & Community": 0.6,
@@ -62,6 +62,8 @@ const SECTOR_CATEGORY_SCORES = {
   "Environment & Sustainability": 0.45,
   "Arts, Culture & Heritage": 0.4,
 } as const satisfies Record<string, number>;
+
+export type SectorCategory = keyof typeof DEFAULT_SECTOR_CATEGORY_SCORES;
 
 /**
  * Standard sector taxonomy mirrored from SECTOR_CATEGORY_GROUPS (F197) in
@@ -132,6 +134,9 @@ function matchesTerm(value: string, term: string): boolean {
 
 export function scoreBySector(
   sector: string | null | undefined,
+  // The admin's ranking from score settings (src/lib/scoring/scout-config.ts);
+  // the provisional v1 ranking above when none is given.
+  categoryScores: Readonly<Record<SectorCategory, number>> = DEFAULT_SECTOR_CATEGORY_SCORES,
 ): SectorScoreResult {
   const trimmed = sector?.trim();
 
@@ -150,8 +155,8 @@ export function scoreBySector(
   for (const [category, presets] of Object.entries(SECTOR_TAXONOMY)) {
     if (trimmed.toLowerCase() === category.toLowerCase()) {
       return {
-        score: SECTOR_CATEGORY_SCORES[
-          category as keyof typeof SECTOR_CATEGORY_SCORES
+        score: categoryScores[
+          category as SectorCategory
         ],
         usedDefault: false,
         matchedTaxonomy: true,
@@ -161,8 +166,8 @@ export function scoreBySector(
 
     if (presets.some((preset) => trimmed.toLowerCase() === preset.toLowerCase())) {
       return {
-        score: SECTOR_CATEGORY_SCORES[
-          category as keyof typeof SECTOR_CATEGORY_SCORES
+        score: categoryScores[
+          category as SectorCategory
         ],
         usedDefault: false,
         matchedTaxonomy: true,
@@ -177,8 +182,8 @@ export function scoreBySector(
       matchesTerm(trimmed, category)
     ) {
       return {
-        score: SECTOR_CATEGORY_SCORES[
-          category as keyof typeof SECTOR_CATEGORY_SCORES
+        score: categoryScores[
+          category as SectorCategory
         ],
         usedDefault: false,
         matchedTaxonomy: true,

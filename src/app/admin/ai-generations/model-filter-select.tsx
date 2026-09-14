@@ -24,10 +24,10 @@ export function ModelFilterSelect({
   if (models.length === 0) return null;
 
   return (
-    <label className="flex items-center gap-2 text-sm font-bold text-foreground/60">
+    <label className="flex items-center gap-2 text-sm font-medium text-dim">
       Filter by model
       <select
-        className="rounded-lg border border-black/15 bg-white px-3 py-1.5 text-sm font-bold text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+        className="rounded-inset border border-rule bg-white px-3 py-1.5 text-sm font-semibold text-ink outline-none focus:border-lead focus:ring-1 focus:ring-lead"
         onChange={(event) => {
           const value = event.target.value;
           const params = new URLSearchParams();

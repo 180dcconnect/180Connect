@@ -1,6 +1,6 @@
 "use client";
 
-import { ACCENTS, MetricChart, formatCompact, formatPointDate } from "@/components/ui/metric-chart";
+import { MetricChart, formatCompact, formatPointDate } from "@/components/ui/metric-chart";
 import type { GenerationDayPoint, GenerationMetric } from "@/lib/outreach/generation-history";
 
 // Unlike pipeline-report.tsx's plain render of <FunnelChart data={...} />, this
@@ -36,8 +36,8 @@ export function SpendOverTime({
 }) {
   if (points.length === 0) {
     return (
-      <div className="overflow-hidden rounded-2xl border border-brand/15 bg-gradient-to-br from-white to-brand/[0.06] px-6 py-14 text-center shadow-sm">
-        <p className="text-sm text-foreground/50">
+      <div className="rounded-panel border border-rule bg-white px-6 py-14 text-center">
+        <p className="text-sm text-dim">
           No generations recorded yet — this fills in day by day as CAMs generate drafts.
         </p>
       </div>
@@ -47,18 +47,18 @@ export function SpendOverTime({
   const total = points.reduce((sum, point) => sum + point.value, 0);
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-brand/15 bg-gradient-to-br from-white to-brand/[0.06] p-6 shadow-sm">
+    <div className="rounded-panel border border-rule bg-white p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-lg font-bold">{METRIC_LABEL[metric]} over time</h2>
-        <p className="text-sm font-bold tabular-nums text-brand-hover">
-          {formatValue(metric, total)} <span className="font-medium text-foreground/40">total</span>
+        <h2 className="font-body text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink">{METRIC_LABEL[metric]} over time</h2>
+        <p className="text-sm font-bold tabular-nums text-ink">
+          {formatValue(metric, total)} <span className="font-medium text-faint">total</span>
         </p>
       </div>
       <div className="mt-6 h-[220px]">
         <MetricChart
           dateFormatter={formatPointDate}
           defaultIndex={points.length - 1}
-          series={[{ name: METRIC_LABEL[metric], data: points, color: ACCENTS.brand.stroke }]}
+          series={[{ name: METRIC_LABEL[metric], data: points, color: "var(--lead)" }]}
           valueFormatter={(value) => formatValue(metric, value)}
           view="curve"
         />

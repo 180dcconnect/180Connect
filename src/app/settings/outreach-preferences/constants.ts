@@ -128,7 +128,10 @@ export const CITY_PRESETS = [
 ] as const;
 
 export const MAX_CITY_LENGTH = 60;
-export const MAX_CITIES = 20;
+// Places are picked from the Charity Commission's 174 local authorities, and a
+// regional group adds a whole region at once (London is 33), so the cap covers
+// every authority. Each is ~20 bytes in a text[] on one row per CAM.
+export const MAX_CITIES = 200;
 
 // F202: Follow-Up Timing Settings (F160 / F161 / F202).
 export const DEFAULT_FIRST_FOLLOW_UP_DAYS = 7;

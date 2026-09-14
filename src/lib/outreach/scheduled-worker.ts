@@ -601,7 +601,20 @@ export async function sendDueReviewedEmails(now = new Date()): Promise<Scheduled
         });
         if (error) {
           await reportError(error, { operation: "outreach.scheduler.notify", messageId });
+          return;
         }
+
+        // The email half, for CAMs who opted in to send-failure emails.
+        // Lazy: this module is loaded by the Node test runner, and the
+        // dispatcher imports `server-only`.
+        const { emailNotificationIfWanted } = await import("../notification-email-dispatch.ts");
+        await emailNotificationIfWanted(admin, {
+          recipientUserId,
+          notificationType: "outreach_send_failed",
+          subject: "A scheduled email could not be sent",
+          text: `${reason}\n\nOpen the client in 180Connect to reschedule or edit the email.`,
+          operation: "outreach.scheduler.notify_email",
+        });
       },
 
       async markSent(messageId, organisationId, outcome, sentAtIso) {

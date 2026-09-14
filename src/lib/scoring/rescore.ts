@@ -104,7 +104,7 @@ export async function rescoreOrganisation(
   // F096: score under the weights of the currently active SCOUT generation, so
   // a weight change is reflected by the very next rescore without code changes.
   const config = await getActiveScoutConfig();
-  return persistLatestScore(admin, organisationId, scoreable, config.weights);
+  return persistLatestScore(admin, organisationId, scoreable, config.weights, config.rules);
 }
 
 /** Reports a best-effort rescore failure to the error log, uniformly. */

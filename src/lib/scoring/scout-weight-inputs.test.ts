@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  anyWeightCounts,
   SCOUT_WEIGHT_PARAMETERS,
+  weightShares,
   readWeightsForm,
   scoutWeightsFormSchema,
   toFractions,
@@ -116,6 +118,29 @@ describe("scout weight inputs — conversions", () => {
 
   it("treats non-numeric display input as 0 rather than NaN-ing the panel", () => {
     assert.equal(toPercentages({ sector: null }).sector, 0);
+  });
+});
+
+describe("scout weight inputs — shares and the all-zero guard", () => {
+  const equal = { sector: 20, geography: 20, size: 20, partnershipHistory: 20, previousContact: 20 };
+
+  it("reports each weight's share of the whole, even when weights do not add to 100", () => {
+    const shares = weightShares({ ...equal, sector: 60 });
+    assert.equal(Math.round(shares.sector), 43);
+    assert.equal(Math.round(shares.geography), 14);
+  });
+
+  it("gives every factor no share when nothing counts", () => {
+    const zero = { sector: 0, geography: 0, size: 0, partnershipHistory: 0, previousContact: 0 };
+    assert.equal(weightShares(zero).sector, 0);
+    assert.equal(anyWeightCounts(zero), false);
+  });
+
+  it("allows a single factor to carry the whole score", () => {
+    assert.equal(
+      anyWeightCounts({ sector: 0, geography: 5, size: 0, partnershipHistory: 0, previousContact: 0 }),
+      true,
+    );
   });
 });
 

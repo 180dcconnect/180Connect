@@ -1,18 +1,18 @@
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
-import { Rise, Stage } from "@/components/dashboard-stage";
-import { BackButton } from "@/components/ui/back-button";
+import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { AccessibilityForm } from "./accessibility-form";
-import {
-  parseAccessibilitySettings,
-  DEFAULT_ACCESSIBILITY_SETTINGS,
-  COOKIE_FONT_SIZE,
-  COOKIE_CONTRAST,
-  COOKIE_LINE_SPACING,
-  COOKIE_REDUCED_MOTION,
-} from "@/lib/accessibility";
 
+/**
+ * Accessibility settings (F205).
+ *
+ * Same skeleton as Profile & account — heading, one rail of facts, a card per
+ * setting — in the Filed Record language (`docs/app-design-system.md`).
+ *
+ * No settings are read here: the form works from `AccessibilityProvider`,
+ * which already holds what is saved and what is being previewed, and which the
+ * account sync may have updated since this page's cookies were read.
+ */
 export default async function AccessibilitySettingsPage() {
   const authorization = await getCurrentActor(undefined, {
     route: "/settings/accessibility",
@@ -21,40 +21,27 @@ export default async function AccessibilitySettingsPage() {
     redirect("/login");
   }
 
-  const cookieStore = await cookies();
-  const parsed = parseAccessibilitySettings({
-    fontSize: cookieStore.get(COOKIE_FONT_SIZE)?.value,
-    contrast: cookieStore.get(COOKIE_CONTRAST)?.value,
-    lineSpacing: cookieStore.get(COOKIE_LINE_SPACING)?.value,
-    reducedMotion: cookieStore.get(COOKIE_REDUCED_MOTION)?.value,
-  });
-
-  const initialSettings = parsed.ok ? parsed.value : DEFAULT_ACCESSIBILITY_SETTINGS;
-
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <Stage className="mx-auto w-full max-w-2xl space-y-10">
+      <Stage className="w-full space-y-8">
         <Rise>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-[clamp(2rem,4vw,2.75rem)] font-semibold font-body leading-[1] tracking-[-0.03em]">
-                Accessibility Settings
-              </h1>
-              <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
-                Configure text size, contrast, line spacing, and motion across 180Connect.
-              </p>
-            </div>
-            <BackButton
-              variant="editorial-minimal"
-              href="/dashboard"
-              className="shrink-0"
-            />
-          </div>
+          <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] leading-[1] font-semibold tracking-[-0.03em] text-ink">
+            Accessibility
+          </h1>
+          <p className="mt-5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-dim">
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-go" />
+            <span>
+              Choices preview as you pick them · <span className="text-ink">saved to your account</span>{" "}
+              when you press Save, so they follow you to any device
+            </span>
+          </p>
         </Rise>
 
-        <Rise>
-          <AccessibilityForm initialSettings={initialSettings} />
-        </Rise>
+        <Group>
+          <Rise>
+            <AccessibilityForm />
+          </Rise>
+        </Group>
       </Stage>
     </div>
   );

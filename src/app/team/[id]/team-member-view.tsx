@@ -18,6 +18,8 @@ import { Liquid } from "liquid-gooey";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { Pill, SectionCard } from "@/app/clients/[id]/section-card";
 import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
+import { describeIncomeRange, incomeRangeFromBands } from "@/lib/income-range";
+import type { IncomeBand } from "@/lib/income-band";
 
 import { AssignedClientsCard, type AssignedClientItem } from "./assigned-clients-card";
 
@@ -41,6 +43,8 @@ export type MemberPreferences = {
   preferred_sectors?: string[] | null;
   preferred_geographic_reach?: string[] | null;
   preferred_income_bands?: string[] | null;
+  preferred_income_min?: number | null;
+  preferred_income_max?: number | null;
   updated_at?: string | null;
 } | null;
 
@@ -569,7 +573,9 @@ export function TeamMemberView({
               {preferences &&
               (preferences.preferred_sectors?.length ||
                 preferences.preferred_geographic_reach?.length ||
-                preferences.preferred_income_bands?.length) ? (
+                preferences.preferred_income_bands?.length ||
+                preferences.preferred_income_min != null ||
+                preferences.preferred_income_max != null) ? (
                 <div className="mt-4 space-y-4 rounded-panel border border-rule bg-white p-4">
                   {preferences.preferred_sectors?.length ? (
                     <div>
@@ -607,23 +613,33 @@ export function TeamMemberView({
                     </div>
                   ) : null}
 
-                  {preferences.preferred_income_bands?.length ? (
-                    <div>
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-dim">
-                        Target Income Bands
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {preferences.preferred_income_bands.map((b: string) => (
-                          <span
-                            key={b}
-                            className="rounded-full bg-paper px-3 py-1 text-xs font-mono font-medium text-ink uppercase border border-rule-soft"
-                          >
-                            {b.replace(/_/g, " ")}
+                  {(() => {
+                    // The exact range when one is saved (F198), otherwise the
+                    // range the legacy bands cover — never raw band codes.
+                    const range =
+                      preferences.preferred_income_min != null ||
+                      preferences.preferred_income_max != null
+                        ? {
+                            min: preferences.preferred_income_min ?? null,
+                            max: preferences.preferred_income_max ?? null,
+                          }
+                        : incomeRangeFromBands(
+                            (preferences.preferred_income_bands ?? []) as IncomeBand[],
+                          );
+                    const label = describeIncomeRange(range);
+                    return label ? (
+                      <div>
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-dim">
+                          Size (annual income)
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          <span className="rounded-full bg-paper px-3 py-1 text-xs font-medium text-ink border border-rule-soft">
+                            {label}
                           </span>
-                        ))}
+                        </div>
                       </div>
-                    </div>
-                  ) : null}
+                    ) : null;
+                  })()}
                 </div>
               ) : (
                 <div className="py-8 text-center text-xs text-dim">

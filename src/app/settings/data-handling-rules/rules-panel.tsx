@@ -1,41 +1,88 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { createRule, toggleRuleActive, loadRules, type RuleRow } from "./actions";
+import { useId, useState, useTransition } from "react";
+import { Check, ChevronRight, Loader2 } from "lucide-react";
+import { Rise } from "@/components/dashboard-stage";
+import { Pill } from "@/app/clients/[id]/section-card";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  catalogueKey,
+  findCatalogueEntry,
+  RULE_CATALOGUE,
+  ruleEffect,
+  ruleKey,
+  SOURCE_LABELS,
+  sourceLabel,
+  type CatalogueEntry,
+} from "@/lib/data-handling-catalogue";
+import { createRule, loadRules, toggleRuleActive, type RuleRow } from "./actions";
+import { ObservedFieldPicker } from "./observed-field-picker";
+import {
+  CARD,
+  CARD_HINT,
+  CARD_TITLE,
+  FIELD_LABEL,
+  FOOTNOTE,
+  INPUT,
+  PRIMARY_BUTTON,
+  QUIET_BUTTON,
+  ROW,
+  ROW_ACTION,
+  SELECT_CONTENT,
+  SELECT_GROUP_LABEL,
+  SELECT_ITEM,
+  SELECT_TRIGGER,
+} from "../styles";
 
-const SOURCE_OPTIONS = [
-  { value: "", label: "All sources (global)" },
-  { value: "companies_house", label: "Companies House" },
-  { value: "charitybase", label: "CharityBase" },
-  { value: "charity_commission", label: "Charity Commission" },
-  { value: "360giving", label: "360Giving" },
-  { value: "find_that_charity", label: "Find That Charity" },
-  { value: "globalgiving", label: "GlobalGiving" },
-  { value: "candid", label: "Candid" },
-] as const;
+type Notice = { tone: "success" | "error"; text: string } | null;
 
-function sourceLabel(source: string | null): string {
-  if (!source) return "All sources";
-  return SOURCE_OPTIONS.find((o) => o.value === source)?.label ?? source;
+const GLOBAL_SOURCE = "__every_source";
+
+function ruleName(rule: RuleRow): { label: string; description: string } {
+  const entry = findCatalogueEntry(rule.source, rule.field_path, rule.rule_kind);
+  if (entry) return { label: entry.label, description: entry.description };
+  // A rule added through the developer form has no catalogue entry; its recorded
+  // reason is the best plain description there is.
+  return { label: "Custom protection", description: rule.reason };
 }
 
-function personLabel(
-  person: { full_name: string | null; email: string } | null,
-): string {
-  // Null means the rule was seeded by a migration rather than written by an
-  // admin — worth naming, because "—" reads as missing data rather than a fact.
-  if (!person) return "System";
-  return person.full_name ?? person.email;
+function groupBySource<T>(items: T[], sourceOf: (item: T) => string | null) {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const label = sourceLabel(sourceOf(item));
+    groups.set(label, [...(groups.get(label) ?? []), item]);
+  }
+  // "Every source" first — it is the widest protection — then alphabetical.
+  return [...groups.entries()].sort(([a], [b]) =>
+    a === "Every source" ? -1 : b === "Every source" ? 1 : a.localeCompare(b),
+  );
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+function EffectPill({ rule }: { rule: RuleRow }) {
+  if (rule.action === "allow") return <Pill tone="hold">Kept (exception)</Pill>;
+  return ruleEffect(rule.rule_kind) === "removed" ? (
+    <Pill tone="neutral" dot={false}>Removed</Pill>
+  ) : (
+    <Pill tone="neutral" dot={false}>Blanked out</Pill>
+  );
 }
 
+/**
+ * F246 / F247 — the protections list, turning protections on and off, and a
+ * developer form for anything the catalogue does not cover.
+ *
+ * Plain names come from `src/lib/data-handling-catalogue.ts`. Turning a
+ * protection off asks first, because it is the one action here that weakens
+ * privacy: personal data starts being saved from the next import.
+ */
 export function RulesPanel({
   initialRules,
   initialVersion,
@@ -45,12 +92,24 @@ export function RulesPanel({
 }) {
   const [rules, setRules] = useState(initialRules);
   const [version, setVersion] = useState(initialVersion);
-  const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState<"success" | "error">(
-    "success",
-  );
+  const [notice, setNotice] = useState<Notice>(null);
   const [isPending, startTransition] = useTransition();
-  const [showForm, setShowForm] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [chosenKey, setChosenKey] = useState("");
+  const [devSource, setDevSource] = useState(GLOBAL_SOURCE);
+  const [devAction, setDevAction] = useState<"deny" | "allow">("deny");
+  const chooseId = useId();
+  const devSourceId = useId();
+  const devActionId = useId();
+
+  const activeRules = rules.filter((rule) => rule.is_active);
+  const inactiveRules = rules.filter((rule) => !rule.is_active);
+  const activeKeys = new Set(
+    activeRules.map((rule) => ruleKey(rule.source, rule.field_path, rule.rule_kind)),
+  );
+  const available = RULE_CATALOGUE.filter((entry) => !activeKeys.has(catalogueKey(entry)));
+  const chosen = available.find((entry) => catalogueKey(entry) === chosenKey) ?? null;
 
   async function refresh() {
     const result = await loadRules();
@@ -60,286 +119,369 @@ export function RulesPanel({
     }
   }
 
-  function flash(msg: string, type: "success" | "error" = "success") {
-    setMessage(msg);
-    setMessageType(type);
-    setTimeout(() => setMessage(""), 5000);
+  function report(result: Awaited<ReturnType<typeof createRule>>) {
+    setNotice(result.ok ? { tone: "success", text: result.message } : { tone: "error", text: result.error });
   }
 
-  async function handleCreate(formData: FormData) {
+  function toggle(rule: RuleRow, isActive: boolean) {
+    setNotice(null);
+    setBusyId(rule.id);
+    startTransition(async () => {
+      const result = await toggleRuleActive(rule.id, isActive);
+      report(result);
+      setConfirmingId(null);
+      setBusyId(null);
+      if (result.ok) await refresh();
+    });
+  }
+
+  function turnOn(entry: CatalogueEntry) {
+    setNotice(null);
+    // Turning a known protection back on reuses its old row, so its history stays
+    // in one place rather than starting a second copy.
+    const previous = inactiveRules.find(
+      (rule) => ruleKey(rule.source, rule.field_path, rule.rule_kind) === catalogueKey(entry),
+    );
+    if (previous) {
+      toggle(previous, true);
+      setChosenKey("");
+      return;
+    }
+    const formData = new FormData();
+    formData.set("source", entry.source ?? "");
+    formData.set("field_path", entry.fieldPath);
+    formData.set("action", "deny");
+    formData.set("rule_kind", entry.ruleKind);
+    formData.set("reason", entry.reason);
     startTransition(async () => {
       const result = await createRule(formData);
+      report(result);
       if (result.ok) {
-        flash(result.message);
-        setShowForm(false);
+        setChosenKey("");
         await refresh();
-      } else {
-        flash(result.error, "error");
       }
     });
   }
 
-  async function handleToggle(ruleId: string, isActive: boolean) {
+  function submitDeveloperRule(formData: FormData) {
+    setNotice(null);
+    formData.set("source", devSource === GLOBAL_SOURCE ? "" : devSource);
+    formData.set("action", devAction);
+    formData.set("rule_kind", "field_path");
     startTransition(async () => {
-      const result = await toggleRuleActive(ruleId, isActive);
-      if (result.ok) {
-        flash(result.message);
-        await refresh();
-      } else {
-        flash(result.error, "error");
-      }
+      const result = await createRule(formData);
+      report(result);
+      if (result.ok) await refresh();
     });
   }
 
-  const activeRules = rules.filter((r) => r.is_active);
-  const inactiveRules = rules.filter((r) => !r.is_active);
+  const availableGroups = groupBySource(available, (entry) => entry.source);
 
   return (
-    <div className="mt-6 space-y-6">
-      {/* Version badge */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-foreground/65">
-          Rule version:{" "}
-          <span className="font-mono font-bold text-foreground">
-            v{version}
-          </span>{" "}
-          · {activeRules.length} active rule
-          {activeRules.length !== 1 ? "s" : ""}
-        </p>
-        <button
-          type="button"
-          onClick={() => setShowForm(!showForm)}
-          className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-50"
-          disabled={isPending}
-        >
-          {showForm ? "Cancel" : "+ Add rule"}
-        </button>
-      </div>
-
-      {/* Flash message */}
-      {message && (
-        <p
-          className={`rounded-xl p-3 text-sm font-medium ${
-            messageType === "error"
-              ? "bg-red-50 text-red-800"
-              : "bg-green-50 text-green-800"
-          }`}
-          role="alert"
-        >
-          {message}
-        </p>
-      )}
-
-      {/* Create form */}
-      {showForm && (
-        <form
-          action={handleCreate}
-          className="space-y-4 rounded-xl border border-black/10 p-5"
-        >
-          <h3 className="font-bold">New data handling rule</h3>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block">
-              <span className="text-sm font-medium text-foreground/80">
-                Source
-              </span>
-              <select
-                name="source"
-                className="mt-1 block w-full rounded-lg border border-black/15 px-3 py-2 text-sm"
-              >
-                {SOURCE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block">
-              <span className="text-sm font-medium text-foreground/80">
-                Action
-              </span>
-              <select
-                name="action"
-                className="mt-1 block w-full rounded-lg border border-black/15 px-3 py-2 text-sm"
-                defaultValue="deny"
-              >
-                <option value="deny">Deny (strip this field)</option>
-                <option value="allow">
-                  Allow (override a global deny for this source)
-                </option>
-              </select>
-            </label>
-          </div>
-
-          <label className="block">
-            <span className="text-sm font-medium text-foreground/80">
-              Field path
-            </span>
-            <input
-              type="text"
-              name="field_path"
-              required
-              placeholder='e.g. officers[*].usual_residential_address'
-              className="mt-1 block w-full rounded-lg border border-black/15 px-3 py-2 font-mono text-sm"
-            />
-            <span className="mt-1 block text-xs text-foreground/50">
-              Dot-separated path into the API response JSON. Use [*] for array
-              elements.
-            </span>
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-medium text-foreground/80">
-              Reason
-            </span>
-            <textarea
-              name="reason"
-              required
-              rows={2}
-              placeholder="Why this field should be excluded — reference the data handling policy section if applicable."
-              className="mt-1 block w-full rounded-lg border border-black/15 px-3 py-2 text-sm"
-            />
-          </label>
-
-          <button
-            type="submit"
-            disabled={isPending}
-            className="rounded-lg bg-brand px-5 py-2 text-sm font-medium text-white hover:bg-brand/90 disabled:opacity-50"
+    <>
+      {notice && (
+        <Rise>
+          <p
+            aria-live="polite"
+            role={notice.tone === "error" ? "alert" : undefined}
+            className={`flex items-center gap-1.5 rounded-panel border px-4 py-3 text-[13px] font-semibold ${
+              notice.tone === "error"
+                ? "border-stop/30 bg-stop-wash text-stop"
+                : "border-go/30 bg-go-wash text-go"
+            }`}
           >
-            {isPending ? "Creating…" : "Create rule"}
-          </button>
-        </form>
+            {notice.tone === "success" && (
+              <Check aria-hidden="true" className="size-3.5 shrink-0" strokeWidth={2.5} />
+            )}
+            {notice.text}
+          </p>
+        </Rise>
       )}
 
-      {/* Active rules table */}
-      {activeRules.length > 0 && (
-        <div>
-          <h3 className="mb-3 font-bold">Active rules</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-black/10 text-foreground/65">
-                  <th className="pb-2 pr-4 font-medium">Source</th>
-                  <th className="pb-2 pr-4 font-medium">Field path</th>
-                  <th className="pb-2 pr-4 font-medium">Action</th>
-                  <th className="pb-2 pr-4 font-medium">Reason</th>
-                  <th className="pb-2 pr-4 font-medium">Created by</th>
-                  <th className="pb-2 pr-4 font-medium">Date</th>
-                  <th className="pb-2 font-medium" />
-                </tr>
-              </thead>
-              <tbody>
-                {activeRules.map((rule) => (
-                  <tr
-                    key={rule.id}
-                    className="border-b border-black/5 last:border-0"
-                  >
-                    <td className="py-3 pr-4">{sourceLabel(rule.source)}</td>
-                    <td className="py-3 pr-4">
-                      <code className="rounded bg-black/5 px-1.5 py-0.5 text-xs">
-                        {rule.field_path}
-                      </code>
-                    </td>
-                    <td className="py-3 pr-4">
-                      <span
-                        className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-                          rule.action === "deny"
-                            ? "bg-red-50 text-red-800"
-                            : "bg-green-50 text-green-800"
-                        }`}
-                      >
-                        {rule.action}
-                      </span>
-                    </td>
-                    <td className="max-w-xs truncate py-3 pr-4 text-foreground/65">
-                      {rule.reason}
-                    </td>
-                    <td className="py-3 pr-4 text-foreground/65">
-                      {personLabel(rule.created_by_user)}
-                    </td>
-                    <td className="py-3 pr-4 text-foreground/65">
-                      {formatDate(rule.created_at)}
-                    </td>
-                    <td className="py-3">
+      <Rise>
+        <section aria-labelledby="protections-heading" className={CARD}>
+          <h2 id="protections-heading" className={CARD_TITLE}>
+            What we never save
+          </h2>
+          <p className={CARD_HINT}>
+            When the platform imports clients from public registers, these personal
+            details are removed before anything is saved. Changes apply from the
+            next import.
+          </p>
+
+          {activeRules.length === 0 ? (
+            <p className={`mt-4 ${ROW} text-[13px] text-stop`}>
+              No protections are on — personal details from imports are being saved.
+              Turn protections on below.
+            </p>
+          ) : (
+            groupBySource(activeRules, (rule) => rule.source).map(([group, groupRules]) => (
+              <div key={group} className="mt-5">
+                <h3 className="text-[13px] font-medium text-ink">From {group}</h3>
+                <ul className="mt-1">
+                  {groupRules.map((rule) => {
+                    const { label, description } = ruleName(rule);
+                    const confirming = confirmingId === rule.id;
+                    return (
+                      <li key={rule.id} className={`${ROW} items-start`}>
+                        <div className="min-w-0 flex-1">
+                          <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-ink">
+                            {label}
+                            <EffectPill rule={rule} />
+                          </p>
+                          <p className="mt-1 text-[13px] leading-[1.55] text-dim">{description}</p>
+                          {confirming && (
+                            <div className="mt-3 rounded-inset bg-stop-wash px-3 py-2.5">
+                              <p className="text-[13px] leading-[1.55] text-stop">
+                                Turn this off? From the next import, {label.toLowerCase()} will be
+                                saved again.
+                              </p>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => toggle(rule, false)}
+                                  disabled={isPending}
+                                  className="inline-flex items-center gap-1.5 rounded-inset border border-stop bg-stop px-2.5 py-1 text-[13px] font-medium text-white disabled:opacity-50"
+                                >
+                                  {busyId === rule.id && (
+                                    <Loader2 aria-hidden="true" className="size-3 animate-spin" />
+                                  )}
+                                  Yes, turn it off
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmingId(null)}
+                                  disabled={isPending}
+                                  className={QUIET_BUTTON}
+                                >
+                                  Keep it on
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {!confirming && (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmingId(rule.id)}
+                            disabled={isPending}
+                            className={`${ROW_ACTION} disabled:pointer-events-none disabled:opacity-50`}
+                          >
+                            Turn off<span className="sr-only"> {label}</span>
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))
+          )}
+        </section>
+      </Rise>
+
+      <Rise>
+        <section aria-labelledby="turn-on-heading" className={CARD}>
+          <h2 id="turn-on-heading" className={CARD_TITLE}>
+            Turn a protection on
+          </h2>
+          <p className={CARD_HINT}>
+            Choose the kind of personal detail to keep out of imports.
+            {available.length === 0 && (
+              <>
+                {" "}
+                <span className="text-ink">
+                  Every protection the platform knows about is already on.
+                </span>
+              </>
+            )}
+          </p>
+
+          {available.length > 0 && (
+            <div className="mt-4 space-y-4 border-t border-rule-soft pt-4">
+              <div>
+                <label htmlFor={chooseId} className={FIELD_LABEL}>
+                  Keep out
+                </label>
+                <Select value={chosenKey} onValueChange={setChosenKey}>
+                  <SelectTrigger id={chooseId} className={`mt-2 ${SELECT_TRIGGER}`}>
+                    <SelectValue placeholder="Choose a personal detail…" />
+                  </SelectTrigger>
+                  <SelectContent position="popper" className={SELECT_CONTENT}>
+                    {availableGroups.map(([group, entries]) => (
+                      <SelectGroup key={group}>
+                        <SelectLabel className={SELECT_GROUP_LABEL}>From {group}</SelectLabel>
+                        {entries.map((entry) => (
+                          <SelectItem
+                            key={catalogueKey(entry)}
+                            value={catalogueKey(entry)}
+                            className={SELECT_ITEM}
+                          >
+                            {entry.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {chosen && (
+                  <p className="mt-2 rounded-inset bg-paper px-3 py-2 text-[13px] leading-[1.55] text-dim">
+                    {chosen.description}
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => chosen && turnOn(chosen)}
+                disabled={!chosen || isPending}
+                aria-busy={isPending || undefined}
+                className={PRIMARY_BUTTON}
+              >
+                {isPending && busyId === null && (
+                  <Loader2 className="size-3.5 animate-spin" strokeWidth={2.2} />
+                )}
+                Turn on
+              </button>
+            </div>
+          )}
+
+          <ObservedFieldPicker
+            activeKeys={activeKeys}
+            onResult={(result) => {
+              report(result);
+              if (result.ok) void refresh();
+            }}
+          />
+
+          {inactiveRules.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-[13px] font-medium text-ink">Turned off</h3>
+              <ul className="mt-1">
+                {inactiveRules.map((rule) => {
+                  const { label } = ruleName(rule);
+                  return (
+                    <li key={rule.id} className={`${ROW} items-start`}>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-ink">{label}</p>
+                        <p className="mt-1 text-[13px] text-dim">From {sourceLabel(rule.source)}</p>
+                      </div>
                       <button
                         type="button"
-                        onClick={() => handleToggle(rule.id, false)}
+                        onClick={() => toggle(rule, true)}
                         disabled={isPending}
-                        className="rounded-lg border border-black/10 px-3 py-1 text-xs font-medium text-foreground/65 hover:bg-black/5 disabled:opacity-50"
+                        className={`${ROW_ACTION} inline-flex items-center gap-1.5 disabled:pointer-events-none disabled:opacity-50`}
                       >
-                        Deactivate
+                        {busyId === rule.id && (
+                          <Loader2 aria-hidden="true" className="size-3 animate-spin" />
+                        )}
+                        Turn back on<span className="sr-only"> {label}</span>
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
-      {activeRules.length === 0 && !showForm && (
-        <p className="rounded-xl border border-dashed border-black/15 py-8 text-center text-sm text-foreground/50">
-          No active rules. Click &ldquo;+ Add rule&rdquo; to create one.
-        </p>
-      )}
-
-      {/* Inactive rules */}
-      {inactiveRules.length > 0 && (
-        <details className="mt-4">
-          <summary className="cursor-pointer text-sm font-medium text-foreground/65 hover:text-foreground">
-            {inactiveRules.length} inactive rule
-            {inactiveRules.length !== 1 ? "s" : ""} (history)
-          </summary>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-black/10 text-foreground/65">
-                  <th className="pb-2 pr-4 font-medium">Source</th>
-                  <th className="pb-2 pr-4 font-medium">Field path</th>
-                  <th className="pb-2 pr-4 font-medium">Action</th>
-                  <th className="pb-2 pr-4 font-medium">Reason</th>
-                  <th className="pb-2 font-medium" />
-                </tr>
-              </thead>
-              <tbody>
-                {inactiveRules.map((rule) => (
-                  <tr
-                    key={rule.id}
-                    className="border-b border-black/5 text-foreground/50 last:border-0"
+          {/* The escape hatch for a field no catalogue entry names. Collapsed and
+              labelled for developers: it needs the exact name a source's API uses,
+              which an admin has no way to know. */}
+          <details className="group mt-6 border-t border-rule-soft pt-4">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[13px] font-medium text-dim hover:text-ink">
+              <ChevronRight
+                aria-hidden="true"
+                className="size-3.5 transition-transform group-open:rotate-90"
+              />
+              For developers: add a custom protection
+            </summary>
+            <p className={`mt-2 ${FOOTNOTE}`}>
+              Only needed for a personal detail not in the list above. You will need the exact
+              field name the source uses — if you are not sure, ask a developer rather than guessing,
+              because a wrong name silently protects nothing.
+            </p>
+            <form action={submitDeveloperRule} className="mt-4 space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor={devSourceId} className={FIELD_LABEL}>
+                    Source
+                  </label>
+                  <Select value={devSource} onValueChange={setDevSource}>
+                    <SelectTrigger id={devSourceId} className={`mt-2 ${SELECT_TRIGGER}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent position="popper" className={SELECT_CONTENT}>
+                      <SelectItem value={GLOBAL_SOURCE} className={SELECT_ITEM}>
+                        Every source
+                      </SelectItem>
+                      {Object.entries(SOURCE_LABELS).map(([value, label]) => (
+                        <SelectItem key={value} value={value} className={SELECT_ITEM}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label htmlFor={devActionId} className={FIELD_LABEL}>
+                    What happens
+                  </label>
+                  <Select
+                    value={devAction}
+                    onValueChange={(value) => setDevAction(value as "deny" | "allow")}
                   >
-                    <td className="py-3 pr-4">{sourceLabel(rule.source)}</td>
-                    <td className="py-3 pr-4">
-                      <code className="rounded bg-black/5 px-1.5 py-0.5 text-xs">
-                        {rule.field_path}
-                      </code>
-                    </td>
-                    <td className="py-3 pr-4">
-                      <span className="inline-block rounded-full bg-black/5 px-2 py-0.5 text-xs font-medium">
-                        {rule.action}
-                      </span>
-                    </td>
-                    <td className="max-w-xs truncate py-3 pr-4">
-                      {rule.reason}
-                    </td>
-                    <td className="py-3">
-                      <button
-                        type="button"
-                        onClick={() => handleToggle(rule.id, true)}
-                        disabled={isPending}
-                        className="rounded-lg border border-black/10 px-3 py-1 text-xs font-medium text-foreground/65 hover:bg-black/5 disabled:opacity-50"
-                      >
-                        Reactivate
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </details>
-      )}
-    </div>
+                    <SelectTrigger id={devActionId} className={`mt-2 ${SELECT_TRIGGER}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent position="popper" className={SELECT_CONTENT}>
+                      <SelectItem value="deny" className={SELECT_ITEM}>
+                        Remove this field
+                      </SelectItem>
+                      <SelectItem value="allow" className={SELECT_ITEM}>
+                        Keep it from this source (exception to an every-source rule)
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div>
+                <label htmlFor="dev-field-path" className={FIELD_LABEL}>
+                  Field name in the source&rsquo;s data
+                </label>
+                <input
+                  id="dev-field-path"
+                  type="text"
+                  name="field_path"
+                  required
+                  placeholder="e.g. officers[*].usual_residential_address"
+                  className={`mt-2 ${INPUT} font-mono text-[13px]`}
+                />
+              </div>
+              <div>
+                <label htmlFor="dev-reason" className={FIELD_LABEL}>
+                  Why
+                </label>
+                <textarea
+                  id="dev-reason"
+                  name="reason"
+                  required
+                  rows={2}
+                  maxLength={500}
+                  placeholder="What this is and why it must not be saved."
+                  className={`mt-2 ${INPUT} h-auto py-2 leading-[1.55]`}
+                />
+              </div>
+              <button type="submit" disabled={isPending} className={PRIMARY_BUTTON}>
+                Add custom protection
+              </button>
+            </form>
+          </details>
+
+          <p className={`mt-6 border-t border-rule-soft pt-4 ${FOOTNOTE}`}>
+            Every import records which set of rules it was checked against (currently set{" "}
+            {version}), so we can always show what was in force at the time.
+          </p>
+        </section>
+      </Rise>
+    </>
   );
 }

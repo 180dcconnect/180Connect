@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { MotionConfig, motion } from "motion/react";
+import { motion } from "motion/react";
 import { entranceSoft, entranceSoftFlat, stagger } from "@/components/brand/motion";
 
 /**
@@ -17,7 +17,13 @@ import { entranceSoft, entranceSoftFlat, stagger } from "@/components/brand/moti
  * Server components can be passed straight through these — they only wrap.
  */
 
-/** Top-level container. One per screen: it owns the reduced-motion contract. */
+/**
+ * Top-level container. One per screen.
+ *
+ * Reduced motion is not set here any more: `AccessibilityProvider` owns one
+ * `MotionConfig` for the whole app, which follows the OS setting *and* the
+ * in-app one. A `reducedMotion="user"` here would override it back to OS-only.
+ */
 export function Stage({
   children,
   className,
@@ -26,16 +32,14 @@ export function Stage({
   className?: string;
 }) {
   return (
-    <MotionConfig reducedMotion="user">
-      <motion.div
-        variants={stagger(0.08)}
-        initial="hidden"
-        animate="show"
-        className={className}
-      >
-        {children}
-      </motion.div>
-    </MotionConfig>
+    <motion.div
+      variants={stagger(0.08)}
+      initial="hidden"
+      animate="show"
+      className={className}
+    >
+      {children}
+    </motion.div>
   );
 }
 

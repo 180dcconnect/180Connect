@@ -35,7 +35,7 @@ export default async function AdminCamSettingsPage(props: PageProps) {
     supabase
       .from("outreach_preferences")
       .select(
-        "user_id, preferred_geographic_reach, preferred_sectors, preferred_income_bands, updated_at, created_at",
+        "user_id, preferred_geographic_reach, preferred_sectors, preferred_income_bands, preferred_income_min, preferred_income_max, updated_at, created_at",
       ),
   ]);
 

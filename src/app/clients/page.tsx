@@ -6,6 +6,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
+import { getActiveScoutConfig } from "@/lib/scoring/configured-weights";
 import {
   emptyStateMessage,
   filterByOwner,
@@ -334,7 +335,7 @@ export default async function ClientsPage({
       .overrideTypes<{ id: string; name: string; colour: string | null }[], { merge: false }>(),
     supabase
       .from("outreach_preferences")
-      .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands, prioritise_grant_recipients")
+      .select("preferred_geographic_reach, preferred_cities, preferred_sectors, preferred_income_bands, preferred_income_min, preferred_income_max, prioritise_grant_recipients")
       // F187 lets admins read every CAM's preferences row, so scope to the
       // caller explicitly: an unfiltered maybeSingle would match all of them
       // and error out for admins instead of weighting their own queue.
@@ -344,6 +345,8 @@ export default async function ClientsPage({
         preferred_cities: string[] | null;
         preferred_sectors: string[] | null;
         preferred_income_bands: string[] | null;
+        preferred_income_min: number | null;
+        preferred_income_max: number | null;
         prioritise_grant_recipients: boolean | null;
       }>(),
     // F066 — this CAM's own saved views. The `user_id` filter is belt and braces:
@@ -465,10 +468,16 @@ export default async function ClientsPage({
     ...client,
     matched_grant_count: client.grants?.length ?? 0,
   });
+  // "Same priority area" uses the towns saved in score settings — the one list
+  // scoring and imports share. Loaded only when a shortlist is actually asked for.
+  const similarTowns = eligibleReference
+    ? (await getActiveScoutConfig()).rules?.geography.priorityTowns
+    : undefined;
   const similarResult = eligibleReference
     ? findSimilarClients(
         withGrantCounts(eligibleReference),
         allVisibleClients.map(withGrantCounts),
+        { priorityRegions: similarTowns },
       )
     : null;
   const similarDangling = Boolean(similarParam) && !reference;

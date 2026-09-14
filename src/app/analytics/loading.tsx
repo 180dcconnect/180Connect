@@ -1,4 +1,5 @@
 import { Skeleton, SkeletonStatCard } from "@/components/ui/skeleton";
+import { AnalyticsHeader } from "@/app/admin/analytics-header";
 
 /**
  * Mirrors the geometry of src/app/analytics/page.tsx, card-for-card, so the real
@@ -23,10 +24,13 @@ export default function AnalyticsLoading() {
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <div className="mx-auto w-full max-w-6xl space-y-10">
-        {/* Eyebrow, then the h1 at its clamp */}
+        {/* The real shared header — title and tab row paint immediately, so
+            switching tabs leaves the header pixel-identical while the body
+            below it skeleton-loads. Only the description is a bar. */}
         <header>
-          <Skeleton className="h-4 w-40 max-w-full" />
-          <Skeleton className="mt-2 h-[1em] w-64 max-w-full text-[clamp(2rem,4vw,2.75rem)] leading-none" />
+          <AnalyticsHeader current="/analytics">
+            <Skeleton className="mt-3 h-4 w-11/12 max-w-[68ch]" />
+          </AnalyticsHeader>
         </header>
 
         {/* Your outreach — three StatCards */}

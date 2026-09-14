@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
 import {
   ArrowDownToLine,
   ArrowUpToLine,
@@ -59,6 +59,13 @@ import {
   type RegionalZone,
   type VocabularyEntry,
 } from "@/lib/charity-register/vocabulary";
+import {
+  CHARITY_INCOME_HISTOGRAM,
+  INCOME_RANGE_MAX_PLUS as INCOME_SLIDER_MAX_PLUS,
+  INCOME_RANGE_MIN as INCOME_SLIDER_MIN,
+  INCOME_RANGE_STEP as INCOME_SLIDER_STEP,
+  formatIncomeSliderLabel,
+} from "@/lib/income-range";
 import {
   countRegisterSelection,
   deleteFilterPreset,
@@ -122,29 +129,8 @@ function formatIncome(value: number | null): string {
   return MONEY.format(value);
 }
 
-const INCOME_SLIDER_MIN = 0;
-const INCOME_SLIDER_MAX_PLUS = 5_250_000;
-const INCOME_SLIDER_STEP = 25_000;
-
-function formatIncomeSliderLabel(value: number): string {
-  if (value >= INCOME_SLIDER_MAX_PLUS) return "£5m+";
-  if (value === 0) return "£0";
-  if (value >= 1_000_000) {
-    const m = value / 1_000_000;
-    return Number.isInteger(m) ? `£${m}m` : `£${m.toFixed(2).replace(/\.?0+$/, "")}m`;
-  }
-  if (value >= 1_000) return `£${Math.round(value / 1_000)}k`;
-  return `£${value}`;
-}
-
-/** Approximate income density distribution for UK registered charities from £0 to £5m+. */
-const CHARITY_INCOME_HISTOGRAM: readonly number[] = [
-  1.0, 0.98, 0.95, 0.92, 0.89, 0.86, 0.83, 0.80, 0.77, 0.74,
-  0.71, 0.68, 0.65, 0.63, 0.61, 0.59, 0.57, 0.55, 0.53, 0.51,
-  0.49, 0.48, 0.47, 0.46, 0.45, 0.44, 0.43, 0.43, 0.42, 0.42,
-  0.42, 0.41, 0.41, 0.41, 0.42, 0.42, 0.43, 0.44, 0.45, 0.46,
-  0.47, 0.49, 0.51, 0.53, 0.56, 0.59, 0.63, 0.68, 0.74, 0.82,
-];
+// The slider's scale, labels and histogram live in src/lib/income-range.ts,
+// shared with the size preference on Settings → Outreach preferences.
 
 /** A list of labels, shortened once it stops being readable at a glance. */
 export function summariseList(labels: string[], noun: string): string | null {
@@ -388,7 +374,7 @@ export function Chip({
 
   const isHighlighted = selected || isPartial;
 
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotionConfig();
 
   return (
     <motion.button

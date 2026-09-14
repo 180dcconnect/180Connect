@@ -81,7 +81,9 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
     supabase.from("suppressions").select("organisation_id").eq("status", "active"),
     supabase
       .from("outreach_preferences")
-      .select("preferred_geographic_reach, preferred_sectors, preferred_income_bands, updated_at")
+      .select(
+        "preferred_geographic_reach, preferred_sectors, preferred_income_bands, preferred_income_min, preferred_income_max, updated_at",
+      )
       .eq("user_id", id)
       .maybeSingle(),
     supabase

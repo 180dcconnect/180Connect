@@ -34,6 +34,8 @@ import {
   type SourceIdentifier,
 } from "../standardize/write-organisations.ts";
 import { checkClientCriteria, type ClientCriteriaResult } from "../client-criteria.ts";
+import type { ClientCriteriaConfig } from "../client-criteria-config.ts";
+import { loadClientCriteria } from "../client-criteria-loader.ts";
 import type { StandardOrganisation } from "../standardize/types.ts";
 
 /** What the importer would write, plus the verdict it would reach. */
@@ -67,6 +69,12 @@ export type CharityPreviewResult =
 export type CharityPreviewDependencies = {
   /** Resolves the registration number to one raw record, or null if unknown. */
   fetchRecord: (registeredNumber: string) => Promise<RawCharityCommissionRecord | null>;
+  /**
+   * The criteria config with the priority towns saved in score settings, so the
+   * preview's "local" verdict matches the import's. Omitted (tests) → the
+   * built-in CLIENT_CRITERIA.
+   */
+  loadCriteriaConfig?: () => Promise<ClientCriteriaConfig>;
 };
 
 /** The messages the adapter raises that are safe and useful to show directly. */
@@ -89,6 +97,7 @@ export function createDefaultCharityPreviewDependencies(): CharityPreviewDepende
       const record = records[0]?.raw_payload as RawCharityCommissionRecord | undefined;
       return record ?? null;
     },
+    loadCriteriaConfig: loadClientCriteria,
   };
 }
 
@@ -120,6 +129,7 @@ export async function previewCharity(
   if (!raw) return { status: "not_found" };
 
   const organisation = standardizeCharityCommissionRecord(raw);
+  const criteriaConfig = await deps.loadCriteriaConfig?.();
   const identifier = charityCommissionIdentifier(raw);
   const companyIdentifier = charityCommissionCompanyIdentifier(raw);
 
@@ -134,7 +144,7 @@ export async function previewCharity(
       identifier,
       companyIdentifier,
       financialPeriod: charityCommissionFinancialPeriod(raw),
-      criteria: checkClientCriteria(buildCriteriaInput(organisation)),
+      criteria: checkClientCriteria(buildCriteriaInput(organisation), criteriaConfig),
       registration: {
         status: raw.reg_status === "RM" || raw.date_of_removal ? "removed" : "registered",
         registeredOn: raw.date_of_registration?.slice(0, 10) || null,

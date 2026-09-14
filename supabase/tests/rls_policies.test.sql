@@ -4602,6 +4602,12 @@ begin
 
   perform tests.seed();
 
+  -- Ownership moves in earlier suites (reassign, assign, offboard, request
+  -- approval) now notify the former owner via the owner-change trigger. Clear
+  -- that side effect so this suite's counts see a clean slate — same pattern
+  -- as the edit_suggestion_decided cleanup above.
+  delete from public.notifications where notification_type = 'client_ownership_changed';
+
   -- Producer path: an active user creates a notification for another user.
   perform tests.login_as(v_admin);
   select public.create_notification(

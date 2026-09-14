@@ -464,6 +464,8 @@ export default async function InboxPage({
           initialTab={initialTab}
           viewerEmail={actor.email}
           viewerIsAdmin={actor.role === "admin"}
+          viewerId={actor.id}
+          viewerRole={actor.role}
           initialThreadFlags={threadFlags}
           addressableClients={addressableClients}
           initialThreads={threads}

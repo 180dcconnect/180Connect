@@ -58,7 +58,7 @@ export default function LegalPage({
   }, [sections.length]);
 
   return (
-    <MotionConfig reducedMotion="user">
+    <MotionConfig>
       <div
         className="relative min-h-screen"
         style={{ backgroundColor: GROUND }}

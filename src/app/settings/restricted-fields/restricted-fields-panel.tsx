@@ -1,28 +1,76 @@
 "use client";
 
-import { useState } from "react";
-import { OriginButton } from "@/components/ui/origin-button";
-import { Input } from "@/components/ui/input";
-import { restrictedFieldLabel, type RestrictedFieldRow } from "@/lib/edit-suggestions";
+import { useId, useState } from "react";
+import { Check, Loader2, Lock } from "lucide-react";
+import { Rise } from "@/components/dashboard-stage";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  restrictedFieldDescription,
+  restrictedFieldLabel,
+  type RestrictedFieldRow,
+} from "@/lib/edit-suggestions";
+import {
+  CARD,
+  CARD_HINT,
+  CARD_TITLE,
+  FIELD_LABEL,
+  FOOTNOTE,
+  INPUT,
+  PRIMARY_BUTTON,
+  ROW,
+  ROW_ACTION,
+  SELECT_CONTENT,
+  SELECT_ITEM,
+  SELECT_TRIGGER,
+} from "../styles";
+
+type Notice = { tone: "success" | "error"; text: string } | null;
+
+const NETWORK_ERROR = "Could not reach the server. Check your connection and try again.";
 
 /**
- * #23 (F020) — manage which client fields CAMs cannot save directly. Same shape as
- * the suppressions panel: local state over the initial rows, POST/DELETE to the admin
- * route, refresh from its GET. Adding requires a reason because the panel shows why
- * a field is locked, not just that it is.
+ * #23 (F020) — lock and unlock client fields.
+ *
+ * Written for an admin who does not know the database (AGENTS.md, "Who will
+ * maintain this app"): fields are chosen from a list by their plain-English name,
+ * each with a sentence on what it is used for; nothing on screen is a column name.
+ * "Lock" / "Unlock" rather than restrict / retire, because that is what the admin
+ * is doing from a CAM's point of view.
+ *
+ * Talks to `/api/admin/restricted-fields` (POST locks or re-locks, DELETE unlocks)
+ * and refreshes from its GET, as before.
  */
 export function RestrictedFieldsPanel({
   initialFields,
+  lockableFields,
 }: {
   initialFields: RestrictedFieldRow[];
+  /** Every field the database will let an admin lock, locked or not. */
+  lockableFields: string[];
 }) {
   const [rows, setRows] = useState(initialFields);
   const [fieldName, setFieldName] = useState("");
   const [reason, setReason] = useState("");
-  const [message, setMessage] = useState("");
-  const [messageTone, setMessageTone] = useState<"info" | "error">("info");
-  const [busy, setBusy] = useState(false);
-  const [retiring, setRetiring] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [adding, setAdding] = useState(false);
+  const [working, setWorking] = useState<string | null>(null);
+  const selectId = useId();
+  const reasonId = useId();
+
+  const active = rows.filter((row) => row.active);
+  const unlocked = rows.filter((row) => !row.active);
+  const lockedNames = new Set(active.map((row) => row.field_name));
+  const available = lockableFields
+    .filter((field) => !lockedNames.has(field))
+    .sort((a, b) => restrictedFieldLabel(a).localeCompare(restrictedFieldLabel(b)));
+
+  const selectedDescription = fieldName ? restrictedFieldDescription(fieldName) : null;
 
   async function refresh() {
     const response = await fetch("/api/admin/restricted-fields");
@@ -31,202 +79,249 @@ export function RestrictedFieldsPanel({
     setRows(body.fields as RestrictedFieldRow[]);
   }
 
-  async function add(event: React.FormEvent) {
+  async function send(method: "POST" | "DELETE", payload: object): Promise<boolean> {
+    const response = await fetch("/api/admin/restricted-fields", {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setNotice({ tone: "error", text: body.error ?? "The change could not be saved. Try again." });
+      return false;
+    }
+    return true;
+  }
+
+  async function lock(event: React.FormEvent) {
     event.preventDefault();
-    setBusy(true);
-    setMessage("");
+    setNotice(null);
+    if (!fieldName) {
+      setNotice({ tone: "error", text: "Choose a field to lock from the list." });
+      return;
+    }
+    setAdding(true);
     try {
-      const response = await fetch("/api/admin/restricted-fields", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fieldName, reason }),
-      });
-      const body = await response.json();
-      if (!response.ok) {
-        setMessageTone("error");
-        setMessage(body.error ?? "The change could not be saved.");
-        return;
+      if (await send("POST", { fieldName, reason })) {
+        setNotice({
+          tone: "success",
+          text: `${restrictedFieldLabel(fieldName)} is now locked. CAMs will need to suggest changes to it from now on.`,
+        });
+        setFieldName("");
+        setReason("");
+        await refresh();
       }
-      setFieldName("");
-      setReason("");
-      setMessageTone("info");
-      setMessage(`"${restrictedFieldLabel(fieldName)}" is now restricted. It took effect immediately.`);
-      await refresh();
     } catch {
-      setMessageTone("error");
-      setMessage("Could not reach the server. Check your connection and try again.");
+      setNotice({ tone: "error", text: NETWORK_ERROR });
     } finally {
-      setBusy(false);
+      setAdding(false);
     }
   }
 
-  async function retire(fieldNameToRetire: string) {
-    setRetiring(fieldNameToRetire);
-    setMessage("");
+  async function unlock(field: string) {
+    setNotice(null);
+    setWorking(field);
     try {
-      const response = await fetch("/api/admin/restricted-fields", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fieldName: fieldNameToRetire }),
-      });
-      const body = await response.json();
-      if (!response.ok) {
-        setMessageTone("error");
-        setMessage(body.error ?? "The change could not be saved.");
-        return;
+      if (await send("DELETE", { fieldName: field })) {
+        setNotice({
+          tone: "success",
+          text: `${restrictedFieldLabel(field)} is unlocked. CAMs can change it directly again — you can lock it again below.`,
+        });
+        await refresh();
       }
-      setMessageTone("info");
-      setMessage(
-        `"${restrictedFieldLabel(fieldNameToRetire)}" is no longer restricted — CAMs can edit it directly again.`,
-      );
-      await refresh();
     } catch {
-      setMessageTone("error");
-      setMessage("Could not reach the server. Check your connection and try again.");
+      setNotice({ tone: "error", text: NETWORK_ERROR });
     } finally {
-      setRetiring(null);
+      setWorking(null);
     }
   }
 
-  async function reRestrict(row: RestrictedFieldRow) {
-    setRetiring(row.field_name);
-    setMessage("");
+  async function relock(row: RestrictedFieldRow) {
+    setNotice(null);
+    setWorking(row.field_name);
     try {
-      const response = await fetch("/api/admin/restricted-fields", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fieldName: row.field_name, reason: row.reason }),
-      });
-      const body = await response.json();
-      if (!response.ok) {
-        setMessageTone("error");
-        setMessage(body.error ?? "The change could not be saved.");
-        return;
+      if (await send("POST", { fieldName: row.field_name, reason: row.reason })) {
+        setNotice({
+          tone: "success",
+          text: `${restrictedFieldLabel(row.field_name)} is locked again.`,
+        });
+        await refresh();
       }
-      setMessageTone("info");
-      setMessage(
-        `"${restrictedFieldLabel(row.field_name)}" is restricted again. It took effect immediately.`,
-      );
-      await refresh();
     } catch {
-      setMessageTone("error");
-      setMessage("Could not reach the server. Check your connection and try again.");
+      setNotice({ tone: "error", text: NETWORK_ERROR });
     } finally {
-      setRetiring(null);
+      setWorking(null);
     }
   }
-
-  const active = rows.filter((row) => row.active);
-  const retired = rows.filter((row) => !row.active);
 
   return (
-    <div className="mt-6">
-      <form onSubmit={add} className="rounded-xl border border-black/10 bg-black/[0.015] p-4">
-        <p className="text-[13px] font-bold text-foreground/75">Restrict a client field</p>
-        <p className="mt-1 text-[13px] leading-[1.6] text-foreground/50">
-          Use the column name of the client record, e.g. trading_name. Only existing
-          text columns can be restricted; system columns are refused.
-        </p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-              Field (column name)
-            </span>
-            <Input
-              type="text"
-              value={fieldName}
-              onChange={(event) => setFieldName(event.target.value)}
-              required
-              placeholder="trading_name"
-              className="rounded-xl bg-white"
-            />
-          </label>
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-              Why (shown in this list)
-            </span>
-            <Input
-              type="text"
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              required
-              maxLength={500}
-              placeholder="Feeds dedup — wrong values corrupt matching."
-              className="rounded-xl bg-white"
-            />
-          </label>
-        </div>
-        <OriginButton className="mt-3" type="submit" size="sm" loading={busy} disabled={busy}>
-          Restrict field
-        </OriginButton>
-      </form>
-
-      {(message || messageTone === "error") && message && (
-        <p
-          aria-live="polite"
-          role={messageTone === "error" ? "alert" : undefined}
-          className={`mt-3 text-[13px] font-bold ${messageTone === "error" ? "text-destructive" : "text-emerald-700"}`}
-        >
-          {message}
-        </p>
+    <>
+      {notice && (
+        <Rise>
+          <p
+            aria-live="polite"
+            role={notice.tone === "error" ? "alert" : undefined}
+            className={`flex items-center gap-1.5 rounded-panel border px-4 py-3 text-[13px] font-semibold ${
+              notice.tone === "error"
+                ? "border-stop/30 bg-stop-wash text-stop"
+                : "border-go/30 bg-go-wash text-go"
+            }`}
+          >
+            {notice.tone === "success" && (
+              <Check aria-hidden="true" className="size-3.5 shrink-0" strokeWidth={2.5} />
+            )}
+            {notice.text}
+          </p>
+        </Rise>
       )}
 
-      <h2 className="mt-6 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-        Active restrictions
-      </h2>
-      <ul className="mt-2 divide-y divide-black/[0.06] rounded-xl border border-black/10">
-        {active.map((row) => (
-          <li key={row.field_name} className="flex items-start justify-between gap-4 p-4">
-            <div>
-              <p className="text-sm font-bold text-foreground/85">{restrictedFieldLabel(row.field_name)}</p>
-              <p className="mt-0.5 text-[13px] leading-[1.6] text-foreground/50">
-                <code className="rounded bg-black/[0.04] px-1 py-0.5 text-xs">{row.field_name}</code>{" "}
-                — {row.reason}
-              </p>
-            </div>
-            <OriginButton
-              size="sm"
-              type="button"
-              variant="outline"
-              disabled={retiring === row.field_name}
-              loading={retiring === row.field_name}
-              onClick={() => retire(row.field_name)}
-            >
-              Retire
-            </OriginButton>
-          </li>
-        ))}
-        {active.length === 0 && (
-          <li className="p-4 text-[13px] text-foreground/45">No fields are currently restricted.</li>
-        )}
-      </ul>
-
-      {retired.length > 0 && (
-        <>
-          <h2 className="mt-6 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-            Retired (history only)
+      <Rise>
+        <section aria-labelledby="locked-heading" className={CARD}>
+          <h2 id="locked-heading" className={CARD_TITLE}>
+            Locked fields
           </h2>
-          <ul className="mt-2 divide-y divide-black/[0.06] rounded-xl border border-black/10">
-            {retired.map((row) => (
-              <li key={row.field_name} className="flex items-start justify-between gap-4 p-4 opacity-60">
-                <div>
-                  <p className="text-sm font-bold text-foreground/70">{restrictedFieldLabel(row.field_name)}</p>
-                  <p className="mt-0.5 text-[13px] leading-[1.6] text-foreground/45">{row.reason}</p>
+          <p className={CARD_HINT}>
+            A CAM cannot change these on a client record. Instead they suggest the
+            change, and an admin approves or rejects it under Approvals. Lock the
+            details that would cause real problems if someone got them wrong.
+          </p>
+
+          <ul className="mt-4">
+            {active.map((row) => (
+              <li key={row.field_name} className={`${ROW} items-start`}>
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-center gap-1.5 text-sm font-medium text-ink">
+                    <Lock aria-hidden="true" className="size-3.5 shrink-0 text-faint" strokeWidth={2} />
+                    {restrictedFieldLabel(row.field_name)}
+                  </p>
+                  <p className="mt-1 text-[13px] leading-[1.55] text-dim">
+                    <span className="text-faint">Why: </span>
+                    {row.reason}
+                  </p>
                 </div>
-                <OriginButton
-                  size="sm"
+                <button
                   type="button"
-                  disabled={retiring === row.field_name}
-                  loading={retiring === row.field_name}
-                  onClick={() => reRestrict(row)}
+                  onClick={() => unlock(row.field_name)}
+                  disabled={working === row.field_name}
+                  aria-busy={working === row.field_name || undefined}
+                  className={`${ROW_ACTION} inline-flex items-center gap-1.5 disabled:pointer-events-none disabled:opacity-50`}
                 >
-                  Re-restrict
-                </OriginButton>
+                  {working === row.field_name && (
+                    <Loader2 aria-hidden="true" className="size-3 animate-spin" strokeWidth={2.2} />
+                  )}
+                  Unlock<span className="sr-only"> {restrictedFieldLabel(row.field_name)}</span>
+                </button>
               </li>
             ))}
+            {active.length === 0 && (
+              <li className={`${ROW} text-[13px] text-dim`}>
+                No fields are locked. CAMs can change every detail on a client record directly.
+              </li>
+            )}
           </ul>
-        </>
-      )}
-    </div>
+        </section>
+      </Rise>
+
+      <Rise>
+        <section aria-labelledby="lock-heading" className={CARD}>
+          <h2 id="lock-heading" className={CARD_TITLE}>
+            Lock another field
+          </h2>
+          <p className={CARD_HINT}>
+            Takes effect straight away for every CAM. You can unlock it again at any time.
+          </p>
+
+          {available.length === 0 ? (
+            <p className={`mt-4 border-t border-rule-soft pt-4 ${FOOTNOTE}`}>
+              Every field that can be locked already is.
+            </p>
+          ) : (
+            <form onSubmit={lock} noValidate className="mt-4 space-y-4 border-t border-rule-soft pt-4">
+              <div>
+                <label htmlFor={selectId} className={FIELD_LABEL}>
+                  Field
+                </label>
+                <Select value={fieldName} onValueChange={setFieldName}>
+                  <SelectTrigger id={selectId} className={`mt-2 ${SELECT_TRIGGER}`}>
+                    <SelectValue placeholder="Choose a field…" />
+                  </SelectTrigger>
+                  <SelectContent position="popper" className={SELECT_CONTENT}>
+                    {available.map((field) => (
+                      <SelectItem key={field} value={field} className={SELECT_ITEM}>
+                        {restrictedFieldLabel(field)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedDescription && (
+                  <p className="mt-2 rounded-inset bg-paper px-3 py-2 text-[13px] leading-[1.55] text-dim">
+                    {selectedDescription}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor={reasonId} className={FIELD_LABEL}>
+                  Why should changes be checked first?
+                </label>
+                <textarea
+                  id={reasonId}
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  maxLength={500}
+                  rows={2}
+                  placeholder="For example: outreach emails are sent to this address, so a mistake means emails go to the wrong place."
+                  className={`mt-2 ${INPUT} h-auto py-2 leading-[1.55]`}
+                />
+                <p className="mt-2 text-[13px] leading-[1.55] text-dim">
+                  Shown next to the field in the list above, so the next admin knows why it is locked.
+                </p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={adding}
+                aria-busy={adding || undefined}
+                className={PRIMARY_BUTTON}
+              >
+                {adding && <Loader2 className="size-3.5 animate-spin" strokeWidth={2.2} />}
+                {adding ? "Locking…" : "Lock field"}
+              </button>
+            </form>
+          )}
+
+          {unlocked.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-[13px] font-medium text-ink">Previously locked</h3>
+              <ul className="mt-2">
+                {unlocked.map((row) => (
+                  <li key={row.field_name} className={`${ROW} items-start`}>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-ink">{restrictedFieldLabel(row.field_name)}</p>
+                      <p className="mt-1 text-[13px] leading-[1.55] text-dim">
+                        <span className="text-faint">Was locked because: </span>
+                        {row.reason}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => relock(row)}
+                      disabled={working === row.field_name}
+                      aria-busy={working === row.field_name || undefined}
+                      className={`${ROW_ACTION} inline-flex items-center gap-1.5 disabled:pointer-events-none disabled:opacity-50`}
+                    >
+                      {working === row.field_name && (
+                        <Loader2 aria-hidden="true" className="size-3 animate-spin" strokeWidth={2.2} />
+                      )}
+                      Lock again<span className="sr-only"> {restrictedFieldLabel(row.field_name)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      </Rise>
+    </>
   );
 }

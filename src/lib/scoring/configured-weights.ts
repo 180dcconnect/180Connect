@@ -22,6 +22,11 @@ import "server-only";
 import { createAdminClient } from "../supabase/admin.ts";
 import { reportError } from "../error-logging.ts";
 import { sanitizeWeights, DEFAULT_WEIGHTS, type ScoutWeights } from "./calculate-priority-score.ts";
+import {
+  DEFAULT_SCORING_RULES,
+  sanitizeScoringRules,
+  type ScoringRules,
+} from "./scout-config.ts";
 
 export type ActiveScoutConfig = {
   weights: ScoutWeights;
@@ -30,12 +35,21 @@ export type ActiveScoutConfig = {
   id: string | null;
   /** True when the database could not be read/parsed and defaults were used. */
   degraded: boolean;
+  /**
+   * What each check rewards — sector ranking, priority towns, band scores — from
+   * the same config row. Optional in the type so hand-built test configs stay
+   * valid; every config this module returns carries it.
+   */
+  rules?: ScoringRules;
+  /** When the active version was saved; scores older than this predate it. */
+  createdAt?: string | null;
 };
 
 type ModelVersionRow = {
   id: string;
   version: string;
   config: { weights?: unknown } | null;
+  created_at: string;
 };
 
 export async function getActiveScoutConfig(): Promise<ActiveScoutConfig> {
@@ -44,12 +58,19 @@ export async function getActiveScoutConfig(): Promise<ActiveScoutConfig> {
     await reportError(new Error("Service-role client unavailable for SCOUT config"), {
       operation: "scout_config.load",
     });
-    return { weights: DEFAULT_WEIGHTS, version: null, id: null, degraded: true };
+    return {
+      weights: DEFAULT_WEIGHTS,
+      version: null,
+      id: null,
+      degraded: true,
+      rules: DEFAULT_SCORING_RULES,
+      createdAt: null,
+    };
   }
 
   const { data, error } = await admin
     .from("model_versions")
-    .select("id, version, config")
+    .select("id, version, config, created_at")
     .eq("model_name", "SCOUT")
     .eq("is_active", true)
     .limit(1)
@@ -65,6 +86,8 @@ export async function getActiveScoutConfig(): Promise<ActiveScoutConfig> {
       version: data?.version ?? null,
       id: data?.id ?? null,
       degraded: true,
+      rules: DEFAULT_SCORING_RULES,
+      createdAt: null,
     };
   }
 
@@ -76,6 +99,8 @@ export async function getActiveScoutConfig(): Promise<ActiveScoutConfig> {
     version: data.version,
     id: data.id,
     degraded: false,
+    rules: sanitizeScoringRules(data.config),
+    createdAt: data.created_at,
   };
 }
 

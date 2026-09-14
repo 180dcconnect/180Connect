@@ -17,6 +17,8 @@
  * src/lib/gmail/reply-sync.ts via src/lib/notification-email.ts.
  */
 
+import { NOTIFICATION_CATALOGUE } from "./notification-catalogue.ts";
+
 export type EmailNotificationTypeOption = {
   type: string;
   label: string;
@@ -24,20 +26,20 @@ export type EmailNotificationTypeOption = {
 };
 
 /**
- * Only the owning CAM's reply notification (`client_reply_received`, F174) is
- * emailable on this ticket — F179's "could be P1 for replies" scope. F174's
- * admin-fallback token (`unowned_client_reply_received`) deliberately stays
- * in-app only: it has no single CAM to own the signal. The list is still a
- * list, not a single boolean, so a future type is one array entry away from
- * its own toggle, not a schema change.
+ * The types with an email actually wired, read off the catalogue's
+ * `emailable` flag so a toggle can never exist for an email nothing sends.
+ *
+ * - `client_reply_received` — F179, sent from src/lib/gmail/reply-sync.ts.
+ * - `follow_up_due` — sent from src/lib/outreach/reminder-sweep.ts.
+ * - `outreach_send_failed` — sent from src/lib/outreach/scheduled-worker.ts.
+ *
+ * F174's admin-fallback token (`unowned_client_reply_received`) deliberately
+ * stays in-app only: it has no single CAM to own the signal.
  */
-export const EMAIL_NOTIFICATION_TYPE_OPTIONS: readonly EmailNotificationTypeOption[] = [
-  {
-    type: "client_reply_received",
-    label: "Client replies",
-    description: "Email me when a client I own replies to an outreach email.",
-  },
-];
+export const EMAIL_NOTIFICATION_TYPE_OPTIONS: readonly EmailNotificationTypeOption[] =
+  NOTIFICATION_CATALOGUE.filter((kind) => kind.emailable).map(
+    ({ type, label, description }) => ({ type, label, description }),
+  );
 
 /** Mirrors the migration's column default, for rendering fallbacks. */
 export const DEFAULT_EMAIL_NOTIFICATION_TYPES: readonly string[] = [

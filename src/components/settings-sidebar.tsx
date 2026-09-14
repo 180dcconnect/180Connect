@@ -5,7 +5,14 @@ import { usePathname } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Accessibility } from "@/components/animate-ui/icons/accessibility";
 import { User } from "@/components/animate-ui/icons/user";
+import { BellRing } from "@/components/animate-ui/icons/bell-ring";
+import { Blocks } from "@/components/animate-ui/icons/blocks";
+import { ChartColumnIncreasing } from "@/components/animate-ui/icons/chart-column-increasing";
+import { ClipboardList } from "@/components/animate-ui/icons/clipboard-list";
+import { RefreshCwOff } from "@/components/animate-ui/icons/refresh-cw-off";
+import { useRef } from "react";
 import { AnimateIcon } from "@/components/animate-ui/icons/icon";
+import { StampIcon, type StampIconHandle } from "@/components/ui/stamp-icon";
 import { SidebarAccountMenu } from "@/components/sidebar-account-menu";
 
 export type SettingsNavItem = {
@@ -18,6 +25,35 @@ export type SettingsNavSection = {
   label: string;
   items: SettingsNavItem[];
 };
+
+/**
+ * Separate component so we can call useRef at the top level (no hooks in map
+ * callbacks). The ref lets the Link's row-level hover trigger StampIcon's
+ * animation rather than requiring the cursor to be directly over the icon.
+ */
+function SendingLimitNavItem({ href, label, active }: { href: string; label: string; active: boolean }) {
+  const stampRef = useRef<StampIconHandle>(null);
+  const linkClasses = `flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm transition-all hover:bg-black/10 ${
+    active
+      ? "bg-black/12 font-bold text-black"
+      : "font-semibold text-black/85 hover:text-black"
+  }`;
+
+  return (
+    <li>
+      <Link
+        href={href}
+        aria-current={active ? "page" : undefined}
+        className={linkClasses}
+        onMouseEnter={() => stampRef.current?.startAnimation()}
+        onMouseLeave={() => stampRef.current?.stopAnimation()}
+      >
+        <StampIcon ref={stampRef} size={16} className="shrink-0 pointer-events-none" aria-hidden />
+        <span className="truncate">{label}</span>
+      </Link>
+    </li>
+  );
+}
 
 /**
  * The settings area's own rail, which replaces the app sidebar rather than
@@ -82,15 +118,36 @@ export function SettingsSidebar({
             <ul className="space-y-1">
               {section.items.map((item) => {
                 const active = pathname === item.href;
-                const isAccessibility = item.href === "/settings/accessibility";
-                const isProfile = item.href === "/settings/profile";
-                const isAnimated = isAccessibility || isProfile;
+                const iconByHref: Record<string, React.ComponentType<{ className?: string; "aria-hidden"?: boolean | "true" | "false" }>> = {
+                  "/settings/profile": User,
+                  "/settings/accessibility": Accessibility,
+                  "/settings/notifications": BellRing,
+                  "/settings/outreach-preferences": Blocks,
+                  "/settings/score-settings": ChartColumnIncreasing,
+                  "/settings/data-handling-rules": ClipboardList,
+                  "/settings/restricted-fields": RefreshCwOff,
+                };
+                const Icon = iconByHref[item.href];
                 const linkClasses = `flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm transition-all hover:bg-black/10 ${
                   active
                     ? "bg-black/12 font-bold text-black"
                     : "font-semibold text-black/85 hover:text-black"
                 }`;
-                if (isAnimated) {
+
+                // StampIcon uses a ref to fire on row hover — extracted to
+                // SendingLimitNavItem above to satisfy the Rules of Hooks.
+                if (item.href === "/settings/sending-limits") {
+                  return (
+                    <SendingLimitNavItem
+                      key={item.href}
+                      href={item.href}
+                      label={item.label}
+                      active={active}
+                    />
+                  );
+                }
+
+                if (Icon) {
                   return (
                     <li key={item.href}>
                       <AnimateIcon animateOnHover asChild>
@@ -99,11 +156,7 @@ export function SettingsSidebar({
                           aria-current={active ? "page" : undefined}
                           className={linkClasses}
                         >
-                          {isProfile ? (
-                            <User className="h-4 w-4 shrink-0" aria-hidden="true" />
-                          ) : (
-                            <Accessibility className="h-4 w-4 shrink-0" aria-hidden="true" />
-                          )}
+                          <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                           <span className="truncate">{item.label}</span>
                         </Link>
                       </AnimateIcon>

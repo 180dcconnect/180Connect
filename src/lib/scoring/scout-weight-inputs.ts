@@ -14,35 +14,38 @@ import { z } from "zod";
 // and does not read Next's tsconfig path aliases.
 import { safeValidate } from "../validation.ts";
 
+// Labels are the names the client record's score breakdown uses
+// (src/app/clients/[id]/score-breakdown.tsx), so an admin tuning "Size" here is
+// tuning the "Size" they see on a client. Descriptions are written for an admin
+// who is not a developer (AGENTS.md, "Who will maintain this app").
 export const SCOUT_WEIGHT_PARAMETERS = [
   {
     key: "sector",
-    label: "Sector fit",
-    description:
-      "How strongly a client's sector influences its priority. Charities imported from the " +
-      "register arrive classified; a client with no sector recorded scores the neutral.",
+    label: "Sector",
+    description: "The kind of work the client does, scored by the sector ranking below.",
   },
   {
     key: "geography",
     label: "Geography",
-    description:
-      "Weight given to where the client is based, against the branch's priority cities " +
-      "(Sheffield, Rotherham, Barnsley, Doncaster — the same list the import criteria use).",
+    description: "Whether the client is based in one of the priority towns set below.",
   },
   {
     key: "size",
-    label: "Organisation size",
-    description: "Weight given to the client's latest annual income band.",
+    label: "Size",
+    description:
+      "The client's income on its latest published accounts, scored by the income bands below.",
   },
   {
     key: "partnershipHistory",
     label: "Partnership history",
-    description: "Weight given to previously matched grant awards (360Giving data).",
+    description:
+      "How many public grants we can match to the client. More grants rank higher; none never counts against them.",
   },
   {
     key: "previousContact",
     label: "Previous contact",
-    description: "Weight given to where the client sits in the outreach pipeline today.",
+    description:
+      "How far the client got with us before — already worked with us ranks highest, a firm no ranks lowest.",
   },
 ] as const;
 
@@ -69,12 +72,36 @@ const percentField = (label: string) =>
 // Keys must mirror SCOUT_WEIGHT_PARAMETERS; scout-weight-inputs.test.ts asserts
 // they stay in sync so a new parameter cannot be added to one side only.
 export const scoutWeightsFormSchema = z.object({
-  sector: percentField("Sector fit"),
+  sector: percentField("Sector"),
   geography: percentField("Geography"),
-  size: percentField("Organisation size"),
+  size: percentField("Size"),
   partnershipHistory: percentField("Partnership history"),
   previousContact: percentField("Previous contact"),
 });
+
+/**
+ * False when every weight is zero. The engine scores every client 0 in that case
+ * (calculatePriorityScore's zero-sum guard), which empties the priority order
+ * without saying so. Kept as its own check rather than a refine on the schema, so
+ * the schema stays a plain object whose keys the tests compare.
+ */
+export function anyWeightCounts(weights: Record<ScoutWeightKey, number>): boolean {
+  return SCOUT_WEIGHT_PARAMETERS.some((parameter) => (weights[parameter.key] ?? 0) > 0);
+}
+
+/** Each weight's share of the whole score, 0-100. All zero when nothing counts. */
+export function weightShares(weights: Record<ScoutWeightKey, number>): Record<ScoutWeightKey, number> {
+  const total = SCOUT_WEIGHT_PARAMETERS.reduce(
+    (sum, parameter) => sum + Math.max(0, weights[parameter.key] ?? 0),
+    0,
+  );
+  return Object.fromEntries(
+    SCOUT_WEIGHT_PARAMETERS.map((parameter) => [
+      parameter.key,
+      total === 0 ? 0 : (Math.max(0, weights[parameter.key] ?? 0) / total) * 100,
+    ]),
+  ) as Record<ScoutWeightKey, number>;
+}
 
 /** Form field name for a parameter ("weight_sector" etc.). */
 export function weightFieldName(key: ScoutWeightKey): string {

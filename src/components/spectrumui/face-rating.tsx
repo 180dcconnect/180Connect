@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useCallback, useRef, useState } from "react"
-import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react"
 import { cn } from "@/lib/utils"
 
 import {
@@ -103,7 +103,7 @@ export function FaceRating({
   label = "How was your experience?",
   className,
 }: FaceRatingProps) {
-  const shouldReduceMotion = useReducedMotion()
+  const shouldReduceMotion = useReducedMotionConfig()
   const [internalValue, setInternalValue] = useState(defaultValue)
   const [hovered, setHovered] = useState(0)
   const [bouncing, setBouncing] = useState(false)

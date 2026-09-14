@@ -24,6 +24,14 @@ export interface HorizontalStickGaugeProps {
   className?: string;
   /** Active stick stroke color. Defaults to var(--lead). */
   activeColor?: string;
+  /**
+   * Optional left-to-right gradient stops for the active sticks
+   * (single-metric mode only — ignored when `segments` are given). Two or more
+   * hex stops colour each active stick at its own position along them instead
+   * of `activeColor`. Brand colour only (e.g. a model maker's mark on an
+   * AI-attribution chart) — never state. State still comes from `Pill`.
+   */
+  activeGradient?: string[];
   /** Inactive stick stroke color. Defaults to var(--rule-soft). */
   inactiveColor?: string;
   /** Stick stroke color when hovering the inactive segment. Defaults to var(--faint). */
@@ -55,6 +63,40 @@ type HoverState = {
   segmentColor: string;
 };
 
+function parseHexColor(hex: string): [number, number, number] | null {
+  const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!match) return null;
+  const digits = match[1];
+  const full =
+    digits.length === 3
+      ? digits
+          .split("")
+          .map((char) => char + char)
+          .join("")
+      : digits;
+  const value = Number.parseInt(full, 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+/**
+ * The gradient colour at position `t` (0–1) across `stops`, as an `rgb()`
+ * string. A stop that is not hex falls back to the nearest valid one, so one
+ * bad stop degrades to a shorter gradient rather than an unpainted stick.
+ */
+function sampleGradient(stops: readonly string[], t: number): string {
+  const colours = stops.map(parseHexColor);
+  const clamped = Math.min(1, Math.max(0, t)) * (stops.length - 1);
+  const lower = Math.floor(clamped);
+  const upper = Math.min(stops.length - 1, lower + 1);
+  const fraction = clamped - lower;
+  const from = colours[lower] ?? colours[upper] ?? [0, 0, 0];
+  const to = colours[upper] ?? from;
+  const mixed = from.map((channel, index) =>
+    Math.round(channel + (to[index] - channel) * fraction),
+  );
+  return `rgb(${mixed[0]}, ${mixed[1]}, ${mixed[2]})`;
+}
+
 export function HorizontalStickGauge({
   segments,
   checked = 0,
@@ -63,6 +105,7 @@ export function HorizontalStickGauge({
   ariaValueText,
   className = "",
   activeColor = "var(--lead)",
+  activeGradient,
   inactiveColor = "var(--rule-soft)",
   hoverInactiveColor = "var(--faint)",
   pitch = 8.5,
@@ -268,7 +311,7 @@ export function HorizontalStickGauge({
       segmentValue: isChecked ? clampedChecked : remaining,
       segmentPct: isChecked ? singlePct : 100 - singlePct,
       segmentColor: isChecked
-        ? activeColor
+        ? (gradientCss ?? activeColor)
         : hoverInactiveColor !== "var(--faint)"
           ? hoverInactiveColor
           : inactiveColor,
@@ -287,6 +330,18 @@ export function HorizontalStickGauge({
     const minPadding = Math.min(85, effectiveWidth / 2);
     return Math.max(minPadding, Math.min(effectiveWidth - minPadding, hoverState.x));
   }, [hoverState, effectiveWidth]);
+
+  // Brand gradient for the active sticks (single-metric mode only). Each
+  // active stick takes the solid interpolated colour at its own position along
+  // the stops, so the row reads as a discrete colour flow. Deliberately
+  // computed in JS per stick rather than via an SVG linearGradient reference:
+  // a `url(#…)` paint server that fails to resolve paints as transparent —
+  // invisible sticks with a healthy-looking grey track underneath.
+  const gradientStops =
+    !hasSegments && activeGradient && activeGradient.length >= 2 ? activeGradient : null;
+  const gradientCss = gradientStops
+    ? `linear-gradient(90deg, ${gradientStops.join(", ")})`
+    : null;
 
   const svgHeight = stickHeight + 6;
 
@@ -386,7 +441,12 @@ export function HorizontalStickGauge({
               const fill = Math.min(1, Math.max(0, displayProgress - tick.index));
               if (fill <= 0) return null;
 
-              const activeStroke = activeColor;
+              const activeStroke = gradientStops
+                ? sampleGradient(
+                    gradientStops,
+                    targetTicksCount > 1 ? tick.index / (targetTicksCount - 1) : 0,
+                  )
+                : activeColor;
               let strokeW = stickWidth;
               let activeOpacity = Math.min(1, fill * 1.5);
 
@@ -434,7 +494,7 @@ export function HorizontalStickGauge({
             <div className="flex items-center gap-1.5">
               <span
                 className="size-1.5 shrink-0 rounded-full"
-                style={{ backgroundColor: hoverState.segmentColor }}
+                style={{ background: hoverState.segmentColor }}
               />
               <span className="font-semibold text-white">
                 {hoverState.segmentLabel}

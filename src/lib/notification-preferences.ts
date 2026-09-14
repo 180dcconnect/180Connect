@@ -26,9 +26,9 @@ export const NOTIFICATION_FREQUENCY_LABELS: Record<NotificationFrequency, string
 };
 
 export const NOTIFICATION_FREQUENCY_DESCRIPTIONS: Record<NotificationFrequency, string> = {
-  immediate: "See every notification the moment it arrives.",
-  daily: "Notifications still arrive, but the bell won't interrupt you until your next visit that day.",
-  weekly: "Notifications still arrive, but the bell won't interrupt you until you check in that week.",
+  immediate: "The bell gets your attention the moment something arrives. No digest email.",
+  daily: "The bell stays quiet. At 9am each day, one email lists everything still unread.",
+  weekly: "The bell stays quiet. At 9am each Monday, one email lists everything still unread.",
 };
 
 /**
@@ -47,6 +47,11 @@ const ALWAYS_IMMEDIATE_TYPES: ReadonlySet<string> = new Set([
   "client_reply_received",
   "unowned_client_reply_received",
 ]);
+
+/** Whether a type interrupts straight away whatever the recipient's frequency. */
+export function isAlwaysImmediate(notificationType: string): boolean {
+  return ALWAYS_IMMEDIATE_TYPES.has(notificationType);
+}
 
 /**
  * F178 AC2: the single decision every delivery surface defers to — "should

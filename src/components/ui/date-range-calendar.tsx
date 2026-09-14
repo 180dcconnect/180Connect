@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, X } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
 import { EASE } from "@/components/brand/motion";
 import { cn } from "@/lib/utils";
 
@@ -80,7 +80,7 @@ export function DateRangeCalendar({
   showPresets = true,
   className = "",
 }: DateRangeCalendarProps) {
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotionConfig();
   const today = useMemo(() => todayIso(now ?? new Date()), [now]);
 
   // Open on the month holding the current start, else on the newest month the

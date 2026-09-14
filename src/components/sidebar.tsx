@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentType } from "react";
-import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
+import { AnimatePresence, motion, useReducedMotionConfig, type Variants } from "motion/react";
 import {
   ChartLine,
   ClipboardCheck,
@@ -17,6 +17,7 @@ import {
 import { Cctv } from "@/components/animate-ui/icons/cctv";
 import { CloudDownload } from "@/components/animate-ui/icons/cloud-download";
 import { Compass } from "@/components/animate-ui/icons/compass";
+import { LoaderPinwheel } from "@/components/animate-ui/icons/loader-pinwheel";
 import { AnimateIcon } from "@/components/animate-ui/icons/icon";
 import { PanelLeftClose } from "@/components/animate-ui/icons/panel-left-close";
 import { PanelLeftOpen } from "@/components/animate-ui/icons/panel-left-open";
@@ -55,7 +56,8 @@ export type SidebarIconName =
   | "database"
   | "settings"
   | "actions"
-  | "analytics";
+  | "analytics"
+  | "ai";
 
 export type SidebarNavItem = {
   href: string;
@@ -80,8 +82,9 @@ type RailIcon = ComponentType<{
  * Nav items name an icon rather than importing one, so the shell stays a plain
  * list of routes and every icon in the rail is drawn on the same grid.
  *
- * Dashboard, clients, team management, audit log, and import status use animated glyphs,
- * which draw their own motion on the row rather than the shared spring below.
+ * Dashboard, clients, team management, audit log, import status, and artificial
+ * intelligence use animated glyphs, which draw their own motion on the row
+ * rather than the shared spring below.
  */
 const ICONS: Record<SidebarIconName, RailIcon> = {
   dashboard: Compass,
@@ -99,6 +102,12 @@ const ICONS: Record<SidebarIconName, RailIcon> = {
   settings: Settings,
   actions: ListChecks,
   analytics: ChartLine,
+  // The Generate draft pinwheel — the same glyph as the compose modal's AI
+  // drafting button. It inherits the row's AnimateIcon hover context, so it
+  // spins on row hover like the import icon does. No ICON_MOTION entry: the
+  // glyph animates its own interior, so a wrapper transform on top would read
+  // as two gestures.
+  ai: LoaderPinwheel,
 };
 
 const MotionLink = motion.create(Link);
@@ -118,9 +127,9 @@ const ICON_SPRING = { type: "spring", stiffness: 420, damping: 17, mass: 0.6 } a
 const ICON_MOTION: Partial<Record<SidebarIconName, Variants>> = {
   admin: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: -6 } },
   feedback: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: 6 } },
-  // `dashboard`, `clients`, `users`, `audit`, `import`, and `database` are deliberately absent:
-  // those glyphs animate their own interiors, so a wrapper transform on top would
-  // read as two gestures.
+  // `dashboard`, `clients`, `users`, `audit`, `import`, `database`, and `ai`
+  // are deliberately absent: those glyphs animate their own interiors, so a
+  // wrapper transform on top would read as two gestures.
 };
 
 /**
@@ -172,7 +181,7 @@ export function Sidebar({
   };
 
   // Someone who asked the OS for less motion gets the colour change only.
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotionConfig();
   const iconVariants = (variants: Variants | undefined) =>
     reduceMotion ? undefined : variants;
 

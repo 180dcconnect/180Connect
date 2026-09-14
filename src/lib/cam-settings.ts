@@ -4,6 +4,7 @@ import {
   type GeographicReach,
   type IncomeBand,
 } from "../app/settings/outreach-preferences/constants.ts";
+import { describeIncomeRange, isIncomeRangeActive } from "./income-range.ts";
 
 export type CamUser = {
   id: string;
@@ -18,9 +19,28 @@ export type CamOutreachPreferences = {
   preferred_geographic_reach: GeographicReach[];
   preferred_sectors: string[];
   preferred_income_bands: IncomeBand[];
+  /** F198 — the size range in pounds; replaces the bands when set. */
+  preferred_income_min?: number | null;
+  preferred_income_max?: number | null;
   updated_at?: string | null;
   created_at?: string | null;
 };
+
+/**
+ * What a CAM's size preference says, for read-only views: the exact range when
+ * one is saved, otherwise the legacy band labels.
+ */
+export function getIncomePreferenceLabels(
+  preferences: CamOutreachPreferences | null | undefined,
+): string[] {
+  if (!preferences) return [];
+  const range = {
+    min: preferences.preferred_income_min ?? null,
+    max: preferences.preferred_income_max ?? null,
+  };
+  if (isIncomeRangeActive(range)) return [describeIncomeRange(range)!];
+  return getIncomeBandLabels(preferences.preferred_income_bands);
+}
 
 /**
  * Checks whether any outreach preference has been customized for this CAM.
@@ -33,7 +53,9 @@ export function hasConfiguredPreferences(
   return (
     (preferences.preferred_geographic_reach?.length ?? 0) > 0 ||
     (preferences.preferred_sectors?.length ?? 0) > 0 ||
-    (preferences.preferred_income_bands?.length ?? 0) > 0
+    (preferences.preferred_income_bands?.length ?? 0) > 0 ||
+    preferences.preferred_income_min != null ||
+    preferences.preferred_income_max != null
   );
 }
 
@@ -88,6 +110,10 @@ export function sanitizeQueuePreferences(
     preferred_income_bands: Array.isArray(raw.preferred_income_bands)
       ? (raw.preferred_income_bands as IncomeBand[])
       : [],
+    preferred_income_min:
+      typeof raw.preferred_income_min === "number" ? raw.preferred_income_min : null,
+    preferred_income_max:
+      typeof raw.preferred_income_max === "number" ? raw.preferred_income_max : null,
     updated_at: raw.updated_at ?? null,
     created_at: raw.created_at ?? null,
   };

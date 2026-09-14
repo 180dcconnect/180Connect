@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducedMotion, motion } from "motion/react";
+import { useReducedMotionConfig, motion } from "motion/react";
 
 export type MentionTagProps = {
   text: string;
@@ -39,7 +39,7 @@ export function MentionTag({
   className = "",
   matchTextarea = false,
 }: MentionTagProps) {
-  const reducedMotion = useReducedMotion();
+  const reducedMotion = useReducedMotionConfig();
   const shouldAnimate = animate && !reducedMotion;
 
   const isDark = variant === "dark";

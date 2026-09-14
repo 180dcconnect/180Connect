@@ -4,6 +4,26 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+## Who will maintain this app
+
+The app is built by a technical developer, but it is being built on the assumption
+that **non-technical people will run and maintain it** once that developer moves on.
+Admins, CAMs and branch leadership are consultants, not engineers: they know the
+clients, not the database. Design every screen — especially admin and settings
+screens — for them:
+
+- **Never ask a user to type or read an internal name.** No column names
+  (`trading_name`), table names, enum values, IDs or error codes on screen. Offer a
+  list of choices in plain English and translate internal names at the edge.
+- **Say what a setting does in the words of the job**, not the implementation:
+  "CAMs must suggest a change and an admin approves it", not "column-guard trigger".
+- **Errors say what to do next**, never what Postgres said.
+- **Prefer a choice over free text** wherever the valid answers are knowable, so a
+  wrong answer is impossible rather than rejected.
+- **A change should be undoable from the same screen**, and the screen should say so.
+- If something genuinely needs a developer, say that plainly on the page rather than
+  exposing the knob.
+
 ## Before you write any code
 
 - `src/proxy.ts` replaces `middleware.ts`. There is no `middleware.ts` in this project.

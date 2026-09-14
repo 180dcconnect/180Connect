@@ -442,13 +442,43 @@ a:hover .mail-sprite {
  * Root scaling, enhanced contrast, relaxed line height, and reduced motion modes.
  */
 
-/* 1. Font Size Scaling (AC1 & AC2) */
+/* 1. Text size — zoom, not root font-size.
+   Most app text is set in px (`text-[13px]`), which a root font-size never
+   reaches, so the old rule only moved the few rem-sized elements. `zoom` scales
+   px, rem and spacing together, the way browser zoom does. Viewport-height
+   utilities are divided back down so a zoomed `min-h-screen` does not overflow
+   by 15–30% and put a scrollbar on every page. */
 html[data-font-size="large"] {
-  font-size: 115%;
+  --a11y-zoom: 1.15;
 }
 
 html[data-font-size="extra-large"] {
-  font-size: 130%;
+  --a11y-zoom: 1.3;
+}
+
+html[data-font-size] body {
+  zoom: var(--a11y-zoom);
+  min-height: calc(100% / var(--a11y-zoom));
+}
+
+html[data-font-size] .min-h-screen {
+  min-height: calc(100vh / var(--a11y-zoom));
+}
+
+html[data-font-size] .h-screen {
+  height: calc(100vh / var(--a11y-zoom));
+}
+
+html[data-font-size] .max-h-screen {
+  max-height: calc(100vh / var(--a11y-zoom));
+}
+
+html[data-font-size] .h-dvh {
+  height: calc(100dvh / var(--a11y-zoom));
+}
+
+html[data-font-size] .min-h-dvh {
+  min-height: calc(100dvh / var(--a11y-zoom));
 }
 
 /* 2. Line Spacing & Readability */
@@ -466,6 +496,16 @@ html[data-contrast="high"] {
   --muted-foreground: #1c1a18;
   --border: #2e3c2f;
   --input: #2e3c2f;
+
+  /* Filed Record tokens. Screens converted to the app design system never use
+     `text-foreground/NN` or `border-black/[…]`, so the class-by-class overrides
+     below miss them entirely — high contrast has to reach the tokens too. */
+  --ink: #000000;
+  --dim: #1f2630;
+  --faint: #3a4350;
+  --rule: #4a5361;
+  --rule-soft: #6b7380;
+  --lead: #152a5c;
 }
 
 html[data-contrast="high"] body {
@@ -511,13 +551,54 @@ html[data-contrast="high"] *:focus-visible {
   outline-offset: 2px !important;
 }
 
-/* 4. Reduced Motion */
-html[data-reduced-motion="reduced"] *,
+/* 4. Motion
+   Reduced: CSS transitions and animations collapse to their end state, except
+   loading spinners — a frozen spinner reads as a hung page. Motion (JS)
+   animations are handled by AccessibilityProvider's MotionConfig.
+   Off: everything stops, spinners included; MotionGlobalConfig.skipAnimations
+   does the same for Motion. */
+html[data-reduced-motion] {
+  scroll-behavior: auto !important;
+}
+
+html[data-reduced-motion="reduced"] *:not(.animate-spin),
 html[data-reduced-motion="reduced"] *::before,
 html[data-reduced-motion="reduced"] *::after {
   animation-duration: 0.001ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.001ms !important;
+}
+
+html[data-reduced-motion="off"] *,
+html[data-reduced-motion="off"] *::before,
+html[data-reduced-motion="off"] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* 5. Underlined links — page content only (`main`), not the sidebar's nav rows. */
+html[data-underline-links="on"] main a:not([role="tab"]):not([role="button"]) {
+  text-decoration-line: underline !important;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+/* 6. Strong focus indicator — on every control, including those whose own
+   styles set `outline-none`. Skips `tabindex="-1"` targets (the skip link's
+   <main>), which take focus programmatically and would outline the page. */
+html[data-focus-indicator="strong"] *:focus-visible:not([tabindex="-1"]) {
+  outline: 3px solid var(--lead) !important;
+  outline-offset: 3px !important;
+}
+
+/* 7. Colour-blind safe status colours — the state tokens only. go moves off
+   green to blue and stop off red to vermilion, so good and bad no longer sit
+   on the red–green axis. Every Pill also carries a dot and a word. */
+html[data-status-colours="colour-blind"] {
+  --go: #1d5fa6;
+  --go-wash: #e2ecf7;
+  --stop: #b0400b;
+  --stop-wash: #f8e6dc;
 }
 
 /* ─── Synthetic Nature hero page (scoped) ─────────────────────────────── */

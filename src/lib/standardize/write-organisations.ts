@@ -42,6 +42,7 @@
 
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
 import { checkClientCriteria, type ClientCriteriaResult } from "../client-criteria.ts";
+import { loadClientCriteria } from "../client-criteria-loader.ts";
 import { reportError } from "../error-logging.ts";
 import { fetchPaged } from "../supabase/fetch-paged.ts";
 import { persistLatestScore } from "../scoring/persist-latest-score.ts";
@@ -548,6 +549,7 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
         organisationId,
         scoreableFrom(org, scoreInputs),
         scoutConfig.weights,
+        scoutConfig.rules,
       );
       if (!scored.ok) {
         await reportError(new Error(scored.error), {
@@ -1226,6 +1228,19 @@ async function annotateSingleFromRegisterOrReport(
   }
 }
 
+type CriteriaCheck = (input: Parameters<typeof checkClientCriteria>[0]) => ClientCriteriaResult;
+
+/**
+ * The criteria check a promote run uses. An injected check (a test spy) is used
+ * as-is; the real one is bound to the priority towns saved in score settings,
+ * loaded once per run, so "local" on import means what it means for scoring.
+ */
+async function resolveCriteriaCheck(criteriaCheck: CriteriaCheck): Promise<CriteriaCheck> {
+  if (criteriaCheck !== checkClientCriteria) return criteriaCheck;
+  const config = await loadClientCriteria();
+  return (input) => checkClientCriteria(input, config);
+}
+
 export async function promotePendingCharityCommissionRecords(
   store: OrganisationWriteStore | null = createDefaultOrganisationWriteStore(),
   checkWebsite: (value: string) => Promise<WebsiteStatus> = checkWebsiteReachability,
@@ -1242,6 +1257,7 @@ export async function promotePendingCharityCommissionRecords(
   requireStore(store);
 
   const pending = await store.loadPendingRecords("charity_commission");
+  const checkCriteria = await resolveCriteriaCheck(criteriaCheck);
   const counts = newCounts(pending.length);
 
   // Loaded once per run, then augmented after each successful insert so
@@ -1256,7 +1272,7 @@ export async function promotePendingCharityCommissionRecords(
   // (an injected criteriaCheck may be a test spy asserting call count).
   const prepared = pending.map((record) => {
     const org = standardizeCharityCommissionRecord(record.raw_payload as RawCharityCommissionRecord);
-    const criteria = isUsable(org) ? criteriaCheck(buildCriteriaInput(org)) : null;
+    const criteria = isUsable(org) ? checkCriteria(buildCriteriaInput(org)) : null;
     return { record, org, criteria };
   });
 
@@ -1449,6 +1465,7 @@ export async function promotePendingCompaniesHouseRecords(
   requireStore(store);
 
   const pending = await store.loadPendingRecords("companies_house");
+  const checkCriteria = await resolveCriteriaCheck(criteriaCheck);
   const counts = newCounts(pending.length);
   const existingOrganisations = await store.loadExistingOrganisationsForMatching();
 
@@ -1477,7 +1494,7 @@ export async function promotePendingCompaniesHouseRecords(
     }
 
     const sourceConfidence = classifyCompaniesHouseSourceConfidence(raw);
-    const criteria = criteriaCheck({ ...buildCriteriaInput(org), sourceConfidence });
+    const criteria = checkCriteria({ ...buildCriteriaInput(org), sourceConfidence });
     if (!(await passesClientCriteria(store, counts, record, org, criteria))) {
       continue;
     }
@@ -1548,6 +1565,7 @@ export async function promotePendingFindThatCharityRecords(
   requireStore(store);
 
   const pending = await store.loadPendingRecords("find_that_charity");
+  const checkCriteria = await resolveCriteriaCheck(criteriaCheck);
   const counts = newCounts(pending.length);
   const existingOrganisations = await store.loadExistingOrganisationsForMatching();
 
@@ -1575,7 +1593,7 @@ export async function promotePendingFindThatCharityRecords(
       continue;
     }
 
-    const criteria = criteriaCheck(buildCriteriaInput(org));
+    const criteria = checkCriteria(buildCriteriaInput(org));
     if (!(await passesClientCriteria(store, counts, record, org, criteria))) {
       continue;
     }
@@ -1662,6 +1680,7 @@ export async function promotePendingCharityCommissionBulkRecords(
   requireStore(store);
 
   const pending = await store.loadPendingRecords("charity_commission_bulk");
+  const checkCriteria = await resolveCriteriaCheck(criteriaCheck);
   const counts = newCounts(pending.length);
   const existingOrganisations = await store.loadExistingOrganisationsForMatching();
 
@@ -1674,7 +1693,7 @@ export async function promotePendingCharityCommissionBulkRecords(
       continue;
     }
 
-    const criteria = criteriaCheck(buildCriteriaInput(org));
+    const criteria = checkCriteria(buildCriteriaInput(org));
     if (!(await passesClientCriteria(store, counts, record, org, criteria))) continue;
 
     // The charity number, not the organisation number: the same identifier the

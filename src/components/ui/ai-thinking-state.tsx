@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion, useReducedMotionConfig } from "motion/react";
 import { LoaderPinwheel } from "@/components/animate-ui/icons/loader-pinwheel";
 import type { StageOneDisplayStage, StageOneStreamStage } from "@/components/outreach/use-stage-one-draft-stream";
 
@@ -53,7 +53,7 @@ export function AiThinkingState({
   heading?: string;
   steps?: ReadonlyArray<ThinkingStep>;
 }) {
-  const reducedMotion = useReducedMotion();
+  const reducedMotion = useReducedMotionConfig();
   // Render-safe fallback for the one frame before the hook reports back —
   // lazy initializer, so the compiler does not see an impure render call.
   const [fallbackStartedAt] = useState(() => Date.now());

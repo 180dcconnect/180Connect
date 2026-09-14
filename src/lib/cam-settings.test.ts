@@ -182,11 +182,24 @@ describe("cam-settings helpers (F187)", () => {
         preferred_geographic_reach: ["regional"],
         preferred_sectors: ["Environment"],
         preferred_income_bands: ["10k_100k"],
+        // F198 — the income range is a queue setting; absent reads as no bound.
+        preferred_income_min: null,
+        preferred_income_max: null,
         updated_at: "2026-08-19T00:00:00Z",
         created_at: "2026-08-19T00:00:00Z",
       });
       assert.equal("password_hash" in (sanitized as object), false);
       assert.equal("personal_phone" in (sanitized as object), false);
+    });
+
+    it("keeps a saved income range (F198)", () => {
+      const sanitized = sanitizeQueuePreferences({
+        user_id: "u-123",
+        preferred_income_min: 250_000,
+        preferred_income_max: 2_000_000,
+      });
+      assert.equal(sanitized?.preferred_income_min, 250_000);
+      assert.equal(sanitized?.preferred_income_max, 2_000_000);
     });
   });
 });

@@ -139,8 +139,8 @@ export default async function AdminPage() {
           <Tile href="/admin/ai-generations" title="AI generation history">
             Every generated email draft, by model — compare performance and cost.
           </Tile>
-          <Tile href="/admin/ml-readiness" title="ML readiness">
-            How many labelled outcomes exist in the ML dataset and how close that is to the training threshold.
+          <Tile href="/admin/ml-readiness" title="Machine Learning">
+            How many labelled outcomes exist in the training dataset and how close that is to the training threshold.
           </Tile>
         </Section>
       </section>

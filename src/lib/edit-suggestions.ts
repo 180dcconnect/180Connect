@@ -56,16 +56,89 @@ export const SENSITIVE_FIELD_LABELS: Record<SensitiveOrgField, string> = {
 };
 
 /**
- * Label for any restricted field, known or admin-added: the curated display name for
- * the seeded six, otherwise the column name with underscores spaced out. A field an
- * admin adds later has no hand-written label anywhere, so this is the one place the
- * UI can go.
+ * Plain-English names and explanations for every client field an admin can lock on
+ * /settings/restricted-fields.
+ *
+ * The people running that screen are not developers (AGENTS.md, "Who will maintain
+ * this app"), so a column name never reaches them. The database decides *which*
+ * columns may be locked (`list_restrictable_edit_fields`); this map only decides how
+ * each is described. A column added by a later migration still works without an
+ * entry here — it gets a derived label — but should be given one.
+ */
+const CLIENT_FIELD_INFO: Record<string, { label: string; description: string }> = {
+  legal_name: {
+    label: SENSITIVE_FIELD_LABELS.legal_name,
+    description: "The client's official registered name, as filed with the Charity Commission or Companies House.",
+  },
+  trading_name: {
+    label: "Trading name",
+    description: "The name the client works under day to day, if different from its registered name.",
+  },
+  website: {
+    label: SENSITIVE_FIELD_LABELS.website,
+    description: "The client's website. Used to build booklets and to match the client in outside records.",
+  },
+  contact_email: {
+    label: SENSITIVE_FIELD_LABELS.contact_email,
+    description: "The client's main email address. Outreach emails are sent here.",
+  },
+  address_line_1: {
+    label: SENSITIVE_FIELD_LABELS.address_line_1,
+    description: "The first line of the client's registered address.",
+  },
+  city: {
+    label: SENSITIVE_FIELD_LABELS.city,
+    description: "Where the client is based. Used to target outreach by area and in priority scores.",
+  },
+  postcode: {
+    label: SENSITIVE_FIELD_LABELS.postcode,
+    description: "The client's postcode. Used to target outreach by area and to spot duplicate clients.",
+  },
+  sector: {
+    label: "Sector",
+    description: "The broad area the client works in, such as health or education.",
+  },
+  sub_sector: {
+    label: "Sub-sector",
+    description: "The narrower area within the sector.",
+  },
+  charity_reporting_status: {
+    label: "Charity reporting status",
+    description: "Whether the charity is up to date with its filings, as reported by the Charity Commission.",
+  },
+  charity_activities: {
+    label: "Charity activities",
+    description: "The charity's own description of its work, as filed with the Charity Commission.",
+  },
+  cic_community_statement: {
+    label: "CIC community statement",
+    description: "A community interest company's filed statement of who it benefits and what it does.",
+  },
+};
+
+/**
+ * The fields the settings screen offers when the database cannot be asked (for
+ * example before `list_restrictable_edit_fields` is deployed). The database still
+ * has the final say when a field is actually locked.
+ */
+export const KNOWN_RESTRICTABLE_FIELDS: readonly string[] = Object.keys(CLIENT_FIELD_INFO);
+
+/**
+ * Label for any restricted field, known or admin-added: the curated display name
+ * where one exists, otherwise the column name turned into a sentence-case phrase
+ * ("sub_sector" → "Sub sector"), so an unlabelled column still never shows as code.
  */
 export function restrictedFieldLabel(fieldName: string): string {
   if (fieldName === "mission_statement" || fieldName === "mission") return "Mission";
-  return isSensitiveOrgField(fieldName)
-    ? SENSITIVE_FIELD_LABELS[fieldName]
-    : fieldName.replaceAll("_", " ");
+  const known = CLIENT_FIELD_INFO[fieldName]?.label;
+  if (known) return known;
+  const spaced = fieldName.replaceAll("_", " ").trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** One sentence on what the field is and what relies on it, or null if unwritten. */
+export function restrictedFieldDescription(fieldName: string): string | null {
+  return CLIENT_FIELD_INFO[fieldName]?.description ?? null;
 }
 
 /**
@@ -638,18 +711,18 @@ export function validateRestrictedFieldInput(input: {
   ) {
     return {
       success: false,
-      message: "Enter the column name of a client field, e.g. trading_name.",
+      message: "Choose a field to lock from the list.",
     };
   }
 
   const parsed = safeValidate(
-    z.object({ reason: nonEmptyTrimmed(500, "Say why this field is being restricted.") }),
+    z.object({ reason: nonEmptyTrimmed(500, "Say why changes to this field should be checked first.") }),
     { reason: input.reason },
   );
   if (!parsed.success) {
     return {
       success: false,
-      message: parsed.fieldErrors.reason?.[0] ?? "Say why this field is being restricted.",
+      message: parsed.fieldErrors.reason?.[0] ?? "Say why changes to this field should be checked first.",
     };
   }
 
@@ -700,9 +773,21 @@ export function restrictedFieldRpcFailure(error: {
     case "42501":
       return { status: 403, error: error.message };
     case "23514":
+      // The RPC's refusal names the column ("trading_name is not a restrictable
+      // client field"); the admin chose it from a list and needs a next step, not
+      // the internal name back.
+      if (error.message.includes("not a restrictable")) {
+        return {
+          status: 400,
+          error: "That field can't be locked. Refresh the page and choose one from the list.",
+        };
+      }
       return { status: 400, error: error.message };
     case "P0002":
-      return { status: 404, error: error.message };
+      return {
+        status: 404,
+        error: "That field is already unlocked. Refresh the page to see the latest list.",
+      };
     default:
       return { status: 500, error: CONFIG_GENERIC_FAILURE };
   }

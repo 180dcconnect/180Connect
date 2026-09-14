@@ -7,7 +7,6 @@ import { recordOnboardingStepAction } from "@/lib/onboarding-actions";
 import { reportError } from "@/lib/error-logging";
 import {
   GEOGRAPHIC_REACH_OPTIONS,
-  INCOME_BAND_OPTIONS,
   MAX_CITY_LENGTH,
   MAX_CITIES,
   MAX_SECTOR_LENGTH,
@@ -20,8 +19,8 @@ import {
   clampFollowUpDays,
   validateFollowUpOrdering,
   type GeographicReach,
-  type IncomeBand,
 } from "./constants";
+import { bandsForIncomeRange, parseIncomeBound } from "@/lib/income-range";
 
 export type OutreachPreferencesState = {
   status: "idle" | "error" | "success";
@@ -36,7 +35,8 @@ export type OutreachPreferencesState = {
     geographicReach: GeographicReach[];
     cities: string[];
     sectors: string[];
-    incomeBands: IncomeBand[];
+    incomeMin: number | null;
+    incomeMax: number | null;
     prioritiseGrantRecipients: boolean;
     firstFollowUpDays: number;
     secondFollowUpDays: number;
@@ -44,7 +44,6 @@ export type OutreachPreferencesState = {
 };
 
 const GEOGRAPHIC_REACH_SET = new Set<string>(GEOGRAPHIC_REACH_OPTIONS);
-const INCOME_BAND_SET = new Set<string>(INCOME_BAND_OPTIONS);
 
 /**
  * Trusts nothing from the client past its shape: a tampered POST could submit any
@@ -57,7 +56,8 @@ function parsePreferences(formData: FormData): {
   geographicReach: GeographicReach[];
   cities: string[];
   sectors: string[];
-  incomeBands: IncomeBand[];
+  incomeMin: number | null;
+  incomeMax: number | null;
   prioritiseGrantRecipients: boolean;
   firstFollowUpDays: number;
   secondFollowUpDays: number;
@@ -67,10 +67,10 @@ function parsePreferences(formData: FormData): {
     .filter((value): value is string => typeof value === "string")
     .filter((value) => GEOGRAPHIC_REACH_SET.has(value)) as GeographicReach[];
 
-  const incomeBands = formData
-    .getAll("income_band")
-    .filter((value): value is string => typeof value === "string")
-    .filter((value) => INCOME_BAND_SET.has(value)) as IncomeBand[];
+  // F198: size is a range in pounds. The slider's ends (£0, £5m+) arrive as
+  // "no bound"; parseIncomeBound turns them — and anything malformed — into null.
+  const incomeMin = parseIncomeBound(formData.get("income_min"), "min");
+  const incomeMax = parseIncomeBound(formData.get("income_max"), "max");
 
   const seenCities = new Set<string>();
   const cities: string[] = [];
@@ -118,7 +118,8 @@ function parsePreferences(formData: FormData): {
     geographicReach,
     cities,
     sectors,
-    incomeBands,
+    incomeMin,
+    incomeMax,
     prioritiseGrantRecipients,
     firstFollowUpDays,
     secondFollowUpDays,
@@ -144,11 +145,21 @@ export async function saveOutreachPreferencesAction(
     geographicReach,
     cities,
     sectors,
-    incomeBands,
+    incomeMin,
+    incomeMax,
     prioritiseGrantRecipients,
     firstFollowUpDays,
     secondFollowUpDays,
   } = parsePreferences(formData);
+
+  // Same rule as the outreach_preferences_income_range_ordered constraint,
+  // checked here so the CAM gets a sentence rather than a constraint error.
+  if (incomeMin !== null && incomeMax !== null && incomeMax <= incomeMin) {
+    return {
+      status: "error",
+      message: "The top of the size range must be above the bottom.",
+    };
+  }
 
   // F202 review: the DB CHECK constraints bound each threshold independently,
   // so a 20/10 pair (second before first) would save cleanly without this.
@@ -166,7 +177,11 @@ export async function saveOutreachPreferencesAction(
         preferred_geographic_reach: geographicReach,
         preferred_cities: cities,
         preferred_sectors: sectors,
-        preferred_income_bands: incomeBands,
+        preferred_income_min: incomeMin,
+        preferred_income_max: incomeMax,
+        // Kept in step with the range (the bands it overlaps) for anything that
+        // still reads bands — see 20261004160000.
+        preferred_income_bands: bandsForIncomeRange({ min: incomeMin, max: incomeMax }),
         prioritise_grant_recipients: prioritiseGrantRecipients,
         first_follow_up_days: firstFollowUpDays,
         second_follow_up_days: secondFollowUpDays,
@@ -206,7 +221,8 @@ export async function saveOutreachPreferencesAction(
       geographicReach,
       cities,
       sectors,
-      incomeBands,
+      incomeMin,
+      incomeMax,
       prioritiseGrantRecipients,
       firstFollowUpDays,
       secondFollowUpDays,

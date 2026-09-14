@@ -51,8 +51,8 @@ describe("send ownership contract", () => {
     // Both composers funnel every send through one handleSend, so the gate
     // inside it covers the Send button and the schedule dialog alike.
     const modal = await source("../../components/inbox/gmail-compose-modal.tsx");
-    assert.match(modal, /ownerId == null && ownershipAcceptedFor/);
+    assert.match(modal, /ownerId == null &&\s+ownershipAcceptedFor !==/);
     const composer = await source("../../components/outreach/reply-composer.tsx");
-    assert.match(composer, /ownerId == null && ownershipAcceptedFor/);
+    assert.match(composer, /ownerId == null &&\s+ownershipAcceptedFor !==/);
   });
 });

@@ -602,6 +602,9 @@ export function GmailReadingPane({
   const messages = thread.messages.filter((msg) => msg.pendingKind !== "draft");
 
   const [replyOpen, setReplyOpen] = useState(false);
+  /** Admin-only escape hatch: show the Reply composer without taking ownership.
+      CAMs never get it — their send would still be refused server-side. */
+  const [replyAnyway, setReplyAnyway] = useState(false);
   /** The message a per-message Reply is answering; null answers the latest
       client reply (the bottom Reply button's meaning). */
   const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null);
@@ -735,6 +738,7 @@ export function GmailReadingPane({
     setNotesCount(0);
     setNotesOpen(false);
     setReplyOpen(false);
+    setReplyAnyway(false);
     setReplyToMessageId(null);
     setSuppressOpen(false);
     setScheduledBusy(null);
@@ -752,8 +756,11 @@ export function GmailReadingPane({
   }
 
   /** A per-message Reply opens the composer answering that message (when it is
-      the client's) and smoothly brings it into view. */
+      the client's) and smoothly brings it into view. An admin answering
+      someone else's client bypasses the banner the same way Reply anyway
+      does — their send is allowed server-side. */
   function handleMessageReply(msg: InboxEmailMessage) {
+    if (ownedByOther && viewerRole === "admin") setReplyAnyway(true);
     setReplyToMessageId(msg.isFromClient ? msg.id : null);
     setReplyOpen(true);
   }
@@ -1116,15 +1123,25 @@ export function GmailReadingPane({
             to EmailReviewPanel, which is the one component allowed to render
             the approval control (see lib/outreach/human-send-control.test.ts). */}
         <div className="pt-4 print:hidden" ref={replyBoxRef}>
-          {ownedByOther && viewerRole && thread.ownerId ? (
+          {ownedByOther && viewerRole && thread.ownerId && !replyAnyway ? (
             <ThreadOwnershipBanner
               organisationId={thread.id}
               ownerId={thread.ownerId}
               ownerName={thread.camOwner.name}
               viewerRole={viewerRole}
               onOwnershipChanged={() => onOwnershipChanged?.()}
+              onReplyAnyway={
+                viewerRole === "admin" ? () => setReplyAnyway(true) : undefined
+              }
             />
           ) : (
+          <>
+            {ownedByOther && replyAnyway && viewerRole === "admin" && (
+              <p className="mb-3 text-[12px] leading-[1.6] text-dim">
+                Replying without taking ownership — {thread.camOwner.name} stays
+                the owner.
+              </p>
+            )}
           <AnimatePresence initial={false} mode="wait">
             {!replyOpen ? (
               <motion.button
@@ -1211,6 +1228,7 @@ export function GmailReadingPane({
               </motion.div>
             )}
           </AnimatePresence>
+          </>
           )}
         </div>
       </div>

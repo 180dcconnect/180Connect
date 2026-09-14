@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { ShieldAlert } from "lucide-react";
-import { OriginButton } from "@/components/ui/origin-button";
 import { RequestOwnershipForm } from "@/app/clients/[id]/request-ownership-form";
 import {
   getMyOwnershipRequest,
@@ -28,12 +27,15 @@ export function ThreadOwnershipBanner({
   ownerName,
   viewerRole,
   onOwnershipChanged,
+  onReplyAnyway,
 }: {
   organisationId: string;
   ownerId: string;
   ownerName: string | null;
   viewerRole: AppRole;
   onOwnershipChanged: () => void;
+  /** Admin-only escape hatch: reply without taking ownership. */
+  onReplyAnyway?: () => void;
 }) {
   const owner = ownerName?.trim() || "another team member";
 
@@ -63,6 +65,7 @@ export function ThreadOwnershipBanner({
               ownerId={ownerId}
               ownerName={owner}
               onOwnershipChanged={onOwnershipChanged}
+              onReplyAnyway={onReplyAnyway}
             />
           )}
           {viewerRole === "cam" && (
@@ -79,11 +82,13 @@ function AdminTakeOver({
   ownerId,
   ownerName,
   onOwnershipChanged,
+  onReplyAnyway,
 }: {
   organisationId: string;
   ownerId: string;
   ownerName: string;
   onOwnershipChanged: () => void;
+  onReplyAnyway?: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -109,28 +114,48 @@ function AdminTakeOver({
           <p className="text-[13px] leading-[1.6] text-dim">
             The client moves to you. {ownerName} will be notified.
           </p>
-          <div className="flex items-center gap-2">
-            <OriginButton type="button" size="sm" loading={busy} disabled={busy} onClick={confirm}>
-              {busy ? "Changing…" : "Confirm change"}
-            </OriginButton>
-            <OriginButton
+          <div className="flex items-center justify-end gap-2">
+            <button
               type="button"
-              size="sm"
-              variant="outline"
               disabled={busy}
               onClick={() => {
                 setConfirming(false);
                 setError(null);
               }}
+              className="cursor-pointer rounded-lg border border-rule bg-white px-4 py-2 text-[13px] font-semibold text-dim transition-colors hover:bg-paper hover:text-ink disabled:opacity-50"
             >
               Cancel
-            </OriginButton>
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={confirm}
+              className="cursor-pointer rounded-lg bg-stop px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-stop/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy ? "Changing…" : "Confirm change"}
+            </button>
           </div>
         </>
       ) : (
-        <OriginButton type="button" size="sm" onClick={() => setConfirming(true)}>
-          Change ownership
-        </OriginButton>
+        <div className="flex items-center justify-end gap-3">
+          {onReplyAnyway && (
+            <button
+              type="button"
+              onClick={onReplyAnyway}
+              title={`Reply without changing ownership — ${ownerName} stays the owner.`}
+              className="cursor-pointer text-[13px] font-semibold text-lead underline-offset-2 hover:underline"
+            >
+              Reply anyway
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            className="cursor-pointer rounded-lg bg-stop px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-stop/90"
+          >
+            Change ownership
+          </button>
+        </div>
       )}
       {error && (
         <p aria-live="polite" role="alert" className="text-[13px] font-semibold text-stop">

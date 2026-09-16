@@ -9,6 +9,7 @@
 
 import { createClient } from "../supabase/server.ts";
 import { getCurrentActor, actorFailureMessage } from "../auth/actor.ts";
+import { canRestructureTags } from "../auth/permissions.ts";
 import { reportError } from "../error-logging.ts";
 import {
   deleteTagCore,
@@ -59,7 +60,9 @@ export async function deleteTag(tagId: string): Promise<DeleteTagResult> {
     return { ok: false, message: actorFailureMessage(authorization.reason) };
   }
 
-  const isAdmin = authorization.actor.role === "admin";
+  // Same question the tags screen asks before it draws a Delete button
+  // (`canRestructureTags`), and the same one the RPC re-checks inside.
+  const isAdmin = canRestructureTags(authorization.actor.role);
 
   if (!isAdmin) {
     // Skip the RPC entirely for non-admins; delete_unused_tag re-checks

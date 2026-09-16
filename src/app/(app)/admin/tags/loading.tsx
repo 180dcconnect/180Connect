@@ -1,46 +1,65 @@
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton, SkeletonLine, SkeletonSectionCard } from "@/components/ui/skeleton";
 
 /**
- * Mirrors page.tsx: the one white card on the bone ground, its eyebrow, heading
- * and copy (fixed, so drawn), the create form, then the existing tags.
- * Approximated because it is data: how many tags exist.
+ * Mirrors page.tsx: the ground and the shell, the display heading with its line
+ * of copy and the rail of counts (all fixed, so drawn), then the create card and
+ * the list card — the two `rounded-panel border-rule` sections the page renders,
+ * not one white slab holding everything.
+ *
+ * Approximated because it is data: how many tags there are, how many are on a
+ * client, whether this reader may create one at all (a viewer gets the note where
+ * the form was), and whether the read failed.
  */
 export default function Loading() {
   return (
-    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <section className="mx-auto max-w-2xl rounded-2xl border border-black/[0.06] bg-white p-8 shadow-sm">
-        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-brand">Tags</p>
-        <h1 className="mt-2 text-[clamp(2rem,4vw,2.75rem)] font-black leading-[1.05] tracking-[-0.03em]">
-          Create a tag
-        </h1>
-        <p className="mt-3 text-[15px] leading-[1.8] text-black/55">
-          Tags are shared across the whole team. Once created, any CAM can
-          assign it to a client.
-        </p>
+    <div className="min-h-screen bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+      <div className="w-full space-y-6">
+        <div>
+          <SkeletonLine text="text-[clamp(2rem,4vw,2.75rem)]" width="w-32" />
+          <Skeleton className="mt-3 h-5 w-3/4 max-w-full rounded-sm" />
+          <Skeleton className="mt-2 h-5 w-1/2 max-w-full rounded-sm" />
+          <Skeleton className="mt-3 h-5 w-56 max-w-full rounded-sm" />
+        </div>
 
-        <div aria-hidden="true">
-          <div className="mt-6 flex flex-wrap items-end gap-3">
-            <div>
-              <Skeleton className="h-4 w-16" />
-              <Skeleton className="mt-1 h-9 w-56 rounded-xl" />
+        {/* Create a tag */}
+        <SkeletonSectionCard
+          titleWidth="w-32"
+          hintWidth="w-2/3"
+          className="pb-4.5"
+        >
+          <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-4">
+            <div className="min-w-[16rem] flex-1">
+              <Skeleton className="h-4 w-56 max-w-full rounded-sm" />
+              <Skeleton className="mt-1.5 h-10 w-full rounded-inset" />
             </div>
-            <Skeleton className="h-9 w-40 rounded-xl" />
-            <Skeleton className="h-9 w-24 rounded-full" />
+            <div>
+              <Skeleton className="h-4 w-48 max-w-full rounded-sm" />
+              <Skeleton className="mt-1.5 h-7 w-24 rounded-sm" />
+            </div>
           </div>
-
-          <div className="mt-8">
-            <Skeleton className="h-4 w-28" />
-            <div className="mt-3 flex flex-col gap-2">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <div key={index} className="flex items-center gap-2">
-                  <Skeleton className="h-7 w-28 rounded-full" />
-                  <Skeleton className="h-7 w-14 rounded-full" />
-                </div>
+          <div className="mt-4">
+            <Skeleton className="h-4 w-24 rounded-sm" />
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <Skeleton key={index} className="h-7 w-20 rounded-sm" />
               ))}
             </div>
           </div>
-        </div>
-      </section>
+        </SkeletonSectionCard>
+
+        {/* The team's tags */}
+        <SkeletonSectionCard titleWidth="w-44" hintWidth="w-3/4" padded={false}>
+          <ul className="mt-3 divide-y divide-rule-soft px-5 pb-4.5">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <li key={index} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3">
+                <Skeleton className="h-7 w-24 rounded-sm" />
+                <Skeleton className="h-4 w-32 rounded-sm" />
+                <Skeleton className="ml-auto h-5 w-16 rounded-sm" />
+              </li>
+            ))}
+          </ul>
+        </SkeletonSectionCard>
+      </div>
     </div>
   );
 }

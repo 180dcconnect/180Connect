@@ -5,6 +5,7 @@ import {
   authorizeUserProfile,
   canChangeAccess,
   canChangeRole,
+  canRestructureTags,
   canView,
   hasPermission,
   isViewOnly,
@@ -49,6 +50,17 @@ describe("role permission matrix", () => {
     assert.equal(hasPermission("viewer", "client:edit"), false);
     assert.equal(hasPermission("viewer", "client:contact"), false);
     assert.equal(hasPermission("viewer", "tags:manage"), false);
+  });
+
+  it("keeps renaming and deleting a shared tag with an admin", () => {
+    // A CAM holds `tags:manage` — create, assign, recolour — and still may not
+    // rename or delete one, because that changes the tag on every client that
+    // already carries it. The tags screen draws its Rename and Delete buttons
+    // from this and nothing else (edit-tag.ts / delete-tag.ts enforce it again).
+    assert.equal(hasPermission("cam", "tags:manage"), true);
+    assert.equal(canRestructureTags("cam"), false);
+    assert.equal(canRestructureTags("viewer"), false);
+    assert.equal(canRestructureTags("admin"), true);
   });
 });
 

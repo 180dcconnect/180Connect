@@ -42,12 +42,14 @@ import { parseFilters } from "@/lib/charity-register/filters";
 import { findBackfillTargets } from "@/lib/charity-register/annual-return-backfill";
 import { findProfileTargets } from "@/lib/charity-register/profile-backfill";
 import { findReachTargets } from "@/lib/charity-register/reach-backfill";
+import { findCompanyNumberTargets } from "@/lib/charity-register/company-number-backfill";
 import { labelValues, registerMeta } from "@/lib/charity-register/sqlite";
 import { LABEL_KIND } from "@/lib/charity-register/sqlite-query";
 import { DataImportsHeader } from "../data-imports-header";
 import { AnnualReturnCard } from "./annual-return-card";
 import { RegisterProfileCard } from "./profile-card";
 import { GeographicReachCard } from "./reach-card";
+import { CompanyNumberCard } from "./company-number-card";
 import { CharityLookupDialog } from "./lookup-dialog";
 import { FilterBuilder, type PresetSummary } from "./filter-builder";
 import { ImportConsole, NewImportButton } from "./import-console";
@@ -57,6 +59,7 @@ import { RegisterRail } from "./register-rail";
 import { MAX_BACKFILL } from "@/lib/charity-register/annual-return-backfill";
 import { MAX_BACKFILL as MAX_PROFILE_BACKFILL } from "@/lib/charity-register/profile-backfill";
 import { MAX_BACKFILL as MAX_REACH_BACKFILL } from "@/lib/charity-register/reach-backfill";
+import { MAX_BACKFILL as MAX_COMPANY_BACKFILL } from "@/lib/charity-register/company-number-backfill";
 import type { CharityCommissionRun } from "./bulk-funnel";
 
 // The import runs inside a Server Action, not this page — but promotion of a
@@ -113,18 +116,20 @@ export default async function CharityCommissionPage() {
   // failing the page — the coverage card is the least important thing here, and
   // a missing register file is its normal empty case, not an error.
   //
-  // The two reads run together. They are independent, and each is several
-  // thousand rows, so awaiting one before starting the other doubled the wait
+  // The reads run together. They are independent, and each is several
+  // thousand rows, so awaiting one before starting the next quadrupled the wait
   // for no reason. `allSettled` keeps the "degrades to null" behaviour per
-  // read — one failing must not deny the other its card.
+  // read — one failing must not deny the others their cards.
   let coverage = null;
   let profileCoverage = null;
   let reachCoverage = null;
+  let companyCoverage = null;
   if (admin) {
-    const [backfill, profile, reach] = await Promise.allSettled([
+    const [backfill, profile, reach, company] = await Promise.allSettled([
       findBackfillTargets(admin),
       findProfileTargets(admin),
       findReachTargets(admin),
+      findCompanyNumberTargets(admin),
     ]);
 
     if (backfill.status === "fulfilled") {
@@ -153,6 +158,16 @@ export default async function CharityCommissionPage() {
     } else {
       await reportError(reach.reason, {
         operation: "admin.charity_commission.reach_coverage",
+      });
+    }
+
+    // And the second registration number, which only the charity register can
+    // supply and which mostly only hand-added clients are missing.
+    if (company.status === "fulfilled") {
+      companyCoverage = company.value.coverage;
+    } else {
+      await reportError(company.reason, {
+        operation: "admin.charity_commission.company_number_coverage",
       });
     }
   }
@@ -295,6 +310,16 @@ export default async function CharityCommissionPage() {
                       covered={reachCoverage.covered}
                       pending={reachCoverage.pending}
                       maxBatchSize={MAX_REACH_BACKFILL}
+                      readOnly={!canImport}
+                    />
+                  )}
+
+                  {companyCoverage && companyCoverage.charities > 0 && (
+                    <CompanyNumberCard
+                      charities={companyCoverage.charities}
+                      covered={companyCoverage.covered}
+                      pending={companyCoverage.pending}
+                      maxBatchSize={MAX_COMPANY_BACKFILL}
                       readOnly={!canImport}
                     />
                   )}

@@ -1,97 +1,117 @@
 "use client";
 
-// F189/F194/F190: existing tags list with inline rename (admin-only,
-// enforced server-side regardless of what this UI shows), inline recolour
-// (F194, any CAM or admin — enforced by the set_tag_colour RPC
-// server-side) and delete (F190, admin-only — enforced by the
-// delete_unused_tag RPC server-side).
-// Clicking a tag's name turns it into an editable field; saving calls
-// editTagAction and updates the name in place, no page reload — renaming
-// here only ever touches the tags row itself, so every existing client
-// assignment survives under the new name automatically (F189 AC1, AC2).
+// The team's tags: what each one is called, what it looks like, and how many
+// clients carry it.
+//
+// F189 (rename, admin-only — enforced server-side regardless of what this UI
+// shows), F194 (recolour, every CAM and admin — enforced by the `set_tag_colour`
+// RPC) and F190 (delete, admin-only, blocked while the tag is in use — enforced
+// by the `delete_unused_tag` RPC). Every write resolves without a page reload,
+// and this component owns none of the state it shows: the panel above does, so
+// the tag a CAM just created appears here at once (the record's `TagsCard` makes
+// the same call for the same reason).
+//
+// ── What the old list could not say ──
+//
+// - **How much a decision costs.** It offered Rename and Delete on a tag used by
+//   eleven clients, then refused after the click ("assigned to 11 clients"). The
+//   count is read on the server and shown on the row now, and a tag that is on a
+//   client offers no Delete button at all — a control whose only outcome is a
+//   refusal is a bug report waiting to happen (`AGENTS.md` §Roles). Where the
+//   count could not be read, deleting is withheld too, and the card says so:
+//   an unknown count must never read as "safe to delete".
+// - **Who may do what.** Rename and Delete are drawn only for an administrator
+//   — the same question the actions ask (`canRestructureTags`) — and the card's
+//   hint says who to ask. A CAM used to press Rename and be told no.
+// - **What a tag looks like.** The row rendered a `rounded-full` pill with
+//   brand-green text, so the tag on this screen did not match the tag on the
+//   record. It is the record's chip now (`TagChip`), and the colour picker is
+//   chips too, so you choose by looking at the result.
 
-import { useState, useTransition } from "react";
+import { useTransition, useState } from "react";
+
+import { TagChip } from "@/lib/tags/tag-chips";
+import { deleteTagAction } from "@/lib/tags/delete-tag-action.ts";
 import { editTagAction } from "@/lib/tags/edit-tag-action";
 import { setTagColourAction } from "@/lib/tags/set-tag-colour-action.ts";
-import { deleteTagAction } from "@/lib/tags/delete-tag-action.ts";
-import { TAG_COLOURS, tagPillStyle } from "@/lib/tags/tag-colours.ts";
 
-export type EditableTagEntry = { id: string; name: string; colour: string | null };
+import { TagColourPicker } from "./colour-picker";
+import {
+  PRIMARY_BUTTON,
+  ROW_ACTION,
+  ROW_ACTION_STOP,
+  ROW_ERROR,
+  SECONDARY_BUTTON,
+  TEXT_FIELD,
+} from "./styles";
+
+export type TagEntry = { id: string; name: string; colour: string | null };
+
+/**
+ * How many clients carry each tag. `null` means the count could not be read —
+ * which is not the same as zero, and is why the caller withholds deleting.
+ */
+export type TagUsage = Record<string, number | null>;
+
+/** Said as what it is, and never as a number we did not read. */
+function usageLabel(count: number | null): string {
+  if (count === null) return "In use on clients — the count could not be read";
+  if (count === 0) return "Not on any client yet";
+  return count === 1 ? "On 1 client" : `On ${count} clients`;
+}
 
 export function EditableTagList({
-  initialTags,
-  readOnly = false,
+  tags,
+  usageById,
+  canCreate,
+  canRestructure,
+  onRenamed,
+  onRecoloured,
+  onDeleted,
 }: {
-  initialTags: EditableTagEntry[];
-  /**
-   * Leadership reads the list and edits none of it. Set for a viewer, whose
-   * every write here is refused server-side (rename, recolour, delete) — this
-   * only stops the screen offering controls that cannot work. The pills render
-   * exactly as everywhere else, so a viewer sees the same tag as a CAM does.
-   */
-  readOnly?: boolean;
+  tags: TagEntry[];
+  usageById: TagUsage;
+  /** Whether this reader may create one at all — the empty state says who can. */
+  canCreate: boolean;
+  /** An administrator may rename and delete; a CAM may only recolour. */
+  canRestructure: boolean;
+  onRenamed: (tagId: string, name: string) => void;
+  onRecoloured: (tagId: string, colour: string | null) => void;
+  onDeleted: (tagId: string) => void;
 }) {
-  const [tags, setTags] = useState(initialTags);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
+  // F194: the picker opens on one row at a time, under the tag it changes.
   const [colourId, setColourId] = useState<string | null>(null);
-  // F190 AC1: delete requires a two-step armed confirm — the first click
-  // only arms it, a second click on the same tag actually deletes.
-  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
-    null,
-  );
+  // F190 AC1: deleting takes two steps. The first click asks, in words, on the
+  // row itself — "Delete “Urgent”? Yes / Keep it" — rather than arming a button
+  // that says "click again to confirm", which is a sentence about the mouse.
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [errorByTagId, setErrorByTagId] = useState<Record<string, string>>({});
 
   function clearError(tagId: string) {
     setErrorByTagId((prev) => {
+      if (!(tagId in prev)) return prev;
       const next = { ...prev };
       delete next[tagId];
       return next;
     });
   }
 
-  function startEditing(tag: EditableTagEntry) {
+  function startEditing(tag: TagEntry) {
     setEditingId(tag.id);
     setDraftName(tag.name);
     setColourId(null);
+    setConfirmingDeleteId(null);
     clearError(tag.id);
-  }
-
-  function cancelEditing() {
-    setEditingId(null);
-    setDraftName("");
-  }
-
-  // F190: admin delete with armed confirmation (AC1). The server-side RPC
-  // blocks in-use tags with the assignment count (AC2) and a genuinely
-  // deleted row disappears from assign/filter everywhere by construction
-  // (AC3).
-  function handleDeleteClick(tagId: string) {
-    if (confirmingDeleteId !== tagId) {
-      setConfirmingDeleteId(tagId);
-      return;
-    }
-
-    clearError(tagId);
-    startTransition(async () => {
-      const result = await deleteTagAction(tagId);
-      if (result.ok) {
-        setTags((current) => current.filter((t) => t.id !== tagId));
-      } else {
-        setErrorByTagId((prev) => ({ ...prev, [tagId]: result.message }));
-      }
-      setConfirmingDeleteId(null);
-    });
   }
 
   function saveEdit(tagId: string) {
     startTransition(async () => {
       const result = await editTagAction(tagId, draftName);
       if (result.ok) {
-        setTags((current) =>
-          current.map((t) => (t.id === tagId ? { ...t, name: result.tag.name } : t)),
-        );
+        onRenamed(tagId, result.tag.name);
         setEditingId(null);
       } else {
         setErrorByTagId((prev) => ({ ...prev, [tagId]: result.message }));
@@ -99,11 +119,9 @@ export function EditableTagList({
     });
   }
 
-  // F194 AC3: recolouring is open to every tags:manage holder — CAMs
-  // included. The RPC refuses anyone the app gate would, so this UI can
-  // offer it unconditionally.
+  // F194 AC3: recolouring is open to every `tags:manage` holder, CAMs included,
+  // and saves the moment a colour is picked — a colour is not worth a Save button.
   function saveColour(tagId: string, colour: string | null) {
-    setColourId(null);
     startTransition(async () => {
       try {
         const result = await setTagColourAction(tagId, colour);
@@ -111,158 +129,205 @@ export function EditableTagList({
           setErrorByTagId((prev) => ({ ...prev, [tagId]: result.message }));
           return;
         }
-        setTags((current) =>
-          current.map((t) =>
-            t.id === tagId ? { ...t, colour: result.tag.colour } : t,
-          ),
-        );
+        onRecoloured(tagId, result.tag.colour);
       } catch {
         setErrorByTagId((prev) => ({
           ...prev,
-          [tagId]: "The colour could not be saved. Please try again later.",
+          [tagId]: "The colour could not be saved. Please try again.",
         }));
       }
     });
   }
 
-  if (tags.length === 0) {
-    return <p className="mt-3 text-sm text-black/50">No tags created yet.</p>;
+  // F190: the second half of the two-step delete. The RPC still blocks an
+  // in-use tag inside one transaction — somebody can assign the tag between
+  // this row being drawn and this press — and its refusal names the count.
+  function confirmDelete(tagId: string) {
+    clearError(tagId);
+    startTransition(async () => {
+      const result = await deleteTagAction(tagId);
+      if (result.ok) {
+        onDeleted(tagId);
+      } else {
+        setErrorByTagId((prev) => ({ ...prev, [tagId]: result.message }));
+      }
+      setConfirmingDeleteId(null);
+    });
   }
 
+  if (tags.length === 0) {
+    return (
+      <p className="mt-3 font-body text-sm leading-[1.7] text-dim">
+        {canCreate ? (
+          <>
+            No tags yet. Create the first one above, then put it on a client from
+            that client&rsquo;s own record.
+          </>
+        ) : (
+          <>
+            No tags yet. A CAM or an administrator creates them on this screen,
+            and any CAM can put one on a client from that client&rsquo;s own
+            record.
+          </>
+        )}
+      </p>
+    );
+  }
+
+  // A count that failed is not a zero. If any row's count is unknown, the counts
+  // on this page cannot be trusted, so no row offers a delete and the card says
+  // why once rather than leaving a person to wonder at eleven identical gaps.
+  const countsIncomplete = tags.some((tag) => usageById[tag.id] === null);
+
   return (
-    <div className="mt-3 flex flex-col gap-2">
-      {tags.map((tag) => {
-        const pillStyle = tagPillStyle(tag.colour);
-        return (
-          <div key={tag.id} className="flex flex-wrap items-center gap-2">
-            {readOnly ? (
-              <span
-                style={pillStyle ?? undefined}
-                className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                  pillStyle ? "" : "bg-[--brand]/10 text-[--brand]"
-                }`}
-              >
-                {tag.name}
-              </span>
-            ) : editingId === tag.id ? (
-              <>
-                <input
-                  type="text"
-                  value={draftName}
-                  onChange={(e) => setDraftName(e.target.value)}
-                  disabled={pending}
-                  className="rounded-full border border-black/20 px-2.5 py-1 text-xs"
-                  autoFocus
-                />
-                <button
-                  type="button"
-                  onClick={() => saveEdit(tag.id)}
-                  disabled={pending}
-                  className="text-xs font-bold text-[--brand] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {pending ? "Saving…" : "Save"}
-                </button>
-                <button
-                  type="button"
-                  onClick={cancelEditing}
-                  disabled={pending}
-                  className="text-xs font-medium text-black/40 hover:text-black/60 disabled:cursor-not-allowed"
-                >
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <>
-                <span
-                  style={pillStyle ?? undefined}
-                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                    pillStyle
-                      ? ""
-                      : "bg-[--brand]/10 text-[--brand]"
-                  }`}
-                >
-                  {tag.name}
-                </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    colourId === tag.id ? setColourId(null) : setColourId(tag.id)
-                  }
-                  disabled={pending}
-                  aria-expanded={colourId === tag.id}
-                  className="text-xs font-medium text-black/40 hover:text-[--brand] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Colour
-                </button>
-                <button
-                  type="button"
-                  onClick={() => startEditing(tag)}
-                  className="text-xs font-medium text-black/40 hover:text-[--brand]"
-                >
-                  Rename
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteClick(tag.id)}
-                  disabled={pending}
-                  aria-expanded={confirmingDeleteId === tag.id}
-                  className={`text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
-                    confirmingDeleteId === tag.id
-                      ? "text-red-700 underline"
-                      : "text-black/40 hover:text-red-700"
-                  }`}
-                >
-                  {confirmingDeleteId === tag.id
-                    ? "Click again to confirm delete"
-                    : "Delete"}
-                </button>
-              </>
-            )}
-            {!readOnly && colourId === tag.id && (
-              <div className="flex w-full items-center gap-1.5 pt-1">
-                <label className="cursor-pointer" title="No colour">
-                  <input
-                    type="radio"
-                    name={`colour-${tag.id}`}
-                    checked={tag.colour === null}
-                    onChange={() => saveColour(tag.id, null)}
-                    disabled={pending}
-                    className="peer sr-only"
-                  />
-                  <span
-                    aria-hidden
-                    className="block h-5 w-5 rounded-full border border-dashed border-black/25 bg-white opacity-60 peer-checked:opacity-100 peer-checked:ring-2 peer-checked:ring-brand peer-checked:ring-offset-1"
-                  />
-                  <span className="sr-only">No colour</span>
-                </label>
-                {TAG_COLOURS.map((c) => (
-                  <label key={c.hex} className="cursor-pointer" title={c.name}>
-                    <input
-                      type="radio"
-                      name={`colour-${tag.id}`}
-                      checked={tag.colour === c.hex}
-                      onChange={() => saveColour(tag.id, c.hex)}
+    <>
+      <ul className="mt-3 divide-y divide-rule-soft">
+        {tags.map((tag) => {
+          const usage = usageById[tag.id] ?? null;
+          const editing = editingId === tag.id;
+          const confirming = confirmingDeleteId === tag.id;
+          const colouring = colourId === tag.id;
+
+          return (
+            <li key={tag.id} className="py-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                {editing ? (
+                  <form
+                    className="flex flex-1 flex-wrap items-center gap-2"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      saveEdit(tag.id);
+                    }}
+                  >
+                    <label className="min-w-[14rem] flex-1">
+                      <span className="sr-only">New name for {tag.name}</span>
+                      <input
+                        type="text"
+                        value={draftName}
+                        onChange={(event) => setDraftName(event.target.value)}
+                        disabled={pending}
+                        autoFocus
+                        className={TEXT_FIELD}
+                      />
+                    </label>
+                    <button type="submit" disabled={pending} className={PRIMARY_BUTTON}>
+                      {pending ? "Saving…" : "Save name"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingId(null);
+                        clearError(tag.id);
+                      }}
                       disabled={pending}
-                      className="peer sr-only"
-                    />
-                    <span
-                      aria-hidden
-                      style={{ backgroundColor: c.hex }}
-                      className="block h-5 w-5 rounded-full opacity-40 peer-checked:opacity-100 peer-checked:ring-2 peer-checked:ring-brand peer-checked:ring-offset-1"
-                    />
-                    <span className="sr-only">{c.name}</span>
-                  </label>
-                ))}
+                      className={SECONDARY_BUTTON}
+                    >
+                      Cancel
+                    </button>
+                  </form>
+                ) : (
+                  <>
+                    <TagChip label={tag.name} colour={tag.colour} />
+                    <span className="font-body text-[13px] text-dim">
+                      {usageLabel(usage)}
+                    </span>
+
+                    {canRestructure && !confirming && (
+                      <button
+                        type="button"
+                        onClick={() => startEditing(tag)}
+                        className={`ml-auto ${ROW_ACTION}`}
+                      >
+                        Rename
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setColourId(colouring ? null : tag.id);
+                        setConfirmingDeleteId(null);
+                        clearError(tag.id);
+                      }}
+                      disabled={pending}
+                      aria-expanded={colouring}
+                      className={`${canRestructure && !confirming ? "" : "ml-auto"} ${ROW_ACTION}`}
+                    >
+                      {tag.colour === null ? "Add a colour" : "Change colour"}
+                    </button>
+
+                    {canRestructure && !confirming && usage === 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmingDeleteId(tag.id);
+                          setColourId(null);
+                          clearError(tag.id);
+                        }}
+                        className={ROW_ACTION_STOP}
+                      >
+                        Delete
+                      </button>
+                    )}
+
+                    {confirming && (
+                      <span className="ml-auto flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="font-body text-[13px] text-ink">
+                          Delete “{tag.name}”?
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => confirmDelete(tag.id)}
+                          disabled={pending}
+                          className={ROW_ACTION_STOP}
+                        >
+                          {pending ? "Deleting…" : "Yes, delete"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingDeleteId(null)}
+                          disabled={pending}
+                          className={ROW_ACTION}
+                        >
+                          Keep it
+                        </button>
+                      </span>
+                    )}
+                  </>
+                )}
               </div>
-            )}
-            {!readOnly && errorByTagId[tag.id] && (
-              <span className="w-full text-xs font-medium text-red-700" role="alert">
-                {errorByTagId[tag.id]}
-              </span>
-            )}
-          </div>
-        );
-      })}
-    </div>
+
+              {colouring && !editing && (
+                <div className="mt-3 border-t border-rule-soft pt-3">
+                  <TagColourPicker
+                    name={`colour-${tag.id}`}
+                    value={tag.colour}
+                    onChange={(colour) => saveColour(tag.id, colour)}
+                    disabled={pending}
+                    legend={`What “${tag.name}” looks like on a client`}
+                  />
+                </div>
+              )}
+
+              {errorByTagId[tag.id] && (
+                <p role="alert" className={`mt-2 ${ROW_ERROR}`}>
+                  {errorByTagId[tag.id]}
+                </p>
+              )}
+
+              {/* A tag that is on a client offers no Delete button at all; the
+                  card's hint says why once, rather than the row repeating it. */}
+            </li>
+          );
+        })}
+      </ul>
+
+      {countsIncomplete && canRestructure && (
+        <p className="mt-3 font-body text-[13px] leading-[1.6] text-dim">
+          How many clients carry a tag could not be read just now, so no tag can be
+          deleted until it can. Refresh the page to try again.
+        </p>
+      )}
+    </>
   );
 }

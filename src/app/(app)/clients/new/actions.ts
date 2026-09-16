@@ -12,6 +12,8 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { reportRescoreFailure, rescoreOrganisation } from "@/lib/scoring/rescore";
 import { checkWebsiteReachability } from "@/lib/website-reachability";
+import { companyNumberForRegisteredCharity } from "@/lib/charity-register/company-identifier";
+import { registerIdForName } from "@/lib/registration-number";
 
 // save_manual_entry and approve_manual_entry (supabase/migrations/20260817130000,
 // 20260818100500) raise Postgres exceptions with a fixed message per case. Several
@@ -221,6 +223,17 @@ export async function saveManualEntry(
       }
     }
 
+    // A charity that is also a company carries two registration numbers, and the
+    // register we hold publishes both. Read here, from the file, rather than
+    // accepting it from the browser: it is a fact about the organisation, not
+    // something the person filling the form has to know, and the same read the
+    // number field's check shows them. Derived on every save (including a draft)
+    // so it is already on the entry whenever the approval happens.
+    const companyNumber = companyNumberForRegisteredCharity(
+      registerIdForName(parsed.data.registryName),
+      parsed.data.registryNumber,
+    );
+
     const supabase = await createClient();
     const { data, error } = await supabase.rpc("save_manual_entry", {
       p_entry_id: entryId,
@@ -248,6 +261,9 @@ export async function saveManualEntry(
       // shared organisation inbox. The RPC records who and when, binds it to this
       // exact address, and ignores it for an address that is not refused anyway.
       p_contact_email_role_confirmed: formData.get("contactEmailRoleConfirmed") === "on",
+      // The register's second number for a charity that is also a company, or
+      // null. Filed as a uk_company identifier when the entry is approved.
+      p_company_number: companyNumber,
     });
     if (error) throw error;
     const savedEntryId = String(data);

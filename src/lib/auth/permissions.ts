@@ -69,6 +69,23 @@ export function isViewOnly(role: AppRole): boolean {
 }
 
 /**
+ * Whether a role may rename or delete a shared tag.
+ *
+ * `tags:manage` is the everyday half of the tag vocabulary and a CAM holds it:
+ * creating a tag, putting one on a client, and choosing its colour. Renaming or
+ * deleting a tag is a different act — it changes the tag on *every* client that
+ * already carries it — so it stays with an administrator.
+ *
+ * The three places that enforce this (`edit-tag.ts`, `delete-tag.ts` and the
+ * `delete_unused_tag` RPC) all ask this one question. It exists so a screen can
+ * ask it too — a button whose only possible outcome is "Only an admin can…" is a
+ * bug report waiting to happen (`docs/app-design-system.md` §Components).
+ */
+export function canRestructureTags(role: AppRole): boolean {
+  return role === "admin";
+}
+
+/**
  * Whether a role may *see* what a permission guards: the page, the list, the
  * button. Every role that holds the permission may, and so may a viewer, who
  * sees the whole app but is refused when they press a control that changes

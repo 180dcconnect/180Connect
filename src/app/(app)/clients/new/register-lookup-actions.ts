@@ -22,6 +22,7 @@ import {
 import { parseRegisterSearch } from "@/lib/register-search-term";
 import { importCharityNumber } from "@/lib/charity-register/import";
 import { importCompanyNumber } from "@/lib/companies-register/import";
+import { bulkSector } from "@/lib/standardize/charity-commission-bulk";
 import {
   promotePendingCharityCommissionBulkRecords,
   promotePendingCompaniesHouseRecords,
@@ -115,6 +116,16 @@ export type RegisterMatch = {
     contactEmail: string;
     registryName: string;
     registryNumber: string;
+    /**
+     * The sector the register's own classification maps to, or "" where it
+     * classifies nothing we score.
+     *
+     * Carried because the card above already shows the classification and this
+     * is the same fact in the form's vocabulary — dropping it left the field
+     * blank, and an unclassified record scores against neutrals (see
+     * `bulkSector`). "" not null: the form's field is a string.
+     */
+    sector: string;
   };
 };
 
@@ -257,6 +268,10 @@ function toCharityMatch(
       contactEmail: row.contactEmail ?? "",
       registryName: CHARITY_REGISTRY_NAME,
       registryNumber: registryNumber ?? "",
+      // The register classifies every charity, and this is the same mapping the
+      // bulk import writes to `organisations.sector` — the register's own
+      // "What the charity does", translated into the taxonomy the scorer reads.
+      sector: bulkSector(row.classifications) ?? "",
     },
   };
 }
@@ -298,6 +313,10 @@ function toCompanyMatch(row: RegisterCompanyMatch, listed: Map<string, string>):
       contactEmail: "",
       registryName: COMPANY_REGISTRY_NAME,
       registryNumber: row.number,
+      // No SIC-to-sector mapping exists for companies anywhere in the app, so
+      // this stays blank rather than inventing one here: a wrong sector is a
+      // wrong score, and the CAM can pick one on the form.
+      sector: "",
     },
   };
 }

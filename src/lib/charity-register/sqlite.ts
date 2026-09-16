@@ -308,20 +308,30 @@ export function charityByOrganisationNumber(
  * the one they meant. The main charity is preferred over its linked subsidiaries,
  * which share the registered number.
  *
+ * `companyNumber` is the register's own second number for a charity that is also
+ * a company (null when it is not one, which is most of them). Read for the same
+ * reason the name is: it decides whether the record carries one identifier or
+ * two, and nothing else in the deployment can answer it — see
+ * `company-identifier.ts`, which is the only caller that should use it.
+ *
  * Null when the file is missing or does not hold the number.
  */
 export function charityByRegisteredNumber(
   registeredNumber: number,
-): { name: string; postcode: string | null } | null {
+): { name: string; postcode: string | null; companyNumber: string | null } | null {
   const handle = open();
   if (!handle) return null;
   const row = handle.db
     .prepare(
-      "select charity_name, postcode from charity where registered_charity_number = ? " +
-        "order by organisation_number limit 1",
+      "select charity_name, postcode, company_number from charity " +
+        "where registered_charity_number = ? order by organisation_number limit 1",
     )
-    .get(registeredNumber) as { charity_name: string; postcode: string | null } | undefined;
-  return row ? { name: row.charity_name, postcode: row.postcode } : null;
+    .get(registeredNumber) as
+    | { charity_name: string; postcode: string | null; company_number: string | null }
+    | undefined;
+  return row
+    ? { name: row.charity_name, postcode: row.postcode, companyNumber: row.company_number }
+    : null;
 }
 
 /** Every value the file holds for one label kind — the location pickers use it. */

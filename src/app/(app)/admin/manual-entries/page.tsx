@@ -25,6 +25,8 @@ type Entry = {
   role_confirmer: { full_name: string | null } | { full_name: string | null }[] | null;
   registry_name: string | null;
   registry_number: string | null;
+  /** The register's second number, when the charity is also a company (20261005120000). */
+  company_number: string | null;
   reason_for_manual_entry: string;
   sector: string | null;
   geographic_reach: string | null;
@@ -69,7 +71,7 @@ export default async function ManualEntriesPage() {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("manual_entry_records")
-    .select("id, legal_name, mission_statement, organisation_type, address_line_1, city, postcode, country_code, website, contact_email, contact_email_role_confirmed_for, contact_email_role_confirmed_at, role_confirmer:users!manual_entry_records_contact_email_role_confirmed_by_fkey(full_name), registry_name, registry_number, reason_for_manual_entry, sector, geographic_reach, latest_income, accounts_year_end, staff_count, volunteer_count, review_status, created_at, submitter:users!manual_entry_records_submitted_by_user_id_fkey(full_name)")
+    .select("id, legal_name, mission_statement, organisation_type, address_line_1, city, postcode, country_code, website, contact_email, contact_email_role_confirmed_for, contact_email_role_confirmed_at, role_confirmer:users!manual_entry_records_contact_email_role_confirmed_by_fkey(full_name), registry_name, registry_number, company_number, reason_for_manual_entry, sector, geographic_reach, latest_income, accounts_year_end, staff_count, volunteer_count, review_status, created_at, submitter:users!manual_entry_records_submitted_by_user_id_fkey(full_name)")
     .eq("review_status", "pending")
     .order("created_at", { ascending: false });
   if (error) await reportError(error, { operation: "manual_entry.admin_list" });
@@ -129,6 +131,11 @@ export default async function ManualEntriesPage() {
                 {(entry.website || entry.contact_email || entry.registry_number) && (
                   <p className="mt-2 text-xs text-foreground/65">
                     {[entry.website, entry.contact_email, entry.registry_name, entry.registry_number].filter(Boolean).join(" · ")}
+                    {/* The register's own second number, so the approver can see
+                        the record will carry two identifiers rather than one
+                        before they decide. */}
+                    {entry.company_number &&
+                      ` · also a company (Companies House ${entry.company_number})`}
                   </p>
                 )}
                 {confirmation && (

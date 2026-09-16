@@ -85,7 +85,7 @@ export function SendingCapacityCard({
 
       {canChangeLimit && (
         <Link
-          href="/admin/sending-limits"
+          href="/settings/sending-limits"
           className="mt-auto pt-3 font-body text-[13px] font-semibold text-lead transition-colors hover:text-lead-mid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
         >
           Change the daily limit →

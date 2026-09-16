@@ -9,6 +9,7 @@ import {
   charityByRegisteredNumber,
   registerUnavailableReason,
 } from "@/lib/charity-register/sqlite";
+import { companyNumberForRegisteredCharity } from "@/lib/charity-register/company-identifier";
 import {
   companiesRegisterUnavailableReason,
   companyByNumber,
@@ -81,6 +82,15 @@ export type RegistrationCheck =
       number: string;
       name: string;
       listedOrganisationId: string | null;
+      /**
+       * The register's own second number, when this charity is also a company,
+       * in the app's canonical company-number form.
+       *
+       * Only ever set for the England and Wales charity register: the companies
+       * file carries no charity numbers, so the question cannot be asked in that
+       * direction (see company-identifier.ts).
+       */
+      companyNumber?: string | null;
     }
   | { status: "not_found"; number: string; message: string; listedOrganisationId: string | null }
   | { status: "unchecked"; number: string; message: string; listedOrganisationId: string | null }
@@ -134,7 +144,16 @@ export async function checkRegistrationField(
       }
       const charity = charityByRegisteredNumber(Number(number));
       return charity
-        ? { status: "found", number, name: charity.name, listedOrganisationId }
+        ? {
+            status: "found",
+            number,
+            name: charity.name,
+            listedOrganisationId,
+            // The row already read, rather than a second read of the same
+            // number: the second number can then never come from a different
+            // charity than the name beside it.
+            companyNumber: companyNumberForRegisteredCharity("ccew", number, () => charity),
+          }
         : {
             status: "not_found",
             number,

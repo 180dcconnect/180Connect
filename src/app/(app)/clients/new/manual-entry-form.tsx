@@ -591,6 +591,17 @@ function RegistrationFields({
                       </Link>
                     </FieldNote>
                   )}
+                  {/* The register's second number for a charity that is also a
+                      company. Said here because it is the only place the fact
+                      is known before the record exists, and because it changes
+                      what the client will carry: two numbers, not one. */}
+                  {result.companyNumber && (
+                    <FieldNote tone="dim">
+                      The register also lists it as a company. Companies House number{" "}
+                      <span className="font-mono">{result.companyNumber}</span> — both numbers
+                      go on the client record.
+                    </FieldNote>
+                  )}
                 </>
               );
             }
@@ -635,6 +646,15 @@ export type ManualEntryPrefill = {
   contactEmail: string;
   registryName: string;
   registryNumber: string;
+  /**
+   * The register's classification, in the form's own vocabulary, or "".
+   *
+   * A charity's sector decides its SCOUT sector factor, so a prefilled match
+   * that dropped it would score against neutrals while showing the reader the
+   * register's classification on the card above. Empty for a company: nothing
+   * maps SIC codes to a sector yet.
+   */
+  sector: string;
 };
 
 /**
@@ -752,7 +772,7 @@ export function ManualEntryForm({
     contactEmail: seed(prefill?.contactEmail, initialEntry?.contact_email) || prefillContactEmail || "",
     registryName: seed(prefill?.registryName, initialEntry?.registry_name),
     registryNumber: seed(prefill?.registryNumber, initialEntry?.registry_number),
-    sector: initialEntry?.sector ?? "",
+    sector: seed(prefill?.sector, initialEntry?.sector),
     geographicReach: initialEntry?.geographic_reach ?? "",
     latestIncome: initialEntry?.latest_income != null ? String(initialEntry.latest_income) : "",
     accountsYearEnd: initialEntry?.accounts_year_end ?? "",

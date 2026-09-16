@@ -34,6 +34,11 @@ import {
   MAX_BACKFILL as MAX_REACH_BACKFILL,
   DEFAULT_BACKFILL as DEFAULT_REACH_BACKFILL,
 } from "@/lib/charity-register/reach-backfill";
+import {
+  runCompanyNumberBackfill,
+  MAX_BACKFILL as MAX_COMPANY_BACKFILL,
+  DEFAULT_BACKFILL as DEFAULT_COMPANY_BACKFILL,
+} from "@/lib/charity-register/company-number-backfill";
 import { promotePendingCharityCommissionBulkRecords } from "@/lib/standardize/write-organisations";
 
 /**
@@ -805,6 +810,150 @@ export async function runReachBackfillNow(
         .eq("id", runId);
     }
     await reportError(error, { operation: "admin.charity_register_reach_backfill" });
+    return {
+      kind: "error",
+      message: "The backfill could not be run. The error has been reported.",
+    };
+  }
+}
+
+/**
+ * ── Company number backfill ──
+ *
+ * The second-registration-number catch-up. See
+ * `lib/charity-register/company-number-backfill.ts` for why it exists — in
+ * short, a charity added by hand carries only the number the CAM typed until
+ * 20261005120000, and every register-aware feature works off the identifier's
+ * type. This is the door onto it, gated and recorded exactly as the three
+ * backfills above.
+ */
+
+export type CompanyNumberBackfillState =
+  | { kind: "idle"; message: string }
+  | { kind: "error"; message: string }
+  | {
+      kind: "done";
+      message: string;
+      organisations: number;
+      numbers: number;
+      remaining: number;
+      skipped: number;
+    };
+
+export async function runCompanyNumberBackfillNow(
+  _previous: CompanyNumberBackfillState,
+  formData: FormData,
+): Promise<CompanyNumberBackfillState> {
+  const authorization = await getCurrentActor(IMPORT_PERMISSION);
+  if (!authorization.ok) {
+    return { kind: "error", message: actorFailureMessage(authorization.reason) };
+  }
+
+  if (registerUnavailableReason()) {
+    return { kind: "error", message: REGISTER_MISSING };
+  }
+
+  const requested = Number(formData.get("batchSize"));
+  const limit =
+    Number.isInteger(requested) && requested > 0
+      ? Math.min(requested, MAX_COMPANY_BACKFILL)
+      : DEFAULT_COMPANY_BACKFILL;
+
+  let runId: string | null = null;
+  try {
+    const supabase = requireAdminClient();
+
+    const { data: run, error: runError } = await supabase
+      .from("ingestion_runs")
+      .insert({
+        api_source: "charity_commission_bulk",
+        triggered_by: "manual",
+        triggered_by_user_id: authorization.actor.id,
+        job_status: "running",
+      })
+      .select("id")
+      .single();
+    if (runError) throw runError;
+    runId = run.id as string;
+
+    const outcome = await runCompanyNumberBackfill(supabase, limit);
+
+    await supabase
+      .from("ingestion_runs")
+      .update({
+        job_status: outcome.remaining > 0 ? "partial" : "completed",
+        completed_at: new Date().toISOString(),
+        records_fetched: outcome.organisations,
+        // Rows inserted into ORGANISATION_IDENTIFIERS, not organisations — the
+        // same accounting the profile and reach backfills explain above:
+        // counting these as "inserted" would put clients on Import Status that
+        // were never created.
+        records_inserted: 0,
+        records_skipped: outcome.skipped,
+        records_failed: 0,
+        run_stats: {
+          job: "company_number_backfill",
+          organisations: outcome.organisations,
+          numbers: outcome.numbers,
+          remaining: outcome.remaining,
+          skipped: outcome.skipped,
+        },
+      })
+      .eq("id", runId);
+
+    await supabase.from("audit_log").insert({
+      actor_user_id: authorization.actor.id,
+      action: "charity_register_company_numbers_backfilled",
+      target_table: "ingestion_runs",
+      target_id: runId,
+      detail: {
+        organisations: outcome.organisations,
+        numbers: outcome.numbers,
+        remaining: outcome.remaining,
+        skipped: outcome.skipped,
+        limit,
+      },
+    });
+
+    revalidatePath("/admin/charity-commission");
+    // The numbers land on client records, so both the list and the records
+    // themselves are stale the moment this returns.
+    revalidatePath("/clients");
+
+    if (outcome.organisations === 0 && outcome.skipped === 0) {
+      return {
+        kind: "done",
+        message:
+          "Nothing outstanding — every charity the register publishes a company number for already carries it.",
+        ...outcome,
+      };
+    }
+
+    const parts = [
+      outcome.organisations > 0
+        ? `Added the register's company number to ${outcome.organisations.toLocaleString()} ` +
+          `${outcome.organisations === 1 ? "client" : "clients"}`
+        : "Added nothing — every one of those was already done",
+      outcome.skipped > 0
+        ? `${outcome.skipped.toLocaleString()} were done by another run at the same time`
+        : "",
+      outcome.remaining > 0 ? `${outcome.remaining.toLocaleString()} still queued` : "",
+    ].filter(Boolean);
+
+    return { kind: "done", message: `${parts.join(". ")}.`, ...outcome };
+  } catch (error) {
+    if (runId) {
+      const supabase = createAdminClient();
+      await supabase
+        ?.from("ingestion_runs")
+        .update({
+          job_status: "failed",
+          completed_at: new Date().toISOString(),
+          error_message: error instanceof Error ? error.message : String(error),
+        })
+        .eq("id", runId);
+    }
+    await reportError(error, { operation: "admin.charity_register_company_number_backfill" });
     return {
       kind: "error",
       message: "The backfill could not be run. The error has been reported.",

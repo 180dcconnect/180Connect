@@ -5,6 +5,7 @@
 
 import { createClient } from "../supabase/server.ts";
 import { getCurrentActor, actorFailureMessage } from "../auth/actor.ts";
+import { canRestructureTags } from "../auth/permissions.ts";
 import { reportError } from "../error-logging.ts";
 import {
   editTagCore,
@@ -19,8 +20,9 @@ export async function editTag(
   newName: string,
 ): Promise<EditTagResult> {
   // Outer gate is the shared "tags:manage" permission; renaming itself stays
-  // admin-only via editTagCore's isAdmin check, so a CAM gets the clear
-  // "Only an admin can edit a shared tag" message instead of a bare refusal.
+  // admin-only via canRestructureTags, so a CAM gets the clear "Only an admin
+  // can edit a shared tag" message instead of a bare refusal. The tags screen
+  // asks the same function before it draws a Rename button.
   const authorization = await getCurrentActor("tags:manage", {
     route: "tags.edit",
   });
@@ -28,7 +30,7 @@ export async function editTag(
     return { ok: false, message: actorFailureMessage(authorization.reason) };
   }
 
-  const isAdmin = authorization.actor.role === "admin";
+  const isAdmin = canRestructureTags(authorization.actor.role);
 
   const supabase = await createClient();
   const client: TagUpdateClient = {

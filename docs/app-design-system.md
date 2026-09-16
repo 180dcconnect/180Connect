@@ -264,6 +264,21 @@ put `.dark` on `<html>` and define token overrides under it.
 | Checkbox | `FiledCheckbox` from `src/components/ui/filed-checkbox.tsx` |
 | Instant on/off | `Switch` from `src/components/ui/material-design-3-switch.tsx` |
 | Pick one of a few (settings) | `OptionGroup` from `src/app/settings/option-group.tsx` |
+| A tag | `TagChip` from `src/lib/tags/tag-chips.tsx` |
+
+**A tag is one chip, everywhere.** `TagChip` is the tag as it appears on the
+client record, on the tags screen's list and inside its colour picker: a
+rectangle cut with an 8px V notch (`TAG_NOTCH_CLIP`), tinted with the tag's own
+colour, or `bg-paper-sunk text-ink` when it has none. The colour palette is the
+one exception to "never a colour of your own" — it is data the team chose, and
+every entry is ≥4.5:1 as text on its own tint (`src/lib/tags/tag-colours.ts`).
+**"No colour" is neutral, never green**: a tag is the one thing a person picks
+the colour of, so choosing nothing must not arrive as `--brand`, which is not an
+app colour at all. Before this, the record drew a notched brand-green chip and
+the admin list drew a `rounded-full` pill in a second, different brand tint.
+Picking a colour is `OptionGroup`'s problem in miniature — real radios — but the
+control that shows the choice is the chip itself, so you pick by looking at the
+result (`admin/tags/colour-picker.tsx`).
 
 **Checkboxes are always `FiledCheckbox`** — the animated animate-ui checkbox
 (the one on the Terms & Conditions step, where the tick draws itself in),

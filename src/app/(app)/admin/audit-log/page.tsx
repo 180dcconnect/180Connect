@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
@@ -86,7 +86,7 @@ export default async function AuditLogPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const authorization = await getCurrentActor("user:manage", {
+  const authorization = await getViewingActor("user:manage", {
     route: "/admin/audit-log",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));

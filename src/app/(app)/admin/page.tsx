@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 
 /**
@@ -8,7 +8,7 @@ import { adminRouteDestination } from "@/lib/auth/admin-route";
  *
  * The sidebar is the front door for what admins touch often; pages grouped
  * under one sidebar entry (Data imports, Platform settings — see
- * `src/app/admin/import-group.ts`) also keep a tile here so nothing depends on
+ * `src/app/(app)/admin/import-group.ts`) also keep a tile here so nothing depends on
  * remembering which group hid it. Tiles here are organised by the job they do,
  * not by where they also appear.
  *
@@ -36,7 +36,7 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 }
 
 export default async function AdminPage() {
-  const authorization = await getCurrentActor("user:manage", { route: "/admin" });
+  const authorization = await getViewingActor("user:manage", { route: "/admin" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
   return (
@@ -60,9 +60,9 @@ export default async function AdminPage() {
           <Tile href="/admin/cam-settings" title="CAM queue settings">
             View outreach preferences and queue configuration for team members.
           </Tile>
-          <Tile href="/admin/actions" title="Team actions">
-            Assign a client-linked action to a CAM and track outstanding vs completed work
-            across the team.
+          <Tile href="/admin/actions" title="Assign actions">
+            Give a team member a piece of client work and track outstanding vs completed
+            work across the team.
           </Tile>
         </Section>
 
@@ -124,11 +124,8 @@ export default async function AdminPage() {
         </Section>
 
         <Section label="Oversight & intelligence">
-          <Tile href="/admin/dashboard" title="Admin dashboard">
-            Team-wide pipeline activity, funnel and sector performance.
-          </Tile>
           <Tile href="/admin/analytics" title="Team analytics">
-            Team-wide outreach performance, conversions over time, and who may need support.
+            Team-wide outreach performance, pipeline stages, ownership, sectors, and who may need support.
           </Tile>
           <Tile href="/admin/audit-log" title="Audit log">
             Every recorded action, most recent first.

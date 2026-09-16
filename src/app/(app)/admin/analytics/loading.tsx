@@ -2,7 +2,7 @@ import { Skeleton, SkeletonStatCard } from "@/components/ui/skeleton";
 import { AnalyticsHeader } from "../analytics-header";
 
 /**
- * F212 — mirrors src/app/admin/analytics/page.tsx panel-for-panel, so the real
+ * F212 — mirrors src/app/(app)/admin/analytics/page.tsx panel-for-panel, so the real
  * page lands underneath this without the layout shifting.
  *
  * This page runs six paged reads before it can render anything, which makes it

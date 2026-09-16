@@ -32,7 +32,8 @@
 
 import { redirect } from "next/navigation";
 
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
+import { hasPermission } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { reportError } from "@/lib/error-logging";
@@ -68,11 +69,21 @@ const RUN_WINDOW = 8;
 export default async function CompaniesHousePage() {
   // `client:edit`, not `user:manage`: the team decided everyone who works the
   // client list can shape and run imports. Viewers still cannot.
-  const authorization = await getCurrentActor("client:edit");
+  const authorization = await getViewingActor("client:edit");
   if (!authorization.ok) {
     if (authorization.reason === "unauthenticated") redirect("/login");
     redirect("/dashboard?error=admin-access-required");
   }
+
+  // Leadership reads this screen and runs nothing on it. `client:edit` is the
+  // exact permission every write behind the run history asks for — the import,
+  // the single-company lookup and the CIC statement reader — and
+  // `platform-settings:manage` is what the register refresh asks for. Reading
+  // the same questions here keeps the controls off the page rather than letting
+  // a viewer press one and be refused.
+  const canImport = hasPermission(authorization.actor.role, "client:edit");
+  const canRefreshRegister =
+    canImport && hasPermission(authorization.actor.role, "platform-settings:manage");
 
   const supabase = await createClient();
   const admin = createAdminClient();
@@ -173,7 +184,9 @@ export default async function CompaniesHousePage() {
               sourceMonth={sourceMonth}
               registerSize={registerSize}
               staleDays={staleDays}
-              canRefresh={Boolean(process.env.GITHUB_REGISTER_TOKEN?.trim())}
+              canRefresh={
+                canRefreshRegister && Boolean(process.env.GITHUB_REGISTER_TOKEN?.trim())
+              }
             />
           </DataImportsHeader>
         </Rise>
@@ -189,22 +202,33 @@ export default async function CompaniesHousePage() {
                         variant="page"
                         message="Import history could not be loaded. This has been recorded — refresh and try again."
                       />
-                      <div className="px-1">
-                        <CompaniesLookupDialog configured={lookupConfigured} />
-                      </div>
+                      {canImport && (
+                        <div className="px-1">
+                          <CompaniesLookupDialog configured={lookupConfigured} />
+                        </div>
+                      )}
                     </>
                   ) : (
                     <CompaniesRecentRuns
                       runs={runs}
-                      action={staged ? <NewImportButton /> : undefined}
-                      secondaryAction={<CompaniesLookupDialog configured={lookupConfigured} />}
+                      nowIso={now.toISOString()}
+                      action={staged && canImport ? <NewImportButton /> : undefined}
+                      secondaryAction={
+                        canImport ? (
+                          <CompaniesLookupDialog configured={lookupConfigured} />
+                        ) : undefined
+                      }
                     />
                   )}
 
                   {!staged && (
                     <InlineAlert
                       variant="page"
-                      message="The register has not been loaded yet, so there is nothing to import from. Refresh it from the link above the history."
+                      message={
+                        canImport
+                          ? "The register has not been loaded yet, so there is nothing to import from. Refresh it from the link above the history."
+                          : "The register has not been loaded yet, so there is nothing to import from."
+                      }
                     />
                   )}
 
@@ -216,6 +240,7 @@ export default async function CompaniesHousePage() {
                       pending={cicCoverage.pending}
                       maxBatchSize={MAX_CIC_BACKFILL}
                       unavailableReason={cicUnavailable}
+                      readOnly={!canImport}
                     />
                   )}
 

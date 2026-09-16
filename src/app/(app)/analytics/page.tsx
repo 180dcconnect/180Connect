@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { getCurrentActor } from "@/lib/auth/actor";
-import { hasPermission } from "@/lib/auth/permissions";
+import { hasPermission, isViewOnly } from "@/lib/auth/permissions";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { createClient } from "@/lib/supabase/server";
 import { fetchPaged, fetchPagedForOrgs } from "@/lib/supabase/fetch-paged";
@@ -10,7 +10,7 @@ import { InlineAlert } from "@/components/ui/inline-alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatCard } from "@/components/stat-card";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
-import { AnalyticsHeader } from "@/app/admin/analytics-header";
+import { AnalyticsHeader } from "@/app/(app)/admin/analytics-header";
 import {
   filterActiveSuppressed,
   type DashboardOrgRow,
@@ -30,6 +30,7 @@ import {
   type CamReplyRow,
   type SentMessageRow,
 } from "@/lib/cam-analytics";
+import { formatWinRate } from "@/lib/outreach-rates";
 import {
   describeToneRow,
   tonePerformanceSummary,
@@ -57,7 +58,7 @@ type ToneMessageRow = {
 /**
  * F206/F207/F208 — the CAM's own outreach performance, as opposed to the
  * platform-wide readings on /dashboard. One tab of the Analytics group — see
- * `src/app/admin/analytics-group.ts`.
+ * `src/app/(app)/admin/analytics-group.ts`.
  *
  * Every figure here describes *clients you own*. The eyebrow says so on screen,
  * because a personal analytics page that quietly showed team totals would be
@@ -73,19 +74,9 @@ export default async function AnalyticsPage() {
   // two client objects for no gain.
   const supabase = await createClient();
 
-  let user;
-
-  try {
-    const result = await supabase.auth.getUser();
-    user = result.data.user;
-  } catch {
-    redirect("/login");
-  }
-
-  if (!user) {
-    redirect("/login");
-  }
-
+  // No separate `auth.getUser()` pre-check: that was a network round trip to
+  // the Auth server on every load, and `getCurrentActor` already resolves the
+  // session (locally, via getClaims) and reports "unauthenticated" itself.
   const actorResult = await getCurrentActor();
   if (!actorResult.ok) {
     logSecurityEvent("permission.denied", {
@@ -95,6 +86,10 @@ export default async function AnalyticsPage() {
     redirect("/login");
   }
   const actor = actorResult.actor;
+
+  // Only the clients you own are counted here, and a viewer owns none — send
+  // leadership to the team's numbers instead of an always-empty page.
+  if (isViewOnly(actor.role)) redirect("/admin/analytics");
 
   const canViewClients = hasPermission(actor.role, "client:view");
 
@@ -346,7 +341,7 @@ export default async function AnalyticsPage() {
                     label="Conversions"
                     value={totals.conversions}
                     share={share(totals.conversions)}
-                    caption={formatRate(totals.conversionRate)}
+                    caption={formatWinRate(totals.winRate)}
                     emphasis
                   />
                 </Rise>
@@ -482,7 +477,7 @@ export default async function AnalyticsPage() {
                 <Rise>
                   <div className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
                     <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-                      Reply and conversion rates by email tone (F107)
+                      Reply and win rates by email tone
                     </p>
                     {(toneSummary.untrackedRegister > 0 || toneSummary.untrackedLength > 0) && (
                       <div className="mt-2 space-y-1 text-[11px] text-foreground/40">
@@ -563,7 +558,10 @@ function ToneTable({
               Reply rate
             </th>
             <th scope="col" className="py-2 text-right text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-              Converted
+              Won
+            </th>
+            <th scope="col" className="py-2 text-right text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+              Win rate
             </th>
           </tr>
         </thead>
@@ -572,8 +570,9 @@ function ToneTable({
             <tr key={row.value} className="border-b border-black/[0.04] last:border-0">
               <td className="py-2 pr-3 font-medium">{row.label}</td>
               <td className="py-2 pr-3 text-right tabular-nums">{row.sent.toLocaleString()}</td>
-              <td className="py-2 pr-3 text-right tabular-nums">{pct(row.responseRate)}</td>
-              <td className="py-2 text-right tabular-nums">{pct(row.conversionRate)}</td>
+              <td className="py-2 pr-3 text-right tabular-nums">{pct(row.replyRate)}</td>
+              <td className="py-2 pr-3 text-right tabular-nums">{row.convertedClients.toLocaleString()}</td>
+              <td className="py-2 text-right tabular-nums">{pct(row.winRate)}</td>
             </tr>
           ))}
         </tbody>

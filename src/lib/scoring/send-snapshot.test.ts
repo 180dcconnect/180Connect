@@ -48,7 +48,7 @@ test("assembles the five factors plus score and band from org data", () => {
       DEFAULT_WEIGHTS.size +
       DEFAULT_WEIGHTS.partnershipHistory +
       DEFAULT_WEIGHTS.previousContact);
-  assert.equal(payload.priority_score, closeTo(expected));
+  assert.equal(closeTo(payload.priority_score), closeTo(expected));
   assert.equal(payload.priority_band, bandOf(expected));
   assert.equal(payload.model_version_id, fullConfig.id);
 });

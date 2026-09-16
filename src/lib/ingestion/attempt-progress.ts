@@ -3,7 +3,7 @@
 // Pure by design, same reasoning as the standardize mappers: the row arrives
 // as untyped JSON from the database, and deciding "what does this row say?"
 // should be testable without one. The poll action in
-// src/app/admin/three-sixty-giving/actions.ts does the fetching; this module
+// src/app/(app)/admin/three-sixty-giving/actions.ts does the fetching; this module
 // does the interpreting.
 
 import type { JobStatus } from "./type.ts";

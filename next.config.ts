@@ -21,6 +21,14 @@ const nextConfig: NextConfig = {
     "/api/cron/scheduled-outreach": ["./src/lib/outreach/assets/**"],
   },
   experimental: {
+    // Keeps a visited signed-in page in the browser's router cache for 30s, so
+    // Back, or returning to a page moments after leaving it, is instant instead
+    // of re-running the whole server render (Next 15+ defaults this to 0).
+    // Saves still show at once: server actions that call revalidatePath or
+    // router.refresh() clear the cache regardless of this window.
+    staleTimes: {
+      dynamic: 30,
+    },
     // Defense in depth only: on exceeding this, Next.js truncates the body
     // and logs a warning rather than rejecting the request, so the actual
     // enforcement point for input limits is still src/lib/validation.ts.

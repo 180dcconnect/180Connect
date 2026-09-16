@@ -49,7 +49,7 @@ setting from the recovery side.
 `INVITE_EXPIRY_HOURS` (`src/lib/auth/invite.ts`) only *says* how long the
 link lasts, in the email copy and (via `isInviteExpired` in
 `src/lib/admin/team-realtime.ts`) in the admin's pending-invites list
-(`src/app/admin/users/pending-invites-list.tsx`, which shows "Expired" once an
+(`src/app/(app)/admin/users/pending-invites-list.tsx`, which shows "Expired" once an
 invite passes this window). It does not enforce anything — Supabase does that.
 The two must be kept aligned by hand in every environment:
 

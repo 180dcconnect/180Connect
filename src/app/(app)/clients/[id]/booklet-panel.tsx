@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Clock, ExternalLink, Globe, ShieldCheck } from "lucide-react";
+import { Clock, ExternalLink, Globe, Pencil, ShieldCheck } from "lucide-react";
 import { LoaderPinwheel } from "@/components/animate-ui/icons/loader-pinwheel";
 import { DeleteButton } from "@/components/ui/delete-button";
 import { GooeyEmailInput } from "@/components/ui/gooey-email-input";
@@ -19,8 +19,9 @@ import {
 } from "@/components/core/morphing-dialog";
 import { BrandSearchBar } from "@/components/brand/search-bar";
 import { validateBookletWebsiteUrl } from "./outreach-actions";
-import { deleteBookletVersion } from "./booklet-actions";
+import { deleteBookletVersion, saveBookletEdit } from "./booklet-actions";
 import { SectionCard } from "./section-card";
+import { MAX_BOOKLET_EDIT_CHARS } from "@/lib/booklet/edit-validation";
 import { parseBookletSections } from "@/lib/booklet/parse-sections";
 import { MAX_STEER_CHARS } from "@/lib/booklet/build-prompt";
 import type { BookletSource } from "@/lib/booklet/sources";
@@ -167,6 +168,21 @@ function SourceBadge({ source }: { source: BookletSource }) {
 
 }
 
+/**
+ * Manual editing — a corrected version is no longer purely what Gemini wrote,
+ * so it carries who corrected it next to the source badges. The profile badge
+ * stays (the facts still originated there), but it never stands alone on
+ * edited text claiming a person’s words are register-verified.
+ */
+function EditedBadge({ editedBy }: { editedBy: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-brand/10 px-3 py-1 text-sm font-semibold text-brand">
+      <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
+      Edited by {editedBy}
+    </span>
+  );
+}
+
 function BookletContent({ booklet }: { booklet: string }) {
   const blocks = parseBookletSections(booklet);
   return (
@@ -244,7 +260,9 @@ function HistoryVersionDialog({ version }: { version: SavedBooklet }) {
                 </MorphingDialogTitle>
                 <MorphingDialogSubtitle>
                   <p className="mt-1 text-[13px] leading-[1.5] text-dim">
-                    Generated {formatGeneratedAt(version.generatedAt)} — read-only.
+                    {version.editedBy
+                      ? `Edited by ${version.editedBy}, ${formatGeneratedAt(version.generatedAt)} — read-only.`
+                      : `Generated ${formatGeneratedAt(version.generatedAt)} — read-only.`}
                   </p>
                 </MorphingDialogSubtitle>
               </div>
@@ -283,11 +301,12 @@ function HistoryVersionDialog({ version }: { version: SavedBooklet }) {
                 },
               }}
             >
-              {version.sources.length > 0 && (
+              {(version.sources.length > 0 || version.editedBy) && (
                 <div className="mb-1 flex flex-wrap items-center gap-2">
                   {version.sources.map((source) => (
                     <SourceBadge key={source.type} source={source} />
                   ))}
+                  {version.editedBy && <EditedBadge editedBy={version.editedBy} />}
                 </div>
               )}
               <BookletContent booklet={version.text} />
@@ -311,6 +330,8 @@ export type SavedBooklet = {
   websiteContextUsed: boolean;
   generatedAt: string;
   sources: BookletSource[];
+  /** Who corrected this version by hand, in display words — null on generated versions. */
+  editedBy: string | null;
 };
 
 function formatGeneratedAt(iso: string): string {
@@ -545,6 +566,7 @@ export function BookletPanel({
   savedBooklet,
   priorVersions,
   canDeleteBooklet = false,
+  canEditBooklet = false,
 }: {
   organisationId: string;
   savedBooklet: SavedBooklet | null;
@@ -555,6 +577,13 @@ export function BookletPanel({
    * the action re-checks server-side regardless.
    */
   canDeleteBooklet?: boolean;
+  /**
+   * Whether the viewer may correct the current version by hand. CAMs and
+   * admins holding client:contact — never viewers, who read the booklet and
+   * its Edited badge but get no control. The action re-checks server-side
+   * regardless, which is the refusal for anyone who reaches it anyway.
+   */
+  canEditBooklet?: boolean;
 }) {
   // F085: seeded straight from the server-read CLIENT_BOOKLETS rows, so a client
   // with a saved booklet renders it on first paint with zero fetch and zero
@@ -575,6 +604,13 @@ export function BookletPanel({
   // full composer (website + focus + confirm sheet) rather than firing a paid
   // call off the click itself.
   const [composerOpen, setComposerOpen] = useState(false);
+  // Manual correction of the version on screen. Holds the draft text, not a
+  // diff: the save writes the whole corrected text as a new version row, and
+  // the previous version stays under History untouched.
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Bumped per generation failure so a closed composer panel opens onto the
@@ -631,6 +667,65 @@ export function BookletPanel({
   const displayedWebsiteContext =
     freshWebsiteContext ?? (currentVersion ? initialWebsiteContext(currentVersion) : null);
 
+  function openEditor() {
+    if (!currentVersion || busy || editSaving) return;
+    setEditText(currentVersion.text);
+    setEditError(null);
+    setComposerOpen(false);
+    setEditing(true);
+  }
+
+  async function saveEdit() {
+    if (!currentVersion || editSaving) return;
+    const trimmed = editText.trim();
+    if (!trimmed) {
+      setEditError("Write something first — an empty booklet cannot be saved.");
+      return;
+    }
+    if (trimmed.length > MAX_BOOKLET_EDIT_CHARS) {
+      setEditError(
+        `That edit is ${trimmed.length.toLocaleString()} characters — booklets cannot be longer than ${MAX_BOOKLET_EDIT_CHARS.toLocaleString()} characters.`,
+      );
+      return;
+    }
+    if (trimmed === currentVersion.text.trim()) {
+      setEditError("No changes to save yet.");
+      return;
+    }
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const result = await saveBookletEdit({
+        organisationId,
+        baseVersionId: currentVersion.id,
+        text: trimmed,
+      });
+      if (!result.ok) {
+        setEditError(result.message);
+        return;
+      }
+      // An edit archives exactly like a regeneration: whatever was current
+      // becomes history, never discarded.
+      setHistory((previous) => [currentVersion, ...previous]);
+      setCurrentVersion({
+        id: result.version.id,
+        text: trimmed,
+        websiteUrl: currentVersion.websiteUrl,
+        websiteContextUsed: currentVersion.websiteContextUsed,
+        generatedAt: result.version.generatedAt,
+        sources: currentVersion.sources,
+        // An unnamed account still corrected this — the badge must show on
+        // every edited version, so it falls back to a role rather than vanishing.
+        editedBy: result.version.editedBy ?? "a team member",
+      });
+      setFreshWebsiteContext(null);
+      setSaveFailed(false);
+      setEditing(false);
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   async function generate() {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -675,6 +770,8 @@ export function BookletPanel({
         // F087: the route's own authoritative list for this exact call (sources.ts),
         // not re-derived client-side — see route.ts's response comment.
         sources: (body.sources as BookletSource[] | undefined) ?? [{ type: "profile", verified: true }],
+        // Fresh from Gemini, corrected by nobody.
+        editedBy: null,
       };
       // F086 AC2: archive whatever was current, never discard it — a regenerate
       // is additive to history, not a replacement of it.
@@ -743,7 +840,17 @@ export function BookletPanel({
         action={
           currentVersion && !busy ? (
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              {canDeleteBooklet && currentVersion && (
+              {canEditBooklet && (
+                <button
+                  className="shrink-0 rounded-full border border-rule px-4 py-2 text-xs font-semibold text-lead transition-colors hover:bg-lead-wash disabled:opacity-50"
+                  disabled={deleteArmed || editSaving}
+                  onClick={() => (editing ? setEditing(false) : openEditor())}
+                  type="button"
+                  aria-expanded={editing}
+                >
+                  {editing ? "Close editor" : "Edit"}
+                </button>
+              )}              {canDeleteBooklet && currentVersion && (
                 <DeleteButton
                   key={`delete-booklet-${currentVersion.id}-${deleteAttempts[currentVersion.id] ?? 0}`}
                   label="Delete"
@@ -787,8 +894,11 @@ export function BookletPanel({
               )}
               <button
                 className="shrink-0 rounded-full border border-rule px-4 py-2 text-xs font-semibold text-lead transition-colors hover:bg-lead-wash disabled:opacity-50"
-                disabled={deleteArmed}
-                onClick={() => setComposerOpen((open) => !open)}
+                disabled={deleteArmed || editing}
+                onClick={() => {
+                  setEditing(false);
+                  setComposerOpen((open) => !open);
+                }}
                 type="button"
                 aria-expanded={composerOpen}
               >
@@ -825,6 +935,58 @@ export function BookletPanel({
           disc plus the cycling status line in the prompt row. Nothing renders
           below the bar — no separate loading block on either path. */}
 
+      {/* Manual correction: the whole current text, editable, saved as a new
+          version on Save — never an overwrite. Only the current version opens
+          here; history versions are read-only by construction. */}
+      {editing && currentVersion && !busy && (
+        <div className="mt-6 rounded-inset border border-rule bg-paper p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-[13px] font-semibold text-ink">Correct this version</p>
+            <p className="shrink-0 text-xs tabular-nums text-faint" aria-live="polite">
+              {editText.length.toLocaleString()} / {MAX_BOOKLET_EDIT_CHARS.toLocaleString()}
+            </p>
+          </div>
+          <p className="mt-1 text-xs leading-[1.6] text-dim">
+            Saves as a new version — the original stays under History, and the
+            record of what the AI generated is untouched.
+          </p>
+          <label className="sr-only" htmlFor="booklet-edit-text">
+            Corrected booklet text
+          </label>
+          <textarea
+            id="booklet-edit-text"
+            value={editText}
+            onChange={(event) => setEditText(event.target.value)}
+            rows={12}
+            maxLength={MAX_BOOKLET_EDIT_CHARS}
+            className="mt-3 w-full rounded-xl border border-rule bg-white px-3 py-2 text-[15px] leading-relaxed text-ink"
+          />
+          {editError && (
+            <p className="mt-2 text-sm font-semibold text-stop" role="alert">
+              {editError}
+            </p>
+          )}
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              className="shrink-0 rounded-full border border-rule px-4 py-2 text-xs font-semibold text-lead transition-colors hover:bg-lead-wash disabled:opacity-50"
+              disabled={editSaving}
+              onClick={() => void saveEdit()}
+              type="button"
+            >
+              {editSaving ? "Saving…" : "Save correction"}
+            </button>
+            <button
+              className="text-xs font-bold text-dim hover:text-ink"
+              disabled={editSaving}
+              onClick={() => setEditing(false)}
+              type="button"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Failures outside the composer report here: the arrival-time
           auto-generate (?booklet=generate) runs with no composer on screen.
           Its Try again opens the composer onto the error, rather than firing
@@ -844,7 +1006,13 @@ export function BookletPanel({
 
       {displayed && (
         <p className="mt-1 text-xs text-dim">
-          Generated {formatGeneratedAt(displayed.generatedAt)}
+          {displayed.editedBy ? (
+            <>
+              Edited by {displayed.editedBy} · {formatGeneratedAt(displayed.generatedAt)}
+            </>
+          ) : (
+            <>Generated {formatGeneratedAt(displayed.generatedAt)}</>
+          )}
           {saveFailed
             ? " — could not be saved, will re-generate next time this client is opened."
             : "."}
@@ -854,11 +1022,12 @@ export function BookletPanel({
           website only when it actually contributed — never listed as a source it
           wasn't (AC3). Rendered regardless of error state, consistent with the
           saved-content-stays-visible behaviour above. */}
-      {displayed && displayedSources.length > 0 && (
+      {displayed && (displayedSources.length > 0 || displayed.editedBy) && (
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
           {displayedSources.map((source) => (
             <SourceBadge key={source.type} source={source} />
           ))}
+          {displayed.editedBy && <EditedBadge editedBy={displayed.editedBy} />}
         </div>
       )}
       {displayed && displayedWebsiteContext?.status === "skipped" && (

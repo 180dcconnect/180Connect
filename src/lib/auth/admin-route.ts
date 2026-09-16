@@ -23,5 +23,5 @@ import type { PermissionFailureReason } from "./permissions.ts";
 export const ADMIN_ACCESS_DENIED_PATH = "/dashboard?error=admin-access-required";
 
 export function adminRouteDestination(reason: PermissionFailureReason): string {
-  return reason === "forbidden" ? ADMIN_ACCESS_DENIED_PATH : "/login";
+  return reason === "forbidden" || reason === "view_only" ? ADMIN_ACCESS_DENIED_PATH : "/login";
 }

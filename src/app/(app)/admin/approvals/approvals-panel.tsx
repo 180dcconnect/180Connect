@@ -9,6 +9,7 @@ import {
   restrictedFieldLabel,
   type EditSuggestionRow,
 } from "@/lib/edit-suggestions";
+import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import { decideEditSuggestionAction } from "./actions";
 
 function personLabel(person: { full_name: string | null; email: string } | null) {
@@ -25,8 +26,16 @@ const STATUS_PILL: Record<EditSuggestionRow["status"], string> = {
 
 export function ApprovalsPanel({
   initialSuggestions,
+  canDecide,
 }: {
   initialSuggestions: EditSuggestionRow[];
+  /**
+   * Whether this reader may decide anything. False for leadership, who read the
+   * queue and are offered no control in it — see `approval:manage` in
+   * `src/lib/auth/permissions.ts`. The server refuses them either way; this is
+   * so the page does not offer a button that can only fail.
+   */
+  canDecide: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending");
   const [pending, setPending] = useState(() =>
@@ -95,10 +104,13 @@ export function ApprovalsPanel({
     <div className="mt-8 space-y-6">
       {/* Subtitle / Context description */}
       <p className="text-sm leading-relaxed text-foreground/65">
-        Review proposals from Client Account Managers. Approving applies the suggested
-        value directly to the live client record and audits the change; rejecting leaves
-        the record intact.
+        {canDecide
+          ? "Review proposals from Client Account Managers. Approving applies the suggested value directly to the live client record and audits the change; rejecting leaves the record intact."
+          : "Proposals from Client Account Managers, and how each one was decided."}
       </p>
+      {!canDecide && (
+        <p className="text-sm leading-relaxed text-foreground/55">{VIEW_ONLY_CONTROL_NOTE}</p>
+      )}
 
       {/* Tabs */}
       <div className="flex items-center gap-2 border-b border-black/10 pb-3">
@@ -249,51 +261,55 @@ export function ApprovalsPanel({
                       </div>
                     </div>
 
-                    {/* Optional Rejection Reason */}
-                    <div className="mt-4">
-                      <label
-                        htmlFor={`reason-${row.id}`}
-                        className="block text-xs font-semibold text-foreground/70"
-                      >
-                        Rejection reason (optional — visible to proposing CAM if rejected)
-                      </label>
-                      <textarea
-                        id={`reason-${row.id}`}
-                        disabled={isBusy}
-                        rows={2}
-                        value={reasons[row.id] ?? ""}
-                        onChange={(e) =>
-                          setReasons((prev) => ({ ...prev, [row.id]: e.target.value }))
-                        }
-                        placeholder="e.g. Registered address confirmed via Companies House does not match."
-                        className="mt-1 w-full rounded-xl border border-black/15 bg-white px-3 py-2 text-sm placeholder:text-foreground/40 focus:border-brand focus:outline-none"
-                      />
-                    </div>
+                    {canDecide && (
+                      <>
+                        {/* Optional Rejection Reason */}
+                        <div className="mt-4">
+                          <label
+                            htmlFor={`reason-${row.id}`}
+                            className="block text-xs font-semibold text-foreground/70"
+                          >
+                            Rejection reason (optional — visible to proposing CAM if rejected)
+                          </label>
+                          <textarea
+                            id={`reason-${row.id}`}
+                            disabled={isBusy}
+                            rows={2}
+                            value={reasons[row.id] ?? ""}
+                            onChange={(e) =>
+                              setReasons((prev) => ({ ...prev, [row.id]: e.target.value }))
+                            }
+                            placeholder="e.g. Registered address confirmed via Companies House does not match."
+                            className="mt-1 w-full rounded-xl border border-black/15 bg-white px-3 py-2 text-sm placeholder:text-foreground/40 focus:border-brand focus:outline-none"
+                          />
+                        </div>
 
-                    {/* Action buttons */}
-                    <div className="mt-4 flex flex-wrap items-center gap-3">
-                      <OriginButton
-                        size="sm"
-                        variant="default"
-                        disabled={isBusy}
-                        loading={isBusy}
-                        onClick={() => void handleDecision(row, true)}
-                        type="button"
-                      >
-                        <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                        Approve and apply
-                      </OriginButton>
-                      <OriginButton
-                        size="sm"
-                        variant="outline"
-                        disabled={isBusy}
-                        onClick={() => void handleDecision(row, false)}
-                        type="button"
-                      >
-                        <X className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                        Reject
-                      </OriginButton>
-                    </div>
+                        {/* Action buttons */}
+                        <div className="mt-4 flex flex-wrap items-center gap-3">
+                          <OriginButton
+                            size="sm"
+                            variant="default"
+                            disabled={isBusy}
+                            loading={isBusy}
+                            onClick={() => void handleDecision(row, true)}
+                            type="button"
+                          >
+                            <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                            Approve and apply
+                          </OriginButton>
+                          <OriginButton
+                            size="sm"
+                            variant="outline"
+                            disabled={isBusy}
+                            onClick={() => void handleDecision(row, false)}
+                            type="button"
+                          >
+                            <X className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                            Reject
+                          </OriginButton>
+                        </div>
+                      </>
+                    )}
                   </li>
                 );
               })}

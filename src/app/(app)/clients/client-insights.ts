@@ -11,8 +11,8 @@
  * has to mean the same thing on both screens or the two disagree in front of a CAM.
  */
 
-import { hasResponded, isContacted, isConverted } from "../../lib/dashboard-metrics.ts";
-import { formatOrganisationType } from "../../lib/organisation-format.ts";
+import { hasResponded, isContacted, isConverted } from "../../../lib/dashboard-metrics.ts";
+import { formatOrganisationType } from "../../../lib/organisation-format.ts";
 import type { VisibleClient } from "./visible-clients.ts";
 
 /** organisation_type → the label the source filter (F051 bar) matches on.

@@ -12,6 +12,11 @@
  * directly rather than only through a rendered page.
  */
 
+import {
+  isStalledRun,
+  stalledRunSummary,
+} from "../import-status/status-helpers.ts";
+
 /** The stages, in the order the adapter's gates apply. */
 const STAGES = [
   {
@@ -143,8 +148,12 @@ export const PIPELINE_LABEL: Record<string, string> = {
  * other three at zero. This says the outcome and carries only the counts that
  * are not zero.
  */
-export function summariseRun(run: CharityCommissionRun): string {
-  if (run.job_status === "running") return "Running now.";
+export function summariseRun(run: CharityCommissionRun, now: Date = new Date()): string {
+  if (run.job_status === "running") {
+    return isStalledRun(run.started_at, now)
+      ? stalledRunSummary(run.started_at, now)
+      : "Running now.";
+  }
   if (run.job_status === "failed") return "Failed — nothing was imported.";
 
   const parts: string[] = [];

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor, actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { findDuplicateMatch } from "@/lib/dedup/match-organisations";
 import { reportError } from "@/lib/error-logging";
 import {
@@ -12,6 +12,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { fetchPaged } from "@/lib/supabase/fetch-paged";
 import { checkWebsiteReachability } from "@/lib/website-reachability";
+import { reportRescoreFailure, rescoreOrganisation } from "@/lib/scoring/rescore";
 
 export type ManualEntryCheck = {
   label: string;
@@ -87,7 +88,7 @@ export async function checkAvailableManualEntryDependencies(
   _previous: ManualEntryReviewState,
   formData: FormData,
 ): Promise<ManualEntryReviewState> {
-  const authorization = await getCurrentActor("approval:manage", { route: "/admin/manual-entries" });
+  const authorization = await getViewingActor("approval:manage", { route: "/admin/manual-entries" });
   if (!authorization.ok) {
     return { kind: "error", message: actorFailureMessage(authorization.reason) };
   }
@@ -293,6 +294,16 @@ export async function approveManualEntry(
     revalidatePath("/admin/manual-entries");
     revalidatePath("/clients");
     revalidatePath(`/clients/${organisationId}`);
+
+    // The approved entry may have filed sector/size fields the org never had
+    // before, so score it now rather than leave it unscored until the next
+    // status change picks it up. Best-effort — see rescore.ts.
+    await reportRescoreFailure(
+      await rescoreOrganisation(organisationId),
+      "manual_entry.approve.rescore",
+      organisationId,
+    );
+
     return {
       kind: "success",
       message: duplicateDecision === "link_existing"

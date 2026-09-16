@@ -65,3 +65,36 @@ export function resolveMission(input: MissionInput): {
 export function resolveMissionText(input: MissionInput): string | null {
   return resolveMission(input).text;
 }
+
+/** One enrichment mission row, as the dashboard cards select it. */
+export type EnrichmentMissionRow = {
+  organisation_id: string;
+  mission_statement: string | null;
+  enriched_at: string;
+};
+
+/**
+ * Latest non-blank hand-written/LLM mission per organisation, for screens that
+ * show several organisations at once (dashboard opportunity cards). Pure: the
+ * caller runs the single batched `enrichment_results` read and hands the rows
+ * over, so this stays free of client generics and trivially testable.
+ *
+ * Rows are ordered newest-first internally (unparseable dates sink last), so
+ * the first non-blank row per organisation wins regardless of read order.
+ */
+export function newestMissionPerOrg(rows: EnrichmentMissionRow[]): Map<string, string> {
+  const missions = new Map<string, string>();
+  const ordered = [...rows].sort((a, b) => {
+    const timeA = Date.parse(a.enriched_at);
+    const timeB = Date.parse(b.enriched_at);
+    const safeA = Number.isNaN(timeA) ? -Infinity : timeA;
+    const safeB = Number.isNaN(timeB) ? -Infinity : timeB;
+    return safeB - safeA;
+  });
+  for (const row of ordered) {
+    if (missions.has(row.organisation_id)) continue;
+    const text = row.mission_statement?.trim();
+    if (text) missions.set(row.organisation_id, text);
+  }
+  return missions;
+}

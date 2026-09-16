@@ -1,5 +1,5 @@
 import type { GroupTabsSpec } from "@/components/ui/group-tabs";
-import { hasPermission, type AppRole, type Permission } from "@/lib/auth/permissions";
+import { canView, isViewOnly, type AppRole, type Permission } from "@/lib/auth/permissions";
 
 /**
  * The Analytics group: your own numbers and the whole team's numbers as two
@@ -22,5 +22,9 @@ export const ANALYTICS_TABS = [
 export const ANALYTICS_ROUTES: readonly string[] = ANALYTICS_TABS.map((tab) => tab.href);
 
 export function analyticsTabsFor(role: AppRole): GroupTabsSpec {
-  return ANALYTICS_TABS.filter((tab) => hasPermission(role, tab.permission));
+  // "Your analytics" counts only the clients you own. A viewer owns none, so the
+  // tab would always be empty — leadership gets Team analytics alone.
+  return ANALYTICS_TABS.filter(
+    (tab) => canView(role, tab.permission) && !(isViewOnly(role) && tab.href === "/analytics"),
+  );
 }

@@ -43,8 +43,16 @@ export type DuplicateMatch = {
   matchedOn: "registration_number" | "name_and_postcode";
 };
 
-/** Lowercases, strips punctuation and the "Ltd"/"Limited" suffix, collapses whitespace. */
-function normaliseName(name: string): string {
+/**
+ * Lowercases, strips punctuation and the "Ltd"/"Limited" suffix, collapses whitespace.
+ *
+ * Exported for F042's review screen, which marks the rows where the two records
+ * disagree. A difference there should mean "the importer would not treat these as
+ * the same", so the screen asks this function rather than inventing a second
+ * opinion about what makes two names equal — "Test Trust Ltd" against "Test
+ * Trust Limited" is not a difference anybody should be asked to weigh.
+ */
+export function normaliseName(name: string): string {
   return name
     .toLowerCase()
     .replace(/[.,()]/g, "")
@@ -53,7 +61,8 @@ function normaliseName(name: string): string {
     .trim();
 }
 
-function normalisePostcode(postcode: string): string {
+/** Space- and case-insensitive, for the same reason as normaliseName above. */
+export function normalisePostcode(postcode: string): string {
   return postcode.toUpperCase().replace(/\s+/g, "");
 }
 

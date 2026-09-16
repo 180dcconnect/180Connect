@@ -19,11 +19,13 @@ const ROLE_LABEL: Record<PendingInvite["role"], string> = {
 export function PendingInvitesList({
   invites,
   error,
+  canManage = true,
   onResendSuccess,
   onCancelSuccess,
 }: {
   invites: PendingInvite[];
   error: boolean;
+  canManage?: boolean;
   onResendSuccess?: (id: string, newInvitedAt: string) => void;
   onCancelSuccess?: (id: string) => void;
 }) {
@@ -162,26 +164,30 @@ export function PendingInvitesList({
                   Invited {new Date(invite.invited_at).toLocaleDateString("en-GB")}
                   {expired && <span className="ml-2 font-bold text-red-700">Expired</span>}
                 </span>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => handleResend(invite.id)}
-                  className="h-7 rounded-sm border border-black/10 bg-white px-3 text-xs font-semibold text-foreground shadow-2xs transition-all hover:border-neutral-300 hover:bg-neutral-100 hover:text-neutral-900 disabled:cursor-wait disabled:opacity-50"
-                >
-                  {resendingId === invite.id ? "Resending…" : "Resend"}
-                </button>
-                <DeleteButton
-                  key={`cancel-${invite.id}-${cancelAttempts[invite.id] ?? 0}`}
-                  label="Cancel"
-                  confirmLabel="Revoke?"
-                  deletingLabel="Cancelling…"
-                  size="xs"
-                  variant="subtle"
-                  disabled={busy}
-                  loading={cancellingId === invite.id}
-                  onConfirm={() => handleCancel(invite.id)}
-                  onComplete={() => handleCancelComplete(invite.id)}
-                />
+                {canManage && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleResend(invite.id)}
+                      className="h-7 rounded-sm border border-black/10 bg-white px-3 text-xs font-semibold text-foreground shadow-2xs transition-all hover:border-neutral-300 hover:bg-neutral-100 hover:text-neutral-900 disabled:cursor-wait disabled:opacity-50"
+                    >
+                      {resendingId === invite.id ? "Resending…" : "Resend"}
+                    </button>
+                    <DeleteButton
+                      key={`cancel-${invite.id}-${cancelAttempts[invite.id] ?? 0}`}
+                      label="Cancel"
+                      confirmLabel="Revoke?"
+                      deletingLabel="Cancelling…"
+                      size="xs"
+                      variant="subtle"
+                      disabled={busy}
+                      loading={cancellingId === invite.id}
+                      onConfirm={() => handleCancel(invite.id)}
+                      onComplete={() => handleCancelComplete(invite.id)}
+                    />
+                  </>
+                )}
               </div>
             </div>
             {result &&

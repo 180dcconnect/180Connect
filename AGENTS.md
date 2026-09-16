@@ -31,6 +31,52 @@ screens — for them:
 - Validation goes through `src/lib/validation.ts` (wraps Zod), not raw Zod calls.
 - Test files must import with an explicit `.ts` extension (e.g. `import { foo } from "./bar.ts"`).
 - The React Compiler is enabled (`reactCompiler: true` in `next.config.ts`).
+- Every new control has to answer for a `viewer` before it ships — see
+  [Roles: every control answers for a viewer](#roles-every-control-answers-for-a-viewer).
+
+## Roles: every control answers for a viewer
+
+Three roles, and the third catches people out.
+
+| Role | Who | What they may do |
+| --- | --- | --- |
+| `cam` | Client Account Managers | Work the client list: edit, contact, manage tags. No admin-only screens. |
+| `admin` | Administrators | Everything: approvals, imports, platform settings. |
+| `viewer` | 180DC leadership — branch and global | **See every screen an admin sees. Change nothing.** |
+
+`src/lib/auth/permissions.ts` is the whole model. `canView` answers *what
+renders*; `hasPermission` answers *what a write does*; `isViewOnly` answers
+"this person changes nothing". Pages gate with `getViewingActor`, writes with
+`getCurrentActor` — and the write's own gate is the load-bearing one, never the
+route the reader arrived by.
+
+So a viewer reaches every admin screen, and **each one has to decide what to
+show them.** A feature is not finished until that decision is made and written
+down in the code:
+
+- **Never render a control they cannot use.** No Approve/Reject, no "New
+  import", no lookup or backfill button, no editable tag, no invite or role
+  picker. They get the queue, the numbers, the history around it. A button whose
+  only possible outcome is a refusal is a bug report waiting to happen, and a
+  queue with no visible way to answer it reads as broken.
+- **Say why, in one voice.** Where the control would have been, render
+  `VIEW_ONLY_CONTROL_NOTE` from `src/lib/auth/view-only.ts`. Do not leave a
+  silent gap, and do not invent a second phrasing of it.
+- **Ask the same permission the action asks.** `hasPermission(actor.role,
+  "approval:manage")` in the page, never `role === "admin"` — the literal and the
+  permission drift apart the first time a permission moves.
+- **Keep the reading.** Coverage counts, queue contents, run history and audit
+  trails stay whole for a viewer. Withholding a number they are entitled to see
+  is the same mistake wearing the opposite coat.
+- **Decide group tabs too, not just page bodies.** A tab that is only a starting
+  point for a write ("Add a client") is not offered to a viewer; a tab that is
+  also a page to read is. See `dataImportsTabsFor` in `admin/import-group.ts`.
+- **Refusals still have to land.** A viewer who reaches a write anyway is refused
+  by `getCurrentActor`, which sets the cookie `view-only-notice.tsx` watches for.
+  That is why no refusal needs a dialog of its own — and why a write gated any
+  other way is a write a viewer can attempt with no explanation.
+
+When you add a screen, check it as all three roles before you call it done.
 
 ## Quick commands
 
@@ -87,7 +133,7 @@ Two systems, one per side of the login. Read the right one **before** touching U
 - Public pages (landing, legal, login — before sign-in): [`docs/design-system.md`](docs/design-system.md). Tokens in `src/components/brand/`.
 - Logged-in app (`/dashboard`, `/clients`, `/admin`, `/settings`): [`docs/app-design-system.md`](docs/app-design-system.md). Tokens in `src/app/globals.css`.
 - **Never copy hex values or variants into a page file.** Import the token.
-- **Do not copy the file next to the one you are editing.** The app is mid-migration and most screens are on the old language. `src/app/clients/[id]/` is the reference; `src/app/admin/*` and `src/app/clients/page.tsx` are not.
+- **Do not copy the file next to the one you are editing.** The app is mid-migration and most screens are on the old language. `src/app/(app)/clients/[id]/` is the reference; `src/app/(app)/admin/*` and `src/app/(app)/clients/page.tsx` are not.
 
 ## CI workflows
 

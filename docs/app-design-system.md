@@ -17,7 +17,7 @@ look arbitrary aren't.
 | Need | Where |
 | --- | --- |
 | Colour, radius, font tokens | `src/app/globals.css` (`:root` + `@theme inline`) |
-| The card, the status pill, the register key | `src/app/clients/[id]/section-card.tsx` |
+| The card, the status pill, the register key | `src/app/(app)/clients/[id]/section-card.tsx` |
 | Entrance motion | `src/components/dashboard-stage.tsx`, built on `src/components/brand/motion.ts` |
 | Which to use, and when | this file |
 
@@ -32,15 +32,15 @@ the one you're editing is how the old one keeps spreading. Copy these instead:
 
 | Screen | Path | What to take from it |
 | --- | --- | --- |
-| **Client record** | `src/app/clients/[id]/` | **The token reference.** Surfaces, borders, type scale, pills, tabs. When this doc and another screen disagree on *how a card looks*, this wins. |
-| **Data imports** | `src/app/admin/charity-commission/` | **The structure reference.** Page shell, the heading block and its tab row, the rail of facts under it, the two-view console, and stat cards (big numeral, hint, `HorizontalStickGauge`, action zone). Take the *skeleton* from here. |
-| **Dashboard** | `src/app/dashboard/page.tsx` | Page composition only — the `Stage`/`Group`/`Rise` structure, the display heading, cards floating on the ground rather than one box holding everything. Its *surfaces* are the old language; do not copy those. |
+| **Client record** | `src/app/(app)/clients/[id]/` | **The token reference.** Surfaces, borders, type scale, pills, tabs. When this doc and another screen disagree on *how a card looks*, this wins. |
+| **Data imports** | `src/app/(app)/admin/charity-commission/` | **The structure reference.** Page shell, the heading block and its tab row, the rail of facts under it, the two-view console, and stat cards (big numeral, hint, `HorizontalStickGauge`, action zone). Take the *skeleton* from here. |
+| **Dashboard** | `src/app/(app)/dashboard/page.tsx` | Page composition only — the `Stage`/`Group`/`Rise` structure, the display heading, cards floating on the ground rather than one box holding everything. Its *surfaces* are the old language; do not copy those. |
 
 Not references, for now:
 
-- `src/app/clients/page.tsx` — work in progress.
+- `src/app/(app)/clients/page.tsx` — work in progress.
 
-**On `src/app/admin/*`.** This doc used to say "never copy an admin page", because
+**On `src/app/(app)/admin/*`.** This doc used to say "never copy an admin page", because
 several pages were on `#f1f2f4`, two grounds stale. That is now half wrong and the
 wrong half is the dangerous one. The **tokens** are still not to be copied from
 there: `recent-runs.tsx`, `group-tabs.tsx` and `lookup-dialog.tsx` are on the old
@@ -262,6 +262,7 @@ put `.dark` on `<html>` and define token overrides under it.
 | Code label | `Key`, same file |
 | Entrance | `Stage` / `Group` / `Rise` |
 | Checkbox | `FiledCheckbox` from `src/components/ui/filed-checkbox.tsx` |
+| Instant on/off | `Switch` from `src/components/ui/material-design-3-switch.tsx` |
 | Pick one of a few (settings) | `OptionGroup` from `src/app/settings/option-group.tsx` |
 
 **Checkboxes are always `FiledCheckbox`** — the animated animate-ui checkbox
@@ -274,6 +275,17 @@ and a `<label htmlFor>`; wrapping it in a label alone is not enough.
 **Pick-one choices are real radios.** `OptionGroup` is a `fieldset` of native
 radios styled as cards — grouping, arrow keys and one tab stop come from the
 browser. Never a row of `<button role="radio">`.
+
+**An instant on/off is `Switch`, not a checkbox.** The two controls mean
+different things and a screen that mixes them up lies to people: a checkbox
+answers a question that is submitted with the form, a switch *is* the save.
+Material Design 3's physics are in `material-design-3-switch.tsx` (spring knob,
+morphing handle, halo) but the colours are this system's — `primary` is `--lead`,
+`success` is `--go`, and `destructive` is `--stop`, which is the one to use where
+turning the switch off is the risky direction (`data-handling-rules` turns a
+privacy protection off that way). Its `haptic` prop plays a synthesised click;
+nothing in the app sets it, and nothing should without asking first — a setting's
+state must never depend on the sound card.
 
 `origin-button`, `gooey-action-button`, `send-button`, `gooey-email-input` and
 the other gooey/animated variants are one-off brand pieces, not app defaults.

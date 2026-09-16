@@ -20,8 +20,16 @@ export type EditableTagEntry = { id: string; name: string; colour: string | null
 
 export function EditableTagList({
   initialTags,
+  readOnly = false,
 }: {
   initialTags: EditableTagEntry[];
+  /**
+   * Leadership reads the list and edits none of it. Set for a viewer, whose
+   * every write here is refused server-side (rename, recolour, delete) — this
+   * only stops the screen offering controls that cannot work. The pills render
+   * exactly as everywhere else, so a viewer sees the same tag as a CAM does.
+   */
+  readOnly?: boolean;
 }) {
   const [tags, setTags] = useState(initialTags);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -127,7 +135,16 @@ export function EditableTagList({
         const pillStyle = tagPillStyle(tag.colour);
         return (
           <div key={tag.id} className="flex flex-wrap items-center gap-2">
-            {editingId === tag.id ? (
+            {readOnly ? (
+              <span
+                style={pillStyle ?? undefined}
+                className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                  pillStyle ? "" : "bg-[--brand]/10 text-[--brand]"
+                }`}
+              >
+                {tag.name}
+              </span>
+            ) : editingId === tag.id ? (
               <>
                 <input
                   type="text"
@@ -201,7 +218,7 @@ export function EditableTagList({
                 </button>
               </>
             )}
-            {colourId === tag.id && (
+            {!readOnly && colourId === tag.id && (
               <div className="flex w-full items-center gap-1.5 pt-1">
                 <label className="cursor-pointer" title="No colour">
                   <input
@@ -238,7 +255,7 @@ export function EditableTagList({
                 ))}
               </div>
             )}
-            {errorByTagId[tag.id] && (
+            {!readOnly && errorByTagId[tag.id] && (
               <span className="w-full text-xs font-medium text-red-700" role="alert">
                 {errorByTagId[tag.id]}
               </span>

@@ -16,15 +16,15 @@ import {
 } from "@/lib/edit-suggestions";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 
-import { BasicInfoPanel } from "@/app/clients/[id]/basic-info-panel";
-import { ScoreBreakdownCard } from "@/app/clients/[id]/score-breakdown";
-import { Pill, SectionCard } from "@/app/clients/[id]/section-card";
-import { SuggestEditSection } from "@/app/clients/[id]/suggest-edit-section";
-import { TagsCard } from "@/app/clients/[id]/tags-card";
-import { loadClient, loadScore, loadWebsite, requireActor } from "@/app/clients/[id]/load-record";
+import { BasicInfoPanel } from "@/app/(app)/clients/[id]/basic-info-panel";
+import { ScoreBreakdownCard } from "@/app/(app)/clients/[id]/score-breakdown";
+import { Pill, SectionCard } from "@/app/(app)/clients/[id]/section-card";
+import { SuggestEditSection } from "@/app/(app)/clients/[id]/suggest-edit-section";
+import { TagsCard } from "@/app/(app)/clients/[id]/tags-card";
+import { loadClient, loadScore, loadWebsite, requireActor } from "@/app/(app)/clients/[id]/load-record";
 
-// 1:1 duplicate of src/app/clients/[id]/page.tsx — edit freely, real file untouched.
-// Copy final JSX/classes back to src/app/clients/[id]/page.tsx when happy.
+// 1:1 duplicate of src/app/(app)/clients/[id]/page.tsx — edit freely, real file untouched.
+// Copy final JSX/classes back to src/app/(app)/clients/[id]/page.tsx when happy.
 
 type EnrichmentRow = { mission_statement: string | null; enriched_at: string };
 

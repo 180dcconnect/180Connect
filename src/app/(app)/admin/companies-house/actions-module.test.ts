@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 describe("Companies House server-action module", () => {
   it("exports no runtime values except async server actions", async () => {
     const source = await readFile(
-      "src/app/admin/companies-house/actions.ts",
+      "src/app/(app)/admin/companies-house/actions.ts",
       "utf8",
     );
 
@@ -24,8 +24,8 @@ describe("Companies House server-action module", () => {
   // and the run imports 10,000, which is exactly the bug this replaced.
   it("keeps the client-side import ceiling equal to the server's", async () => {
     const [server, client] = await Promise.all([
-      readFile("src/app/admin/companies-house/register-actions.ts", "utf8"),
-      readFile("src/app/admin/companies-house/filter-builder.tsx", "utf8"),
+      readFile("src/app/(app)/admin/companies-house/register-actions.ts", "utf8"),
+      readFile("src/app/(app)/admin/companies-house/filter-builder.tsx", "utf8"),
     ]);
 
     const capOf = (source: string) =>
@@ -43,7 +43,7 @@ describe("Companies House server-action module", () => {
   // be false, which silently marked over-cap runs "completed".
   it("decides the partial status from the pre-cap count", async () => {
     const source = await readFile(
-      "src/app/admin/companies-house/register-actions.ts",
+      "src/app/(app)/admin/companies-house/register-actions.ts",
       "utf8",
     );
 

@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 
 import { HorizontalStickGauge } from "@/components/ui/horizontal-stick-gauge";
+import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import { runCicStatementBackfillNow, type CicBackfillState } from "./register-actions";
 
 const INITIAL: CicBackfillState = { kind: "idle", message: "" };
@@ -36,6 +37,7 @@ export function CicStatementCard({
   pending,
   maxBatchSize,
   unavailableReason,
+  readOnly = false,
 }: {
   /** Companies on the client list carrying a company number. */
   companies: number;
@@ -51,6 +53,13 @@ export function CicStatementCard({
    *  API key. Shown in place of the control, because a disabled button with no
    *  explanation is the thing people file bugs about. */
   unavailableReason: string | null;
+  /**
+   * Set for leadership. The coverage figures still render — they are a reading,
+   * and the whole point of a view-only account is that it can take one — but
+   * the batch control is replaced by a sentence, because the action behind it
+   * refuses a viewer and a button that cannot work should not be drawn.
+   */
+  readOnly?: boolean;
 }) {
   const [state, action, running] = useActionState(runCicStatementBackfillNow, INITIAL);
 
@@ -106,7 +115,9 @@ export function CicStatementCard({
       </div>
 
       <div className="mt-4 border-t border-rule-soft pt-4">
-        {unavailableReason ? (
+        {readOnly ? (
+          <p className="text-[13px] text-dim">{VIEW_ONLY_CONTROL_NOTE}</p>
+        ) : unavailableReason ? (
           <p className="text-[13px] text-stop">{unavailableReason}</p>
         ) : pending === 0 && state.kind === "idle" ? (
           <p className="text-[13px] text-dim">

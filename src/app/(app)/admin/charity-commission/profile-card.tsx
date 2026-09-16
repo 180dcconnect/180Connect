@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 
 import { HorizontalStickGauge } from "@/components/ui/horizontal-stick-gauge";
+import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import { runProfileBackfillNow, type ProfileBackfillState } from "./register-actions";
 
 const INITIAL: ProfileBackfillState = { kind: "idle", message: "" };
@@ -28,6 +29,7 @@ export function RegisterProfileCard({
   pending,
   pendingFields,
   maxBatchSize,
+  readOnly = false,
 }: {
   /** Charities on the client list with a registration number. */
   charities: number;
@@ -39,6 +41,12 @@ export function RegisterProfileCard({
   pendingFields: number;
   /** Largest slice one press may take. */
   maxBatchSize: number;
+  /**
+   * Set for leadership: the counts still render, the control does not. The
+   * action behind it refuses a viewer, so drawing the button would only offer
+   * them a refusal.
+   */
+  readOnly?: boolean;
 }) {
   const [state, action, running] = useActionState(runProfileBackfillNow, INITIAL);
 
@@ -91,7 +99,9 @@ export function RegisterProfileCard({
       </div>
 
       <div className="mt-4 border-t border-rule-soft pt-4">
-        {pending === 0 && state.kind === "idle" ? (
+        {readOnly ? (
+          <p className="text-[13px] text-dim">{VIEW_ONLY_CONTROL_NOTE}</p>
+        ) : pending === 0 && state.kind === "idle" ? (
           <p className="text-[13px] text-dim">
             Nothing outstanding. Every charity on the list already holds what the
             register publishes about its mission and sector.

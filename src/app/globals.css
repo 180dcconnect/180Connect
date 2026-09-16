@@ -105,6 +105,16 @@
   /* Text selection inside those controls (`selection:bg-primary`). */
   --primary: var(--brand);
   --primary-foreground: #ffffff;
+
+  /**
+   * Provider-status buttons on the System health card. The makers' own brand
+   * colours — same exemption as their logo marks in the card — so an admin can
+   * tell the three status pages apart at a glance. Tokens, never hex in the
+   * component: Supabase green, Vercel black, Google blue.
+   */
+  --provider-supabase: #3ecf8e;
+  --provider-vercel: #000000;
+  --provider-google: #4285f4;
 }
 
 @theme inline {
@@ -150,6 +160,11 @@
   --color-hold-wash: var(--hold-wash);
   --color-stop: var(--stop);
   --color-stop-wash: var(--stop-wash);
+
+  /* Provider-status buttons — see the block above for why these exist. */
+  --color-provider-supabase: var(--provider-supabase);
+  --color-provider-vercel: var(--provider-vercel);
+  --color-provider-google: var(--provider-google);
 
   /* 10px reads as a document; rounded-2xl reads as a 2021 app card. */
   --radius-panel: 10px;

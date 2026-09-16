@@ -1,12 +1,12 @@
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { OffboardPanel, type HandoverUser } from "./offboard-panel";
 
 export default async function AdminOffboardPage() {
-  const authorization = await getCurrentActor("ownership:reassign");
+  const authorization = await getViewingActor("ownership:reassign");
   if (!authorization.ok) {
     if (authorization.reason === "unauthenticated") redirect("/login");
     redirect("/dashboard?error=admin-access-required");

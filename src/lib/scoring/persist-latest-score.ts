@@ -50,6 +50,19 @@ export type ScoreFactorsRecord = {
     previousContact: number;
   };
   weights: ScoutWeights;
+  /**
+   * Which factors above are a real reading versus a stand-in for "no data".
+   * Optional and additive to the shape the DB check constraint enforces
+   * (20260911090000) — a row written before this field existed simply omits
+   * it, and the breakdown UI falls back to its old value-based heuristic.
+   * partnershipHistory is intentionally absent; see FactorReadings.
+   */
+  readings?: {
+    sector: boolean;
+    geography: boolean;
+    size: boolean;
+    previousContact: boolean;
+  };
 };
 
 export async function persistLatestScore(
@@ -68,13 +81,13 @@ export async function persistLatestScore(
   // Passing [] here (as this call used to) meant "no preference set", which
   // pinned the geography factor to its neutral for every client the platform
   // has ever scored.
-  const { score, band, factors, weights: applied } = computePriorityScore(
+  const { score, band, factors, readings, weights: applied } = computePriorityScore(
     org,
     rules?.geography.priorityTowns,
     weights,
     rules,
   );
-  const scoreFactors: ScoreFactorsRecord = { factors, weights: applied };
+  const scoreFactors: ScoreFactorsRecord = { factors, weights: applied, readings };
   const { error } = await db
     .from("latest_scores")
     .upsert(

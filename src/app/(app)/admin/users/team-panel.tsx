@@ -18,12 +18,14 @@ import { Group, Rise } from "@/components/dashboard-stage";
 import { InlineAlert } from "@/components/ui/inline-alert";
 
 export function TeamPanel({
+  canManage = true,
   currentUserId,
   initialTeamUsers,
   initialPendingInvites,
   pendingInvitesError,
   filterCriteria,
 }: {
+  canManage?: boolean;
   currentUserId: string;
   initialTeamUsers: TeamUser[];
   initialPendingInvites: PendingInvite[];
@@ -149,6 +151,7 @@ export function TeamPanel({
         <Rise>
           <div className="rounded-2xl border border-black/[0.06] bg-white shadow-sm overflow-hidden">
             <UserManagementTable
+              canManage={canManage}
               currentUserId={currentUserId}
               hasActiveFilters={hasActiveFilters}
               totalCount={state.teamUsers.length}
@@ -166,6 +169,7 @@ export function TeamPanel({
         <Rise>
           <div className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
             <PendingInvitesList
+              canManage={canManage}
               error={pendingInvitesError}
               invites={state.pendingInvites}
               onResendSuccess={handleResendSuccess}

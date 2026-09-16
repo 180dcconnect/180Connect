@@ -1,11 +1,13 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
+import { isViewOnly } from "@/lib/auth/permissions";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
 import { formatMyActions, type ActionRow } from "@/lib/actions";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { InlineAlert } from "@/components/ui/inline-alert";
+import { ActionsHeader } from "./actions-header";
 import { ActionsList } from "./actions-list";
 
 /**
@@ -48,8 +50,14 @@ import { ActionsList } from "./actions-list";
  * needs no narrower permission than the data itself.
  */
 export default async function ActionsPage() {
-  const authorization = await getCurrentActor("client:view", { route: "/actions" });
+  const authorization = await getViewingActor("client:view", { route: "/actions" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
+
+  // Leadership has no queue of its own — an action is always assigned to whoever
+  // does the work, and a viewer never does. Rather than show them a page that
+  // can only ever be empty, send them to the whole team's actions, which is what
+  // their sidebar row and `actionsTabsFor` already point at.
+  if (isViewOnly(authorization.actor.role)) redirect("/admin/actions");
 
   const supabase = await createClient();
 
@@ -80,13 +88,12 @@ export default async function ActionsPage() {
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-3xl space-y-6">
         <Rise>
-          <h1 className="text-[clamp(1.75rem,3.5vw,2.5rem)] font-semibold font-body leading-[1.05] tracking-[-0.03em]">
-            My actions
-          </h1>
-          <p className="mt-2 text-sm leading-[1.7] text-foreground/50">
-            Outstanding work assigned to you, overdue first. Mark something complete to
-            drop it from this list — it stays on record.
-          </p>
+          <ActionsHeader current="/actions">
+            <p className="mt-3 text-sm leading-[1.7] text-foreground/50">
+              Outstanding work assigned to you, overdue first. Mark something complete to
+              drop it from this list — it stays on record.
+            </p>
+          </ActionsHeader>
         </Rise>
 
         <Group>

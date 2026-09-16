@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
@@ -17,7 +17,7 @@ type PageProps = {
 };
 
 export default async function AdminCamSettingsPage(props: PageProps) {
-  const authorization = await getCurrentActor("user:manage", {
+  const authorization = await getViewingActor("user:manage", {
     route: "/admin/cam-settings",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));

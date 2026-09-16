@@ -8,7 +8,7 @@
 
 import { redirect } from "next/navigation";
 
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { reportError } from "@/lib/error-logging";
@@ -37,7 +37,7 @@ const RUN_WINDOW = 8;
 export default async function CharityCommissionBeforePage() {
   // `client:edit`, not `user:manage`: the team decided everyone who works the
   // client list can shape and run imports. Viewers still cannot.
-  const authorization = await getCurrentActor("client:edit");
+  const authorization = await getViewingActor("client:edit");
   if (!authorization.ok) {
     if (authorization.reason === "unauthenticated") redirect("/login");
     redirect("/dashboard?error=admin-access-required");
@@ -163,7 +163,7 @@ export default async function CharityCommissionBeforePage() {
                 message="Import history could not be loaded. This has been recorded — refresh and try again."
               />
             ) : (
-              <RecentRuns runs={runs} />
+              <RecentRuns runs={runs} now={now} />
             )}
           </Rise>
         </Group>

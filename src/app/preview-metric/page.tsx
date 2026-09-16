@@ -1,6 +1,7 @@
 "use client";
 
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
+import SeriesLineChartCard from "@/components/ui/series-line-chart-card";
 
 const SAMPLE_30_DAYS = [
   { date: "2026-07-20", value: 1420 },
@@ -35,6 +36,35 @@ const SAMPLE_30_DAYS = [
   { date: "2026-08-18", value: 1834 },
 ];
 
+
+/**
+ * A year of daily funnel points shaped like real outreach: weekday-heavy, a
+ * slow climb, and each stage a subset of the one before it.
+ */
+function funnelSample() {
+  const contacted: { date: string; value: number }[] = [];
+  const replied: { date: string; value: number }[] = [];
+  const converted: { date: string; value: number }[] = [];
+  const end = Date.UTC(2026, 8, 16);
+  for (let i = 364; i >= 0; i--) {
+    const day = new Date(end - i * 86_400_000);
+    const iso = day.toISOString().slice(0, 10);
+    const weekend = day.getUTCDay() === 0 || day.getUTCDay() === 6;
+    const wave = 1 + 0.45 * Math.sin(i / 26);
+    const seed = Math.abs(Math.sin(i * 12.9898) * 43_758.5453) % 1;
+    const base = weekend ? seed * 3 : (6 + seed * 14) * wave * (1 + (364 - i) / 900);
+    const c = Math.round(base);
+    const r = Math.round(c * (0.18 + seed * 0.14));
+    const v = Math.round(r * (0.1 + seed * 0.22));
+    contacted.push({ date: iso, value: c });
+    replied.push({ date: iso, value: r });
+    converted.push({ date: iso, value: v });
+  }
+  return { contacted, replied, converted };
+}
+
+const FUNNEL = funnelSample();
+
 export default function PreviewMetricPage() {
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -46,6 +76,32 @@ export default function PreviewMetricPage() {
           <p className="mt-1 text-sm text-muted-foreground">
             Test line morphing across 7d, 14d, 30d windows, bar mode, and hovering to inspect tooltips.
           </p>
+        </div>
+
+        {/* Funnel trend — the three-line chart card */}
+        <div className="space-y-3">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+            Funnel Trend (Three Lines, Real Axes)
+          </h2>
+          <SeriesLineChartCard
+            title="Contacted, replied, converted"
+            subtitle="Clients reached at each stage"
+            unit="clients"
+            toggleId="preview-funnel-toggle"
+            series={[
+              { name: "Contacted", data: FUNNEL.contacted },
+              { name: "Replied", data: FUNNEL.replied },
+              { name: "Converted", data: FUNNEL.converted },
+            ]}
+            period="Past 30 days"
+            periodOptions={[
+              { label: "Past 30 days", points: 30 },
+              { label: "Past 90 days", points: 90 },
+              { label: "Past 12 months", points: 365 },
+            ]}
+            allowCustomRange
+            className="min-h-[420px]"
+          />
         </div>
 
         {/* Large Dashboard Card */}

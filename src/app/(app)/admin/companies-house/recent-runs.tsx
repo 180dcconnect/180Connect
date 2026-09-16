@@ -1,10 +1,16 @@
 "use client";
 
+import { useMemo } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 
 import { StatusBadge } from "../import-status/status-badge";
+import {
+  isStalledRun,
+  runDisplayStatus,
+  stalledRunSummary,
+} from "../import-status/status-helpers.ts";
 
 /**
  * The recent Companies House runs — and the landing view of this screen.
@@ -59,7 +65,8 @@ function pipelineLabel(run: CompaniesHouseRun): string {
 
 /**
  * The one figure worth setting at headline size, or null when the run has no
- * number worth enlarging — a failure, or one still in flight.
+ * number worth enlarging — a failure, or one still in flight (a stalled run's
+ * frozen counts would mislead, so it gets no headline either).
  */
 function headline(run: CompaniesHouseRun): { value: number; label: string } | null {
   if (run.job_status === "running" || run.job_status === "failed") return null;
@@ -75,8 +82,12 @@ function headline(run: CompaniesHouseRun): { value: number; label: string } | nu
  * headline count — reading a number twice in a row reads as two different
  * numbers.
  */
-function detail(run: CompaniesHouseRun): string {
-  if (run.job_status === "running") return "Running now.";
+function detail(run: CompaniesHouseRun, now: Date): string {
+  if (run.job_status === "running") {
+    return isStalledRun(run.started_at, now)
+      ? stalledRunSummary(run.started_at, now)
+      : "Running now.";
+  }
   if (run.job_status === "failed") return "Failed — nothing was imported.";
 
   const top = headline(run);
@@ -95,18 +106,30 @@ function detail(run: CompaniesHouseRun): string {
 }
 
 /** One older run, in a sentence. */
-function summariseRun(run: CompaniesHouseRun): string {
-  if (run.job_status === "running") return "Running now.";
+function summariseRun(run: CompaniesHouseRun, now: Date): string {
+  if (run.job_status === "running") {
+    return isStalledRun(run.started_at, now)
+      ? stalledRunSummary(run.started_at, now)
+      : "Running now.";
+  }
   if (run.job_status === "failed") return "Failed — nothing was imported.";
-  return detail(run);
+  return detail(run, now);
 }
 
 export function CompaniesRecentRuns({
   runs,
+  nowIso,
   action,
   secondaryAction,
 }: {
   runs: CompaniesHouseRun[];
+  /**
+   * The page's one clock, read on the server and passed down so the stalled
+   * check renders identically on both sides — a relative time computed in the
+   * browser would disagree with the SSR output and trip a hydration mismatch
+   * (the rule `display-format.ts` states for all relative times).
+   */
+  nowIso: string;
   /** The primary action for the screen — supplied by the shell that owns the mode. */
   action?: ReactNode;
   /**
@@ -117,6 +140,8 @@ export function CompaniesRecentRuns({
   secondaryAction?: ReactNode;
 }) {
   const [latest, ...older] = runs;
+  const now = useMemo(() => new Date(nowIso), [nowIso]);
+  const latestStalled = latest.job_status === "running" && isStalledRun(latest.started_at, now);
 
   return (
     <section className="overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-xs">
@@ -148,7 +173,7 @@ export function CompaniesRecentRuns({
                   <span className="text-foreground/55">{when(latest.started_at, true)}</span>
                 </p>
               </div>
-              <StatusBadge status={latest.job_status} />
+              <StatusBadge status={runDisplayStatus(latest.job_status, latest.started_at, now)} />
             </div>
 
             {(() => {
@@ -162,15 +187,19 @@ export function CompaniesRecentRuns({
                 </p>
               ) : (
                 <p className="mt-2.5 flex items-center gap-2 text-lg font-semibold tracking-[-0.02em]">
-                  {latest.job_status === "running" && (
+                  {latest.job_status === "running" && !latestStalled && (
                     <Loader2 className="h-4 w-4 animate-spin text-foreground/40" strokeWidth={2.2} />
                   )}
-                  {latest.job_status === "running" ? "Import in progress" : "Import failed"}
+                  {latest.job_status === "running"
+                    ? latestStalled
+                      ? "Import stalled"
+                      : "Import in progress"
+                    : "Import failed"}
                 </p>
               );
             })()}
 
-            <p className="mt-1.5 text-sm leading-[1.6] text-foreground/60">{detail(latest)}</p>
+            <p className="mt-1.5 text-sm leading-[1.6] text-foreground/60">{detail(latest, now)}</p>
           </div>
 
           {older.length > 0 && (
@@ -184,9 +213,9 @@ export function CompaniesRecentRuns({
                     {when(run.started_at)}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm text-foreground/70 flex items-center gap-2">
-                    <span className="truncate">{summariseRun(run)}</span>
+                    <span className="truncate">{summariseRun(run, now)}</span>
                   </span>
-                  <StatusBadge status={run.job_status} />
+                  <StatusBadge status={runDisplayStatus(run.job_status, run.started_at, now)} />
                 </li>
               ))}
             </ul>

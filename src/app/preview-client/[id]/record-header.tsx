@@ -1,7 +1,7 @@
-import { loadClient, loadScore } from "@/app/clients/[id]/load-record";
+import { loadClient, loadScore } from "@/app/(app)/clients/[id]/load-record";
 import { PriorityDial } from "./priority-dial";
 
-// Preview-only stripped header. Real src/app/clients/[id]/record-header.tsx untouched.
+// Preview-only stripped header. Real src/app/(app)/clients/[id]/record-header.tsx untouched.
 // Copy final JSX back to the real file when happy.
 
 export async function RecordHeader({ organisationId }: { organisationId: string }) {

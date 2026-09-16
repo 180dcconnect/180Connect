@@ -139,7 +139,7 @@ is a schema change and the epic was explicitly scoped to need none.
 
 4. Then switch `conversionsOverTime` in `src/lib/admin/manager-analytics.ts` to
    read `occurred_at`, and delete the caption under the chart in
-   `src/app/admin/analytics/page.tsx` that currently explains the artefact.
+   `src/app/(app)/admin/analytics/page.tsx` that currently explains the artefact.
 
 ---
 

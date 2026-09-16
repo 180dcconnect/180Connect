@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { formatExactTime } from "../display-format.ts";
+import { formatCadence, formatExactTime } from "../display-format.ts";
 import {
   GmailAuthError,
   getGmailAccessToken,
@@ -48,9 +48,20 @@ export type OutreachEngineHealth = {
 
 const GMAIL_REPLY_SYNC_JOB = "gmail_reply_sync";
 const SCHEDULED_OUTREACH_DELIVERY_JOB = "scheduled_outreach_delivery";
-/** Both jobs run every 5 minutes; a job that hasn't reported in twice that
-    window is stale rather than merely between ticks. */
-const CRON_STALE_AFTER_MS = 10 * 60 * 1000;
+/**
+ * The 30-second inbox check (`20261003150000`), read only as proof the schedule
+ * is alive. It is not a row on the card: when it works, it files a reply within
+ * seconds and the five-minute sweep below is invisible to everyone, and when it
+ * does not, the sweep is what actually matters. Its value here is that it ticks
+ * 120 times more often than either card job, so "it has run since" is the
+ * crispest answer to "is the scheduler awake?".
+ */
+const GMAIL_REPLY_CHECK_JOB = "gmail_reply_check";
+/** The card's two jobs run every 5 minutes; only raise a stalled warning after
+    an hour of silence (12 missed sweeps). Age alone is still not enough — see
+    `siblingRanSince` — so the warning is left for the case that is really a
+    break and not a platform that has just woken up. */
+const CRON_STALE_AFTER_MS = 60 * 60 * 1000;
 
 /**
  * What one scheduler row's tooltip says it is.
@@ -66,17 +77,24 @@ type CronJobDescriptor = {
   name: string;
   /** One clause, read straight after the name: "Reply sync checks ...". */
   purpose: string;
+  /** The job's schedule, taken from its migration — the only honest answer to
+      "when?" while no run has been recorded yet (pg_cron keeps past runs only). */
+  everyMs: number;
 };
+
+const FIVE_MINUTES = 5 * 60 * 1000;
 
 const REPLY_SYNC_JOB: CronJobDescriptor = {
   name: "Reply sync",
   purpose:
-    "checks the branch mailbox every 30 seconds, with a fuller sweep every five minutes, and files new replies into the inbox",
+    "checks the branch mailbox every five minutes and files new replies into the inbox",
+  everyMs: FIVE_MINUTES,
 };
 
 const SCHEDULED_SEND_JOB: CronJobDescriptor = {
   name: "Scheduled send",
   purpose: "sends queued outreach as soon as its scheduled time passes",
+  everyMs: FIVE_MINUTES,
 };
 
 type CronHealthRow = {
@@ -211,6 +229,31 @@ export async function getGmailEngineHealth(
   return Promise.race([check, timeout]);
 }
 
+/**
+ * Whether the *other* cron job has reported since this one last did — the only
+ * evidence that the scheduler is awake and this job is the one not running.
+ *
+ * The jobs on this card fail in one of two ways that look identical from a
+ * single timestamp. Either the platform was asleep — the free plan pauses
+ * between visits, pg_cron cannot tick while it is down, and every job comes
+ * back hours stale together and catches up seconds later — or one job has
+ * stopped while the others carry on. Only the second is worth telling a CAM
+ * about: the first would put "may be stalled" on the dashboard every morning
+ * for a system that is working, and the row shows its age either way, so
+ * nothing is hidden by staying quiet.
+ */
+function siblingRanSince(rows: readonly CronHealthRow[], row: CronHealthRow): boolean {
+  if (!row.last_run_at) return false;
+  const sinceMs = new Date(row.last_run_at).getTime();
+  if (Number.isNaN(sinceMs)) return false;
+  return rows.some(
+    (candidate) =>
+      candidate.job_name !== row.job_name &&
+      candidate.last_run_at !== null &&
+      new Date(candidate.last_run_at).getTime() > sinceMs,
+  );
+}
+
 /** The moment a run last reported, in the card's fixed en-GB shape. Falls back
     to whatever Postgres sent when it is not a date Node can parse, rather than
     printing "Invalid Date" into a tooltip. */
@@ -231,11 +274,13 @@ function formatRunTime(value: string): string {
 function toCronJobHealth(
   row: CronHealthRow | undefined,
   job: CronJobDescriptor,
+  /** Every row this read fetched, so a job can be judged against its sibling. */
+  rows: readonly CronHealthRow[],
 ): CronJobHealth {
   if (!row || !row.last_run_at) {
     return {
       status: "unconfigured",
-      detail: `${job.name} ${job.purpose}. No run has been recorded yet.`,
+      detail: `${job.name} ${job.purpose}. No run has been recorded yet — it runs ${formatCadence(job.everyMs)}.`,
     };
   }
   const lastRun = formatRunTime(row.last_run_at);
@@ -246,7 +291,7 @@ function toCronJobHealth(
     };
   }
   const ageMs = Date.now() - new Date(row.last_run_at).getTime();
-  if (ageMs > CRON_STALE_AFTER_MS) {
+  if (ageMs > CRON_STALE_AFTER_MS && siblingRanSince(rows, row)) {
     return {
       status: "degraded",
       detail: `${job.name} ${job.purpose}. Its last successful run was at ${lastRun}, so it may be stalled.`,
@@ -274,7 +319,11 @@ async function getCronJobsHealth(
   };
   try {
     const { data, error } = await supabase.rpc("get_outreach_cron_health", {
-      p_job_names: [GMAIL_REPLY_SYNC_JOB, SCHEDULED_OUTREACH_DELIVERY_JOB],
+      p_job_names: [
+        GMAIL_REPLY_SYNC_JOB,
+        SCHEDULED_OUTREACH_DELIVERY_JOB,
+        GMAIL_REPLY_CHECK_JOB,
+      ],
     });
     if (error) {
       return { replySync: fallback, scheduledSend: fallback };
@@ -284,10 +333,12 @@ async function getCronJobsHealth(
       replySync: toCronJobHealth(
         rows.find((row) => row.job_name === GMAIL_REPLY_SYNC_JOB),
         REPLY_SYNC_JOB,
+        rows,
       ),
       scheduledSend: toCronJobHealth(
         rows.find((row) => row.job_name === SCHEDULED_OUTREACH_DELIVERY_JOB),
         SCHEDULED_SEND_JOB,
+        rows,
       ),
     };
   } catch {

@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
+import { hasPermission } from "@/lib/auth/permissions";
+import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import { reportError } from "@/lib/error-logging";
 import { createClient } from "@/lib/supabase/server";
@@ -57,8 +59,12 @@ function roleConfirmation(entry: Entry): { by: string; at: string } | null {
 }
 
 export default async function ManualEntriesPage() {
-  const authorization = await getCurrentActor("approval:manage", { route: "/admin/manual-entries" });
+  const authorization = await getViewingActor("approval:manage", { route: "/admin/manual-entries" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
+
+  // Leadership reads what CAMs have submitted and decides none of it: the
+  // approval controls are the same permission the server actions ask for.
+  const canDecide = hasPermission(authorization.actor.role, "approval:manage");
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -75,9 +81,13 @@ export default async function ManualEntriesPage() {
         <p className="text-sm font-bold text-brand">Admin workspace</p>
         <h1 className="mt-2 text-2xl font-bold">Manual client entries</h1>
         <p className="mt-2 text-sm text-foreground/65">
-          Review submissions, run the shared validation and criteria checks, and make
-          a human decision when F042 finds a possible duplicate.
+          {canDecide
+            ? "Review submissions, run the shared validation and criteria checks, and make a human decision when the duplicate check finds a matching client."
+            : "Submissions from CAMs waiting for an admin decision."}
         </p>
+        {!canDecide && (
+          <p className="mt-2 text-sm text-foreground/55">{VIEW_ONLY_CONTROL_NOTE}</p>
+        )}
         {error && (
           <p className="mt-5 rounded-lg bg-red-50 p-3 text-red-800" role="alert">
             Entries could not be loaded. Refresh and try again.
@@ -137,7 +147,7 @@ export default async function ManualEntriesPage() {
                     Website format: {websiteStatus.status}
                   </span>
                 </div>
-                {entry.review_status === "pending" && (
+                {entry.review_status === "pending" && canDecide && (
                   <ManualEntryReviewForm
                     entryId={entry.id}
                     organisationType={entry.organisation_type}

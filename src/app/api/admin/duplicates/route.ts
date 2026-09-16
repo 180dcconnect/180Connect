@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor, actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
 import {
+  DECIDED_LIMIT,
   ENTITY_MATCH_CANDIDATE_SELECT,
+  PENDING_LIMIT,
   duplicateRpcFailure,
+  toPendingReview,
+  toQueueRecord,
   type EntityMatchCandidateRow,
 } from "@/lib/duplicates";
 import {
@@ -17,8 +21,10 @@ import {
 /**
  * F042 — Deduplicate Clients, admin review queue.
  *
- * GET   list every potential duplicate (all statuses), most recent first. Rows are
- *       written by the ingestion pipeline (service_role), never by this route.
+ * GET   list every potential duplicate, most recent first: the pending set with
+ *       both records read out for the side-by-side comparison, then the decided
+ *       set as history. Rows are written by the ingestion pipeline
+ *       (service_role), never by this route.
  * PATCH confirm or dismiss a pending flag — decide_duplicate_flag. Confirming a
  *       match also runs F048's discrepancy detection as a follow-up (see below).
  *
@@ -38,28 +44,56 @@ function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
 }
 
 export async function GET() {
-  const authorization = await getCurrentActor("approval:manage", {
+  const authorization = await getViewingActor("approval:manage", {
     route: "/admin/duplicates",
   });
   if (!authorization.ok) return denied(authorization.reason);
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
-    .from("entity_match_candidates")
-    .select(ENTITY_MATCH_CANDIDATE_SELECT)
-    .order("created_at", { ascending: false })
-    .overrideTypes<EntityMatchCandidateRow[], { merge: false }>();
+  // Bounded like the page's initial load, through the same two constants, so a
+  // refresh cannot return a different window than the read it replaces. The
+  // panel splits the two client-side, and raw_payload per row makes an
+  // unbounded refresh the heaviest refetch on the page.
+  const [{ data: pendingData, error: pendingError }, { data: decidedData, error: decidedError }] =
+    await Promise.all([
+      supabase
+        .from("entity_match_candidates")
+        .select(ENTITY_MATCH_CANDIDATE_SELECT)
+        .eq("match_status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(PENDING_LIMIT)
+        .overrideTypes<EntityMatchCandidateRow[], { merge: false }>(),
+      supabase
+        .from("entity_match_candidates")
+        .select(ENTITY_MATCH_CANDIDATE_SELECT)
+        .neq("match_status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(DECIDED_LIMIT)
+        .overrideTypes<EntityMatchCandidateRow[], { merge: false }>(),
+    ]);
+
+  const error = pendingError ?? decidedError;
+  if (pendingError) {
+    await reportError(pendingError, { operation: "admin.duplicates.list_pending" });
+  }
+  if (decidedError) {
+    await reportError(decidedError, { operation: "admin.duplicates.list_decided" });
+  }
 
   if (error) {
-    await reportError(error, { operation: "admin.duplicates.list" });
     return NextResponse.json(
       { error: "The duplicates list could not be loaded. Please try again." },
       { status: 500 },
     );
   }
 
-  return NextResponse.json({ duplicates: data ?? [] });
+  // Read on the server, like the page's own load: the register side of each pair
+  // needs the source mappers, and the panel is a client component.
+  return NextResponse.json({
+    pending: (pendingData ?? []).map(toPendingReview),
+    decided: (decidedData ?? []).map(toQueueRecord),
+  });
 }
 
 export async function PATCH(request: Request) {

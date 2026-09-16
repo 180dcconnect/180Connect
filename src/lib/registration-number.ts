@@ -55,6 +55,13 @@ export const REGISTER_OPTIONS: readonly RegisterOption[] = [
  * Tolerant of the spellings already in drafts, because a draft saved before the
  * list existed must open on the right option rather than on "other" with its
  * name in a box. Null for nothing at all.
+ *
+ * "England and Wales" is required before a bare "charity commission" prefix is
+ * trusted: a CAM naming "Charity Commission of Kenya" under "Another register"
+ * is naming a different country's regulator, and treating it as ours decides
+ * both the number's shape check and — via the same rule in
+ * `app.identifier_type_for_registry` — whether the number is filed as a UK
+ * charity number. Mirrored there; the two must not disagree.
  */
 export function registerIdForName(name: string | null | undefined): RegisterId | null {
   const text = name?.trim().toLowerCase();
@@ -66,7 +73,10 @@ export function registerIdForName(name: string | null | undefined): RegisterId |
   if (text === "oscr" || text.includes("scottish charity regulator")) return "oscr";
   if (text.includes("companies house")) return "companies_house";
   if (text.includes("charity commission") && text.includes("northern ireland")) return "ccni";
-  if (text === "ccew" || text.startsWith("charity commission")) return "ccew";
+  if (text === "ccew" || text === "charity commission") return "ccew";
+  if (text.startsWith("charity commission") && text.includes("england") && text.includes("wales")) {
+    return "ccew";
+  }
   return "other";
 }
 

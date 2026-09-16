@@ -43,6 +43,7 @@ export type GmailActionBarProps = {
   activeLabels?: ActiveLabelFilter[];
   onRemoveLabel?: (name: string) => void;
   onClearAllLabels?: () => void;
+  isViewer?: boolean;
 };
 
 export function GmailActionBar({
@@ -67,6 +68,7 @@ export function GmailActionBar({
   activeLabels = [],
   onRemoveLabel,
   onClearAllLabels,
+  isViewer = false,
 }: GmailActionBarProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -181,41 +183,45 @@ export function GmailActionBar({
           {/* Contextual Action Buttons (shown when items are selected) */}
           {selectedCount > 0 ? (
             <div className="flex items-center gap-1 ml-2 border-l border-slate-200 pl-2">
-              <button
-                type="button"
-                onClick={onDeleteSelected}
-                title="Delete selected"
-                className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-red-600 transition-colors cursor-pointer"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              {!isViewer && (
+                <>
+                  <button
+                    type="button"
+                    onClick={onDeleteSelected}
+                    title="Delete selected"
+                    className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-red-600 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
 
-              <button
-                type="button"
-                onClick={onMarkAsRead}
-                title="Mark as read"
-                className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
-              >
-                <MailOpen className="h-4 w-4" />
-              </button>
+                  <button
+                    type="button"
+                    onClick={onMarkAsRead}
+                    title="Mark as read"
+                    className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                  >
+                    <MailOpen className="h-4 w-4" />
+                  </button>
 
-              <button
-                type="button"
-                onClick={onMarkAsUnread}
-                title="Mark as unread"
-                className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
-              >
-                <Mail className="h-4 w-4" />
-              </button>
+                  <button
+                    type="button"
+                    onClick={onMarkAsUnread}
+                    title="Mark as unread"
+                    className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                  >
+                    <Mail className="h-4 w-4" />
+                  </button>
 
-              <button
-                type="button"
-                onClick={onToggleStarSelected}
-                title="Star / Unstar"
-                className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-amber-500 transition-colors cursor-pointer"
-              >
-                <Star className="h-4 w-4" />
-              </button>
+                  <button
+                    type="button"
+                    onClick={onToggleStarSelected}
+                    title="Star / Unstar"
+                    className="p-2 rounded-full hover:bg-slate-100 text-slate-600 hover:text-amber-500 transition-colors cursor-pointer"
+                  >
+                    <Star className="h-4 w-4" />
+                  </button>
+                </>
+              )}
 
               <span className="text-xs text-slate-500 font-medium ml-2">
                 {selectedCount} selected

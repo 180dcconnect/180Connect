@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
 import { dailySendWindowStart, DEFAULT_OUTREACH_DAILY_SEND_LIMIT } from "@/lib/outreach/daily-send-limit";
+import { isViewOnly } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { InlineAlert } from "@/components/ui/inline-alert";
@@ -17,7 +18,7 @@ import { SendingLimitPanel } from "./sending-limit-panel";
  * platform-settings:manage, admins only.
  */
 export default async function SendingLimitsSettingsPage() {
-  const authorization = await getCurrentActor("platform-settings:manage", {
+  const authorization = await getViewingActor("platform-settings:manage", {
     route: "/settings/sending-limits",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
@@ -67,6 +68,7 @@ export default async function SendingLimitsSettingsPage() {
               currentLimit={limitResult.data?.daily_limit ?? DEFAULT_OUTREACH_DAILY_SEND_LIMIT}
               sentToday={volumeResult.count ?? 0}
               updatedAt={limitResult.data?.updated_at ?? null}
+              readOnly={isViewOnly(authorization.actor.role)}
             />
           </Rise>
         </Group>

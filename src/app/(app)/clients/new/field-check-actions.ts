@@ -1,6 +1,6 @@
 "use server";
 
-import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor, actorFailureMessage } from "@/lib/auth/actor";
 import { reportError } from "@/lib/error-logging";
 import { createClient } from "@/lib/supabase/server";
 import { validateWebsiteFormat } from "@/lib/website-validation";
@@ -45,7 +45,7 @@ export type WebsiteCheck =
   | { status: "error"; message: string };
 
 export async function checkWebsiteField(value: string): Promise<WebsiteCheck> {
-  const authorization = await getCurrentActor("client:edit", { route: "/clients/new" });
+  const authorization = await getViewingActor("client:edit", { route: "/clients/new" });
   if (!authorization.ok) {
     return { status: "error", message: actorFailureMessage(authorization.reason) };
   }
@@ -106,7 +106,7 @@ export async function checkRegistrationField(
   register: string,
   value: string,
 ): Promise<RegistrationCheck> {
-  const authorization = await getCurrentActor("client:edit", { route: "/clients/new" });
+  const authorization = await getViewingActor("client:edit", { route: "/clients/new" });
   if (!authorization.ok) {
     return { status: "error", message: actorFailureMessage(authorization.reason) };
   }

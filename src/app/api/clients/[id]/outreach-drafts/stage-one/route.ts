@@ -19,8 +19,8 @@ import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import { computeCostUsd } from "@/lib/outreach/generation-cost";
 import { loadModelRate } from "@/lib/ai/model-rate";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
-import { buildAttachmentEmailContext } from "@/lib/attachments";
-import { resolveMissionText } from "@/lib/mission";
+import { loadStageOneExtras, toStageOneContext } from "@/lib/outreach/stage-one-context";
+import { resolveStageOneNews } from "@/lib/outreach/stage-one-news";
 
 // No maxDuration export: the project default (300s) already covers generation,
 // and a route-specific value puts this route in its own Vercel function — the
@@ -182,44 +182,10 @@ export async function POST(
     );
   }
 
-  const [
-    { data: contact, error: contactError },
-    { data: enrichment, error: enrichmentError },
-    { data: financialPeriod, error: financialError },
-  ] = await Promise.all([
-    supabase.from("contacts").select("id, first_name, last_name, job_title, email").eq("organisation_id", organisationId).order("is_primary", { ascending: false }).order("created_at", { ascending: true }).limit(1).maybeSingle(),
-    supabase.from("enrichment_results").select("mission_statement, mission_keywords, sector, sub_sector, news_hooks").eq("organisation_id", organisationId).order("enriched_at", { ascending: false }).limit(1).maybeSingle(),
-    supabase.from("financial_periods").select("income_band").eq("organisation_id", organisationId).order("period_end", { ascending: false }).limit(1).maybeSingle(),
-  ]);
-  if (contactError) await reportError(contactError, { operation: "outreach.stage_one.load_contact", organisationId });
-  if (enrichmentError) await reportError(enrichmentError, { operation: "outreach.stage_one.load_context", organisationId });
-  if (financialError) await reportError(financialError, { operation: "outreach.stage_one.load_financial_context", organisationId });
-
-  // F103 AC1: the client's saved booklet (latest version per F085/F086) is passed
-  // to generation as additional context. A missing booklet is not an error —
-  // generation continues on profile data alone (F102), so this is tolerant of a
-  // failed read the same way the enrichment lookup above is.
-  const { data: savedBooklet, error: bookletError } = await supabase
-    .from("client_booklets")
-    .select("booklet_text")
-    .eq("organisation_id", organisationId)
-    .order("generated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<{ booklet_text: string }>();
-  if (bookletError) {
-    await reportError(bookletError, { operation: "outreach.stage_one.load_booklet", organisationId });
-  }
-
-  const { data: extractedAttachments, error: attachmentContextError } = await supabase
-    .from("attachments")
-    .select("filename, extracted_text")
-    .eq("organisation_id", organisationId)
-    .eq("text_extraction_status", "succeeded")
-    .order("created_at", { ascending: false });
-  if (attachmentContextError) {
-    await reportError(attachmentContextError, { operation: "outreach.stage_one.load_attachment_context", organisationId });
-  }
-  const attachmentText = buildAttachmentEmailContext(extractedAttachments ?? []);
+  // Every read beyond the organisation row itself, shared with /admin/email-lab
+  // so the lab's preview of the prompt is built from the same context this is.
+  const extras = await loadStageOneExtras(supabase, organisationId, "outreach.stage_one");
+  const contact = extras.contact;
 
   let callModel;
   let model: string;
@@ -244,39 +210,32 @@ export async function POST(
     );
   }
 
+  // F110 for first contact: a live lookup, but only when the CAM chose the
+  // news-hook opening — see stage-one-news.ts for why this one is conditional
+  // where Stage 2's is not.
+  const news = await resolveStageOneNews({
+    opening: preferences.data.opening,
+    organisationId,
+    organisationName: organisation.legal_name,
+    tradingName: organisation.trading_name,
+    website: organisation.website,
+    city: organisation.city,
+    countryCode: organisation.country_code,
+    geographicReach: organisation.geographic_reach,
+    sector: organisation.sector,
+    storedHooks: extras.enrichment?.news_hooks,
+  });
+
   const result = await generateStageOneDraft(
     organisationId,
     {
-      organisationName: organisation.legal_name,
-      tradingName: organisation.trading_name,
-      organisationType: organisation.organisation_type,
-      website: organisation.website,
-      city: organisation.city,
-      countryCode: organisation.country_code,
-      geographicReach: organisation.geographic_reach,
-      incomeBand: financialPeriod?.income_band,
-      contactName: contact ? [contact.first_name, contact.last_name].filter(Boolean).join(" ") : null,
-      contactJobTitle: contact?.job_title,
-      // Canonical register purpose first, enrichment mission as the fallback —
-      // the same resolution the booklet applies. Reading only enrichment left
-      // every company (and every charity with filed activities but no
-      // enrichment row) generating from "Mission: Not provided".
-      missionStatement: resolveMissionText({
-        charity_activities: organisation.charity_activities,
-        cic_community_statement: organisation.cic_community_statement,
-        enrichment_mission: enrichment?.mission_statement,
+      ...toStageOneContext({
+        organisation,
+        extras,
+        senderName: authorization.actor.fullName,
+        attachFlyer: preferences.data.attachFlyer,
       }),
-      missionKeywords: enrichment?.mission_keywords,
-      // Canonical ORGANISATIONS column first, LLM enrichment as the fallback —
-      // the same resolution build-prompt.ts applies for the booklet. Reading only
-      // enrichment reported no sector at all for register-imported charities.
-      sector: organisation.sector?.trim() || enrichment?.sector,
-      subSector: organisation.sub_sector?.trim() || enrichment?.sub_sector,
-      newsHooks: enrichment?.news_hooks,
-      booklet: savedBooklet?.booklet_text ?? null,
-      senderName: authorization.actor.fullName,
-      attachFlyer: preferences.data.attachFlyer,
-      attachmentText,
+      newsHooks: news.hooks,
     },
     callModel,
     { length: preferences.data.length, register: preferences.data.register, opening: preferences.data.opening, closing: preferences.data.closing },
@@ -293,7 +252,17 @@ export async function POST(
   const { data: message, error: draftError } = isRegeneration
     ? await supabase
         .from("outreach_messages")
-        .update({ subject: result.draft.subject, body: result.draft.body, attach_flyer: preferences.data.attachFlyer })
+        .update({
+          subject: result.draft.subject,
+          body: result.draft.body,
+          attach_flyer: preferences.data.attachFlyer,
+          // Rewritten on every regeneration, including back to null: a
+          // regeneration that found no hook must not keep the last one's
+          // article link sitting on the row as if it were this draft's.
+          news_source: news.live ? "live" : null,
+          news_hook: news.live?.text ?? null,
+          news_url: news.live?.url ?? null,
+        })
         .eq("id", draftId)
         .eq("organisation_id", organisationId)
         .select("id")
@@ -308,6 +277,9 @@ export async function POST(
           body: result.draft.body,
           send_status: "draft",
           attach_flyer: preferences.data.attachFlyer,
+          news_source: news.live ? "live" : null,
+          news_hook: news.live?.text ?? null,
+          news_url: news.live?.url ?? null,
         })
         .select("id")
         .single();

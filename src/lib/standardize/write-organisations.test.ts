@@ -752,7 +752,7 @@ describe("promotePendingCharityCommissionRecords — financial periods", () => {
         periodEnd: "2025-03-31",
         totalIncome: 4314025,
         totalExpenditure: 4191442,
-        incomeBand: "over_1m",
+        incomeBand: "1m_10m",
       },
       {
         organisationId: "org-2",

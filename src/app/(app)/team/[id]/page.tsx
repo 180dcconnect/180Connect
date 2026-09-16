@@ -4,6 +4,9 @@ import { notFound, redirect } from "next/navigation";
 
 import { getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
+import { fetchPagedForOrgs } from "@/lib/supabase/fetch-paged";
+import { summariseTrackedReplies, type ReplyTrackingRow } from "@/lib/reply-analytics";
+import { outreachRates } from "@/lib/outreach-rates";
 import { Stage, Rise } from "@/components/dashboard-stage";
 import { formatTeamActivity, type RawTeamActivityRow } from "@/lib/team-activity";
 
@@ -35,6 +38,33 @@ const loadTeamMember = cache(async (id: string) => {
     .eq("id", id)
     .maybeSingle();
 });
+
+/**
+ * Every reply to this member's clients, walked in id chunks (`ID_CHUNK` at a
+ * time, so a member with a thousand clients cannot overflow the query string).
+ *
+ * Fails soft — a failed read returns nothing rather than throwing. The win rate
+ * is then built from conversions alone, which still counts the wins recorded by
+ * hand; failing the page instead would take out a profile that is otherwise
+ * complete because one number could not be derived.
+ */
+async function loadMemberReplies(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  clients: readonly { id: string }[],
+): Promise<ReplyTrackingRow[]> {
+  const { data } = await fetchPagedForOrgs<ReplyTrackingRow>(
+    clients.map((client) => client.id),
+    (ids, from, to) =>
+      supabase
+        .from("reply_events")
+        .select("id, organisation_id")
+        .in("organisation_id", ids)
+        .order("received_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+  );
+  return data ?? [];
+}
 
 export async function generateMetadata({
   params,
@@ -199,6 +229,7 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
     });
 
   const isSelf = authorization.actor.id === user.id;
+  // Admins can manage team members (suspend/delete/change role); viewers have read-only oversight.
   const isAdmin = authorization.actor.role === "admin";
 
   // Who could take this member's clients on if an admin suspends or deletes them. Only
@@ -234,7 +265,21 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
     ["stalled", "rejected", "unresponsive", "do_not_contact"].includes(c.outreach_status),
   ).length;
 
-  const conversionRate = totalClients > 0 ? ((convertedCount / totalClients) * 100).toFixed(1) : "0.0";
+  // Replies, to this member's clients only — the win rate's denominator is
+  // replied ∪ converted, and a client can be won without a reply on record (a
+  // call, a referral, a status set by hand). Read per client-chunk through the
+  // shared helper so a member with a thousand clients still gets every reply.
+  const replyRows = clients.length > 0 ? await loadMemberReplies(supabase, clients) : [];
+  const replySummary = summariseTrackedReplies(
+    replyRows,
+    clients.map((client) => ({ id: client.id, owner_id: id })),
+  );
+
+  const rates = outreachRates({
+    contacted: new Set(clients.filter((c) => c.outreach_status !== "not_contacted").map((c) => c.id)),
+    replied: new Set(replySummary.byClient.keys()),
+    converted: new Set(clients.filter((c) => c.outreach_status === "converted").map((c) => c.id)),
+  });
 
   const stats = {
     totalClients,
@@ -245,7 +290,8 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
     closedCount,
     sentMessagesCount: sentMessages.length,
     notesCount: recentNotes.length,
-    conversionRate,
+    respondedClients: rates.respondedClients,
+    winRate: rates.winRate,
   };
 
   const memberData: TeamMemberHeaderData = {

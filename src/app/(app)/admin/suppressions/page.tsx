@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
@@ -10,7 +10,7 @@ import { SuppressionsPanel } from "./suppressions-panel";
 type OrganisationOption = { id: string; legal_name: string };
 
 export default async function SuppressionsPage() {
-  const authorization = await getCurrentActor("approval:manage", {
+  const authorization = await getViewingActor("approval:manage", {
     route: "/admin/suppressions",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));

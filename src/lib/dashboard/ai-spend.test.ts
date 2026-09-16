@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 import {
   aiSpendChange,
   aiSpendSummary,
+  aiSpendWindowStart,
   formatUsd,
+  toAiGenerationActivity,
   type AiGenerationCostRow,
 } from "./ai-spend.ts";
 
@@ -88,6 +90,41 @@ describe("aiSpendSummary", () => {
   it("skips rows with an unparseable created_at", () => {
     const summary = aiSpendSummary([gen({ created_at: "nonsense" })], NOW);
     assert.equal(summary.generations, 0);
+  });
+});
+
+describe("activities", () => {
+  it("keeps a regeneration in its own bucket instead of folding it into initial emails", () => {
+    const summary = aiSpendSummary(
+      [gen({ cost_usd: 1, activity: "initial_email" }), gen({ cost_usd: 2, activity: "email_regeneration" })],
+      NOW,
+    );
+    assert.equal(summary.activityTotals.initial_email.costUsd, 1);
+    assert.equal(summary.activityTotals.email_regeneration.costUsd, 2);
+    assert.equal(summary.spendByDay[0].byActivity.email_regeneration, 2);
+  });
+
+  it("maps known activity values through and anything else to other", () => {
+    assert.equal(toAiGenerationActivity("follow_up_email"), "follow_up_email");
+    assert.equal(toAiGenerationActivity("email_regeneration"), "email_regeneration");
+    assert.equal(toAiGenerationActivity("something_new"), "other");
+    assert.equal(toAiGenerationActivity(null), "other");
+  });
+});
+
+describe("aiSpendWindowStart", () => {
+  it("reaches past the 1st of last month after a short month", () => {
+    // 31 days into March needs ~31 days before 1 March, i.e. late January —
+    // a fetch from 1 February would count those days as zero spend.
+    const start = aiSpendWindowStart(new Date("2026-03-31T12:00:00Z"));
+    assert.ok(start < new Date("2026-02-01T00:00:00Z"));
+    assert.equal(start.toISOString(), "2026-01-29T12:00:00.000Z");
+  });
+
+  it("counts prior-stretch rows from before last month's 1st", () => {
+    const now = new Date("2026-03-31T12:00:00Z");
+    const summary = aiSpendSummary([gen({ created_at: "2026-01-30T00:00:00Z", cost_usd: 3 })], now);
+    assert.equal(summary.priorCostUsd, 3);
   });
 });
 

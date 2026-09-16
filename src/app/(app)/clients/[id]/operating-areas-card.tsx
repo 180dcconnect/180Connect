@@ -40,6 +40,7 @@ export function OperatingAreasCard({
 
   const {
     registeredCity,
+    registeredAddressLine,
     registeredPostcode,
     registeredCountry,
     geographicReach,
@@ -54,6 +55,17 @@ export function OperatingAreasCard({
 
   const mapLink = mapsUrl(registeredCity, registeredPostcode, registeredCountry);
   const formattedCity = registeredCity ? formatCityWithRegion(registeredCity) : null;
+
+  // What to call the office, in the order a reader would recognise it: the town,
+  // else the street or building the address starts with, else the postcode on
+  // its own. Most of the register carries no town, and reading only `city` made
+  // this tile say "Not on file (SN4 0BZ)" for a record whose address is printed
+  // in full on the card above — a claim about our copy that read as a claim
+  // about the charity.
+  const officeLine = formattedCity ?? registeredAddressLine ?? registeredPostcode;
+  // The postcode is a suffix, never a repeat of the line it follows.
+  const officePostcode =
+    registeredPostcode && registeredPostcode !== officeLine ? registeredPostcode : null;
   const formattedCountry = formatCountryName(registeredCountry);
 
   const filteredLocal = useMemo(() => {
@@ -119,8 +131,8 @@ export function OperatingAreasCard({
                   className="group inline-flex items-center gap-1 font-medium text-lead hover:underline"
                 >
                   <span className="truncate text-[13.5px]">
-                    {formattedCity || "Not on file"}
-                    {registeredPostcode ? ` (${registeredPostcode})` : ""}
+                    {officeLine || "Not on file"}
+                    {officePostcode ? ` (${officePostcode})` : ""}
                   </span>
                   <ExternalLink
                     aria-hidden="true"
@@ -130,8 +142,8 @@ export function OperatingAreasCard({
                 </a>
               ) : (
                 <span className="truncate text-[13.5px] font-medium text-ink">
-                  {formattedCity || "Not on file"}
-                  {registeredPostcode ? ` (${registeredPostcode})` : ""}
+                  {officeLine || "Not on file"}
+                  {officePostcode ? ` (${officePostcode})` : ""}
                 </span>
               )}
             </div>

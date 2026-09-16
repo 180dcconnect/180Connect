@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { actorFailureMessage, getCurrentActor, getViewingActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { isUuid } from "@/lib/validation";
@@ -153,7 +153,8 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  // Viewers may generate booklets (read-only client research asset).
+  const authorization = await getViewingActor("client:contact", { route: "/clients/[id]" });
   if (!authorization.ok) return denied(authorization.reason);
 
   const { id: organisationId } = await params;
@@ -389,7 +390,7 @@ export async function POST(
     websiteContextResult.status === "used" && websiteUrl
       ? validateWebsiteFormat(websiteUrl).url
       : null;
-  const { data: savedRow, error: saveError } = await supabase
+  const { data: savedRow, error: saveError } = await (admin ?? supabase)
     .from("client_booklets")
     .insert({
       organisation_id: organisationId,

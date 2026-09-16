@@ -6,6 +6,7 @@ import type { DiscrepancyChoice, FieldDiscrepancyRow } from "@/lib/discrepancies
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
 import { reportError } from "@/lib/error-logging";
+import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 
 const FIELD_LABEL: Record<string, string> = {
   legal_name: "Legal name",
@@ -32,8 +33,15 @@ function fieldLabel(fieldName: string) {
 
 export function DiscrepanciesPanel({
   initialDiscrepancies,
+  canDecide,
 }: {
   initialDiscrepancies: FieldDiscrepancyRow[];
+  /**
+   * Whether this reader may answer a discrepancy. False for leadership, who see
+   * the conflicts and no way to settle them — the PATCH route refuses them
+   * anyway, so offering the two buttons would only produce a failed press.
+   */
+  canDecide: boolean;
 }) {
   const [rows, setRows] = useState(initialDiscrepancies);
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -83,6 +91,10 @@ export function DiscrepanciesPanel({
 
   return (
     <div className="mt-8 space-y-10">
+      {!canDecide && (
+        <p className="text-sm text-foreground/55">{VIEW_ONLY_CONTROL_NOTE}</p>
+      )}
+
       {pending.length === 0 ? (
         <p className="text-sm text-foreground/65">No discrepancies waiting for review.</p>
       ) : (
@@ -111,38 +123,42 @@ export function DiscrepanciesPanel({
                 <p className="mt-3 text-xs text-foreground/50">
                   Flagged {new Date(row.created_at).toLocaleString("en-GB")}
                 </p>
-                <label className="mt-3 block text-sm font-bold" htmlFor={`note-${row.id}`}>
-                  Note (optional)
-                </label>
-                <textarea
-                  className="mt-1 w-full rounded-lg border border-black/15 bg-white px-3 py-2"
-                  disabled={busy}
-                  id={`note-${row.id}`}
-                  onChange={(event) =>
-                    setNotes((current) => ({ ...current, [row.id]: event.target.value }))
-                  }
-                  rows={2}
-                  value={notes[row.id] ?? ""}
-                />
-                <div className="mt-3 flex gap-3">
-                  <OriginButton
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => resolve(row.id, "existing")}
-                    type="button"
-                  >
-                    Keep existing
-                  </OriginButton>
-                  <OriginButton
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => resolve(row.id, "incoming")}
-                    type="button"
-                  >
-                    Use incoming
-                  </OriginButton>
-                </div>
+                {canDecide && (
+                  <>
+                    <label className="mt-3 block text-sm font-bold" htmlFor={`note-${row.id}`}>
+                      Note (optional)
+                    </label>
+                    <textarea
+                      className="mt-1 w-full rounded-lg border border-black/15 bg-white px-3 py-2"
+                      disabled={busy}
+                      id={`note-${row.id}`}
+                      onChange={(event) =>
+                        setNotes((current) => ({ ...current, [row.id]: event.target.value }))
+                      }
+                      rows={2}
+                      value={notes[row.id] ?? ""}
+                    />
+                    <div className="mt-3 flex gap-3">
+                      <OriginButton
+                        variant="outline"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => resolve(row.id, "existing")}
+                        type="button"
+                      >
+                        Keep existing
+                      </OriginButton>
+                      <OriginButton
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => resolve(row.id, "incoming")}
+                        type="button"
+                      >
+                        Use incoming
+                      </OriginButton>
+                    </div>
+                  </>
+                )}
               </li>
             ))}
           </ul>

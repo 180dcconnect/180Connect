@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { ExternalLink, Globe, Mail, Search } from "lucide-react";
-
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
-import { hasPermission } from "@/lib/auth/permissions";
+import { hasPermission, isViewOnly } from "@/lib/auth/permissions";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import { websiteHref } from "@/lib/website-validation";
 import {
@@ -66,8 +65,8 @@ export default async function ClientOverviewPage({
   const client = await loadClient(id);
   const supabase = await createClient();
 
+  const isViewer = isViewOnly(actor.role);
   const canEdit = hasPermission(actor.role, "client:edit");
-  const isViewer = actor.role === "viewer";
 
   const [
     { score, error: scoreError },
@@ -164,10 +163,10 @@ export default async function ClientOverviewPage({
           : "Missing";
 
   // #79/#80/#81 (F077/F078/F079): fetched without a status filter and filtered
-  // in the component — RLS already scopes what each role may see. Viewers have
-  // no write access at all, so the section is not rendered for them.
+  // in the component — RLS already scopes what each role may see. Viewers read
+  // them as an admin does (and cannot decide them).
   let suggestions: EditSuggestionRow[] = [];
-  if (!isViewer) {
+  {
     const { data, error } = await supabase
       .from("edit_suggestions")
       .select(EDIT_SUGGESTION_SELECT)
@@ -187,7 +186,7 @@ export default async function ClientOverviewPage({
   // active. Current values come off the client row already in scope, so
   // "current vs proposed" reads in one glance.
   let restrictedFields: { field_name: string; label: string }[] = [];
-  if (actor.role === "cam" || actor.role === "admin") {
+  {
     const { data, error } = await supabase
       .from("restricted_edit_fields")
       .select("field_name")
@@ -223,7 +222,7 @@ export default async function ClientOverviewPage({
               missionStatement={enrichment?.mission_statement ?? null}
               missionEnrichedAt={enrichment?.enriched_at ?? null}
               sicTitles={natureOfBusiness}
-              editableFields={restrictedFields.map((field) => field.field_name)}
+              editableFields={isViewer ? [] : restrictedFields.map((field) => field.field_name)}
               actorId={actor.id}
               actorRole={actor.role}
               suggestions={suggestions}
@@ -237,13 +236,11 @@ export default async function ClientOverviewPage({
           {/* Proposing is a control on the card above ("Suggest an edit");
               this is only the state — pending and decided corrections. Renders
               nothing when there are none. CAMs see their own; admins decide. */}
-          {!isViewer && (
-            <SuggestEditSection
-              actorId={actor.id}
-              actorRole={actor.role}
-              suggestions={suggestions}
-            />
-          )}
+          <SuggestEditSection
+            actorId={actor.id}
+            actorRole={actor.role}
+            suggestions={suggestions}
+          />
 
           <Rise>
             <FinancialScaleCard
@@ -294,7 +291,7 @@ export default async function ClientOverviewPage({
               organisationId={client.id}
               initialClientTags={clientTags}
               availableTags={allTagsResult.data ?? []}
-              canEdit={canEdit}
+              canEdit={canEdit && !isViewer}
             />
           </Rise>
 

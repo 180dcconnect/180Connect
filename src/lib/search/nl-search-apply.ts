@@ -14,7 +14,7 @@ import {
   filterByStatus,
   resolveClientIncomeBand,
   type VisibleClient,
-} from "../../app/clients/visible-clients.ts";
+} from "../../app/(app)/clients/visible-clients.ts";
 import { countryToIso } from "../country-flags.ts";
 import { INCOME_BAND_OPTIONS } from "../income-band.ts";
 import type { NlSearchPlan } from "./nl-search-plan.ts";

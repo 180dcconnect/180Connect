@@ -120,11 +120,17 @@ function cleanBody(value: string): string {
 export function stripQuotedReply(value: string): string {
   const lines = value.replace(/\r\n/g, "\n").split("\n");
 
-  const attribution = lines.findIndex((line) => {
+  const attribution = lines.findIndex((line, index) => {
     const trimmed = line.trim();
     if (!trimmed) return false;
-    // Gmail and Apple Mail: "On Mon, 8 Sep 2026 at 10:00, Ada Lovelace wrote:"
-    if (/^on\b.{0,200}\bwrote:\s*$/i.test(trimmed)) return true;
+    // Gmail and Apple Mail: "On Mon, 8 Sep 2026 at 10:00, Ada Lovelace wrote:".
+    // Gmail's text/plain part hard-wraps at ~76 characters, so a long sender
+    // name and address push "wrote:" onto the next line (or the one after) —
+    // read the "On" line together with the two below it.
+    if (/^on\b/i.test(trimmed)) {
+      const joined = lines.slice(index, index + 3).map((part) => part.trim()).join(" ");
+      if (/^on\b.{0,200}?\bwrote:(\s|$)/i.test(joined)) return true;
+    }
     // Outlook's forwarded-message block and its separator rule.
     if (/^-{2,}\s*(original message|forwarded message)\s*-{2,}$/i.test(trimmed)) return true;
     if (/^_{5,}$/.test(trimmed)) return true;

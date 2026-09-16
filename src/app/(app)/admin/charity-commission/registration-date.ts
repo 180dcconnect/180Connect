@@ -1,4 +1,4 @@
-import { todayIso } from "../../../lib/date-range.ts";
+import { todayIso } from "../../../../lib/date-range.ts";
 
 /**
  * Validates a strict UTC ISO day string (`YYYY-MM-DD`).

@@ -100,6 +100,13 @@ describe("canManageNote", () => {
       false,
     );
   });
+
+  it("refuses a viewer even if they are the author of the note", () => {
+    assert.equal(
+      canManageNote(note({ author_id: "viewer-1" }), { id: "viewer-1", role: "viewer" }),
+      false,
+    );
+  });
 });
 
 describe("buildNoteList", () => {

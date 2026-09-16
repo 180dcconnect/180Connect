@@ -15,7 +15,7 @@ import { z } from "zod";
 import { safeValidate } from "../validation.ts";
 
 // Labels are the names the client record's score breakdown uses
-// (src/app/clients/[id]/score-breakdown.tsx), so an admin tuning "Size" here is
+// (src/app/(app)/clients/[id]/score-breakdown.tsx), so an admin tuning "Size" here is
 // tuning the "Size" they see on a client. Descriptions are written for an admin
 // who is not a developer (AGENTS.md, "Who will maintain this app").
 export const SCOUT_WEIGHT_PARAMETERS = [
@@ -89,7 +89,7 @@ export function anyWeightCounts(weights: Record<ScoutWeightKey, number>): boolea
   return SCOUT_WEIGHT_PARAMETERS.some((parameter) => (weights[parameter.key] ?? 0) > 0);
 }
 
-/** Each weight's share of the whole score, 0-100. All zero when nothing counts. */
+/** Each weight's share of the whole, 0-100. All zero when nothing counts. */
 export function weightShares(weights: Record<ScoutWeightKey, number>): Record<ScoutWeightKey, number> {
   const total = SCOUT_WEIGHT_PARAMETERS.reduce(
     (sum, parameter) => sum + Math.max(0, weights[parameter.key] ?? 0),
@@ -100,6 +100,46 @@ export function weightShares(weights: Record<ScoutWeightKey, number>): Record<Sc
       parameter.key,
       total === 0 ? 0 : (Math.max(0, weights[parameter.key] ?? 0) / total) * 100,
     ]),
+  ) as Record<ScoutWeightKey, number>;
+}
+
+/**
+ * Scales weights proportionally so they sum to exactly 100%, rounding to whole
+ * percentages and distributing any rounding remainder to the highest fractional parts.
+ */
+export function autoBalanceWeights(
+  weights: Record<ScoutWeightKey, number>,
+): Record<ScoutWeightKey, number> {
+  const total = SCOUT_WEIGHT_PARAMETERS.reduce(
+    (sum, parameter) => sum + Math.max(0, weights[parameter.key] ?? 0),
+    0,
+  );
+  if (total === 0) {
+    return Object.fromEntries(
+      SCOUT_WEIGHT_PARAMETERS.map((p) => [p.key, 20]),
+    ) as Record<ScoutWeightKey, number>;
+  }
+
+  const parts = SCOUT_WEIGHT_PARAMETERS.map((p) => {
+    const val = Math.max(0, weights[p.key] ?? 0);
+    const raw = (val / total) * 100;
+    const floor = Math.floor(raw);
+    return {
+      key: p.key,
+      raw,
+      floor,
+      fraction: raw - floor,
+    };
+  });
+
+  const flooredSum = parts.reduce((s, item) => s + item.floor, 0);
+  const remainder = 100 - flooredSum;
+
+  const sorted = [...parts].sort((a, b) => b.fraction - a.fraction);
+  const bonusKeys = new Set(sorted.slice(0, remainder).map((item) => item.key));
+
+  return Object.fromEntries(
+    parts.map((item) => [item.key, item.floor + (bonusKeys.has(item.key) ? 1 : 0)]),
   ) as Record<ScoutWeightKey, number>;
 }
 

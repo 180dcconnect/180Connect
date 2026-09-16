@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchPaged } from "@/lib/supabase/fetch-paged";
 import { reportError } from "@/lib/error-logging";
 import { onFileEmail } from "@/lib/client-email-validation";
-import { hasPermission } from "@/lib/auth/permissions";
+import { hasPermission, isViewOnly } from "@/lib/auth/permissions";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import {
   splitOutreachHistory,
@@ -75,7 +75,18 @@ type SavedBookletRow = {
   website_url: string | null;
   website_context_used: boolean;
   generated_at: string;
+  edited_by_user_id: string | null;
+  editor: { full_name: string | null } | null;
 };
+
+/** Who corrected a version by hand, in display words — null on generated versions. */
+function editedByName(version: SavedBookletRow): string | null {
+  if (!version.edited_by_user_id) return null;
+  const name = version.editor?.full_name?.trim();
+  // Same fallback the Sent list uses for a departed sender: the attribution
+  // survives even when the account behind it does not.
+  return name ? name : "a former team member";
+}
 type ScheduledEmailRow = { id: string; subject: string; scheduled_at: string };
 type FailedEmailRow = { id: string; subject: string; updated_at: string };
 
@@ -107,6 +118,7 @@ export default async function ClientOutreachPage({
   const client = await loadClient(id);
   const supabase = await createClient();
 
+  const isViewer = isViewOnly(actor.role);
   const canContact = hasPermission(actor.role, "client:contact");
   const canEdit = hasPermission(actor.role, "client:edit");
   const isAdmin = actor.role === "admin";
@@ -131,7 +143,9 @@ export default async function ClientOutreachPage({
       // open) and list the rest as a timeline a CAM can browse.
       supabase
         .from("client_booklets")
-        .select("id, booklet_text, website_url, website_context_used, generated_at")
+        .select(
+          "id, booklet_text, website_url, website_context_used, generated_at, edited_by_user_id, editor:users!client_booklets_edited_by_user_id_fkey(full_name)",
+        )
         .eq("organisation_id", id)
         .order("generated_at", { ascending: false })
         .limit(BOOKLET_HISTORY_LIMIT)
@@ -458,97 +472,27 @@ export default async function ClientOutreachPage({
     <Stage>
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
         <Group className="space-y-6">
-          {canContact ? (
-            <>
-              {/* F082 — Generate Client Booklet. First, because a CAM reads the
-                  research before writing the email below it. The Rise carries
-                  z-index so the composer's search panel paints over the card
-                  beneath it — `relative z-20` is what orders them, not the
-                  entrance's filter, which `glass` removes: the composer's
-                  frosted panel can only blur the page if no ancestor holds a
-                  filter (see Rise). */}
-              <Rise glass className="relative z-20">
-                <BookletPanel
-                  organisationId={client.id}
-                  canDeleteBooklet={actor.role === "admin"}
-                  savedBooklet={
-                    savedBooklet && {
-                      id: savedBooklet.id,
-                      text: savedBooklet.booklet_text,
-                      websiteUrl: savedBooklet.website_url,
-                      websiteContextUsed: savedBooklet.website_context_used,
-                      generatedAt: savedBooklet.generated_at,
-                      // F087: reconstructed from the stored used/not-used
-                      // boolean and URL — see sources.ts for why this cannot
-                      // drift from what a fresh generation reports.
-                      sources: deriveSourcesFromSavedRow({
-                        websiteContextUsed: savedBooklet.website_context_used,
-                        websiteUrl: savedBooklet.website_url,
-                      }),
-                    }
-                  }
-                  priorVersions={(bookletResult.data ?? []).slice(1).map((version) => ({
-                    id: version.id,
-                    text: version.booklet_text,
-                    websiteUrl: version.website_url,
-                    websiteContextUsed: version.website_context_used,
-                    generatedAt: version.generated_at,
-                    sources: deriveSourcesFromSavedRow({
-                      websiteContextUsed: version.website_context_used,
-                      websiteUrl: version.website_url,
-                    }),
-                  }))}
-                />
-              </Rise>
+          {/* Write to this client card: placed above the booklet panel.
+              Hidden for viewers who have view-only access. */}
+          {!isViewer && canContact && (
+            <Rise>
+              <WriteToClientCard
+                organisationId={client.id}
+                blocked={suppression.suppressed}
+                ownershipBlocked={!suppression.suppressed && ownershipConflict.hasConflict}
+                suppressionReason={
+                  suppression.suppressed ? suppression.latest?.reason : undefined
+                }
+                ownershipWarning={
+                  ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
+                }
+                hasDraft={existingDraft !== null}
+                recipientEmail={composeRecipient}
+              />
+            </Rise>
+          )}
 
-              {/* Composing lives in the inbox now (/inbox), not here. This
-                  page is for knowing the client — mission, financials, history,
-                  who owns them — and the inbox is the one place an email is
-                  written or sent. That split means the ownership, suppression,
-                  rate-limit and audit guarantees have exactly one surface to
-                  hold, instead of the four that had drifted apart.
-
-                  The blocked states stay here rather than being discovered on
-                  arrival in the inbox: whether this client can be contacted at
-                  all is a fact about the client, and a CAM should learn it on
-                  the record, not after switching pages and typing an email. */}
-              <Rise>
-                <WriteToClientCard
-                  organisationId={client.id}
-                  blocked={suppression.suppressed}
-                  ownershipBlocked={!suppression.suppressed && ownershipConflict.hasConflict}
-                  suppressionReason={
-                    suppression.suppressed ? suppression.latest?.reason : undefined
-                  }
-                  ownershipWarning={
-                    ownershipConflict.hasConflict ? ownershipConflict.warning : undefined
-                  }
-                  hasDraft={existingDraft !== null}
-                  recipientEmail={composeRecipient}
-                />
-              </Rise>
-
-              {/* What is waiting to go out, and what failed to leave — with
-                  cancel and retry where each was created. One card rather
-                  than two orphan lists, so the queue reads as one state. */}
-              {hasQueue && (
-                <Rise>
-                  <SectionCard
-                    headingId="outreach-queue-heading"
-                    title="Queued and failed"
-                    hint="Scheduled sends waiting to go out, and sends that failed to leave."
-                    icon={<Clock />}
-                  >
-                    <ScheduledEmailList
-                      organisationId={client.id}
-                      messages={scheduledResult.data ?? []}
-                    />
-                    <FailedEmailList organisationId={client.id} messages={failedEmails} />
-                  </SectionCard>
-                </Rise>
-              )}
-            </>
-          ) : (
+          {!isViewer && !canContact && (
             <Rise>
               <SectionCard
                 headingId="outreach-compose-heading"
@@ -556,6 +500,62 @@ export default async function ClientOutreachPage({
                 hint="Your role can read this client's outreach history but not send to it."
                 icon={<Mail />}
               />
+            </Rise>
+          )}
+
+          {/* F082 — Generate Client Booklet. Visible to CAMs, Admins, and Viewers.
+              The Rise carries z-index so the composer's search panel paints over the card
+              beneath it — `relative z-20` is what orders them, not the
+              entrance's filter, which `glass` removes. */}
+          <Rise glass className="relative z-20">
+            <BookletPanel
+              organisationId={client.id}
+              canDeleteBooklet={isAdmin}
+              canEditBooklet={!isViewer && canContact}
+              savedBooklet={
+                savedBooklet && {
+                  id: savedBooklet.id,
+                  text: savedBooklet.booklet_text,
+                  websiteUrl: savedBooklet.website_url,
+                  websiteContextUsed: savedBooklet.website_context_used,
+                  generatedAt: savedBooklet.generated_at,
+                  editedBy: editedByName(savedBooklet),
+                  sources: deriveSourcesFromSavedRow({
+                    websiteContextUsed: savedBooklet.website_context_used,
+                    websiteUrl: savedBooklet.website_url,
+                  }),
+                }
+              }
+              priorVersions={(bookletResult.data ?? []).slice(1).map((version) => ({
+                id: version.id,
+                text: version.booklet_text,
+                websiteUrl: version.website_url,
+                websiteContextUsed: version.website_context_used,
+                generatedAt: version.generated_at,
+                editedBy: editedByName(version),
+                sources: deriveSourcesFromSavedRow({
+                  websiteContextUsed: version.website_context_used,
+                  websiteUrl: version.website_url,
+                }),
+              }))}
+            />
+          </Rise>
+
+          {/* What is waiting to go out, and what failed to leave — hidden for viewers. */}
+          {!isViewer && hasQueue && (
+            <Rise>
+              <SectionCard
+                headingId="outreach-queue-heading"
+                title="Queued and failed"
+                hint="Scheduled sends waiting to go out, and sends that failed to leave."
+                icon={<Clock />}
+              >
+                <ScheduledEmailList
+                  organisationId={client.id}
+                  messages={scheduledResult.data ?? []}
+                />
+                <FailedEmailList organisationId={client.id} messages={failedEmails} />
+              </SectionCard>
             </Rise>
           )}
         </Group>
@@ -615,7 +615,7 @@ export default async function ClientOutreachPage({
               where the first email and any reply are already on screen. This
               card is the pointer, and keeps the one thing that is knowledge
               rather than action: whether a follow-up is available at all. */}
-          {canFollowUp && (
+          {canFollowUp && !isViewer && (
             <Rise>
               <SectionCard
                 headingId="outreach-followup-heading"
@@ -647,7 +647,7 @@ export default async function ClientOutreachPage({
           <Rise className="relative z-30">
             <SectionCard
               action={
-                canEdit && noteList.length > 0
+                !isViewer && canEdit && noteList.length > 0
                   ? <AddNoteForm organisationId={client.id} />
                   : undefined
               }
@@ -660,7 +660,7 @@ export default async function ClientOutreachPage({
                 notes={noteList}
                 error={Boolean(notesResult.error)}
                 organisationId={client.id}
-                addNoteForm={canEdit ? <AddNoteForm organisationId={client.id} /> : undefined}
+                addNoteForm={!isViewer && canEdit ? <AddNoteForm organisationId={client.id} /> : undefined}
                 mentionNames={mentionNames}
               />
             </SectionCard>
@@ -683,14 +683,14 @@ export default async function ClientOutreachPage({
                     : null
                 }
                 error={Boolean(attachmentsResult.error)}
-                canExtract={canEdit}
-                canLink={canEdit}
-                canDelete={canEdit}
+                canExtract={!isViewer && canEdit}
+                canLink={!isViewer && canEdit}
+                canDelete={!isViewer && canEdit}
                 timelineOptions={timelineLinkOptions}
               />
               {/* F081: upload sits inside the same card so the new file appears
                   in the list directly above it on refresh (AC4). */}
-              {canEdit && <UploadAttachmentForm organisationId={client.id} />}
+              {!isViewer && canEdit && <UploadAttachmentForm organisationId={client.id} />}
             </SectionCard>
           </Rise>
         </Group>

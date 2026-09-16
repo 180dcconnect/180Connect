@@ -1,8 +1,8 @@
 import { Skeleton, SkeletonStatCard } from "@/components/ui/skeleton";
-import { AnalyticsHeader } from "@/app/admin/analytics-header";
+import { AnalyticsHeader } from "@/app/(app)/admin/analytics-header";
 
 /**
- * Mirrors the geometry of src/app/analytics/page.tsx, card-for-card, so the real
+ * Mirrors the geometry of src/app/(app)/analytics/page.tsx, card-for-card, so the real
  * page lands underneath this without the layout shifting.
  *
  * Rewritten against `StatCard` and the page's own measurement cards rather than

@@ -26,10 +26,10 @@ export function IncomeBandScale({
 
   return (
     <div className="w-full space-y-2.5">
-      {/* 4-Stage Segmented Bar */}
+      {/* 8-Stage Segmented Bar */}
       <div
         aria-label="Income band tiers"
-        className={`grid grid-cols-2 gap-1.5 sm:grid-cols-4 ${
+        className={`grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-8 ${
           compact ? "text-[11px]" : "text-[12px]"
         }`}
         role="group"

@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { cookies } from "next/headers";
 
 import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
@@ -10,6 +11,11 @@ import {
   type PermissionFailureReason,
   type UserProfile,
 } from "./permissions";
+import {
+  VIEW_ONLY_MESSAGE,
+  VIEW_ONLY_REFUSED_COOKIE,
+  VIEW_ONLY_REFUSED_MAX_AGE_SECONDS,
+} from "./view-only";
 
 export type Actor = {
   id: string;
@@ -131,9 +137,62 @@ const touchLastSeen = cache(async (userId: string, lastSeenAt: string | null) =>
   }
 });
 
+/**
+ * The signed-in actor, refused unless they may *perform* `permission`.
+ *
+ * For server actions and mutating API routes. A viewer is refused every write
+ * permission with reason `view_only`, and the response carries the cookie that
+ * opens the view-only notice in their browser (src/lib/auth/view-only.ts).
+ * Pages use `getViewingActor` instead.
+ */
 export async function getCurrentActor(
   permission?: Permission,
   context: ActorContext = {},
+): Promise<ActorResult> {
+  const result = await resolveActor(permission, context, "use");
+  if (!result.ok && result.reason === "view_only") await flagViewOnlyRefusal();
+  return result;
+}
+
+/**
+ * The signed-in actor, refused unless they may *see* what `permission` guards.
+ *
+ * For pages and read-only endpoints. Passes every role holding the permission
+ * and every viewer (`canView`), so leadership reaches every screen an admin
+ * does. Never use it in front of a write: the write's own `getCurrentActor`
+ * check is what refuses a viewer.
+ */
+export async function getViewingActor(
+  permission: Permission,
+  context: ActorContext = {},
+): Promise<ActorResult> {
+  return resolveActor(permission, context, "view");
+}
+
+/**
+ * Sets the short-lived cookie ViewOnlyNotice watches for. Cookies can only be
+ * set from a server action or route handler; called while a Server Component
+ * renders, `set` throws, and the notice is simply not needed there (a page
+ * refusal redirects instead) — so the throw is swallowed on purpose.
+ */
+async function flagViewOnlyRefusal(): Promise<void> {
+  try {
+    (await cookies()).set(VIEW_ONLY_REFUSED_COOKIE, "1", {
+      path: "/",
+      maxAge: VIEW_ONLY_REFUSED_MAX_AGE_SECONDS,
+      sameSite: "lax",
+      // Read by client script, and carries nothing worth stealing.
+      httpOnly: false,
+    });
+  } catch {
+    // Rendering context — see above.
+  }
+}
+
+async function resolveActor(
+  permission: Permission | undefined,
+  context: ActorContext,
+  access: "use" | "view",
 ): Promise<ActorResult> {
   const loaded = await loadAuthenticatedProfile();
 
@@ -151,7 +210,7 @@ export async function getCurrentActor(
 
   const { userId, profile } = loaded;
 
-  const authorization = authorizeUserProfile({ id: userId }, profile, permission);
+  const authorization = authorizeUserProfile({ id: userId }, profile, permission, access);
   if (!authorization.ok) {
     logSecurityEvent("permission.denied", {
       ...context,
@@ -185,5 +244,7 @@ export function actorFailureMessage(reason: ActorFailureReason): string {
       return "Your access profile is not available. Contact an administrator.";
     case "forbidden":
       return "You do not have permission to perform this action.";
+    case "view_only":
+      return VIEW_ONLY_MESSAGE;
   }
 }

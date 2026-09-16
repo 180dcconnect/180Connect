@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, AlertCircle } from "lucide-react";
 
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { Group, Rise } from "@/components/dashboard-stage";
@@ -38,7 +38,7 @@ export default async function IngestionRunDetailPage({
 }: {
   params: PageParams;
 }) {
-  const authorization = await getCurrentActor("platform-settings:manage", {
+  const authorization = await getViewingActor("platform-settings:manage", {
     route: "/admin/import-status",
   });
   if (!authorization.ok) {
@@ -52,9 +52,13 @@ export default async function IngestionRunDetailPage({
   // The run and its raw records together: both are keyed on the route's `id`,
   // so the records read never needed the run to come back first. Only the
   // matched-organisation lookup further down genuinely depends on a result.
+  // Raw records carry the full `raw_payload` JSON per row, so the feed is
+  // capped at the 500 most recent — a large run would otherwise ship megabytes
+  // of JSON in a single server render. The count below says how many are listed.
+  const RAW_RECORD_WINDOW = 500;
   const [
     { data: runData, error: runError },
-    { data: rawRecords, error: rawError },
+    { data: rawRecords, error: rawError, count: rawTotal },
   ] = await Promise.all([
     supabase
       .from("ingestion_runs")
@@ -67,9 +71,11 @@ export default async function IngestionRunDetailPage({
       .from("raw_source_records")
       .select(
         "id, ingestion_run_id, record_source, source_record_id, raw_payload, received_at, processing_status, matched_organisation_id, checksum, ingestion_attempt, source_country, source_registry_name, excluded_fields, rule_version_applied",
+        { count: "exact" },
       )
       .eq("ingestion_run_id", id)
-      .order("received_at", { ascending: false }),
+      .order("received_at", { ascending: false })
+      .limit(RAW_RECORD_WINDOW),
   ]);
 
   if (runError) {
@@ -98,26 +104,35 @@ export default async function IngestionRunDetailPage({
   const orgMap = new Map<string, OrganisationPreview>();
 
   if (matchedOrgIds.length > 0) {
-    const { data: orgData } = await supabase
-      .from("organisations")
-      .select("id, legal_name, organisation_type, sector, city, country_code, outreach_status, website, owner_id")
-      .in("id", matchedOrgIds);
+    // Chunked: a single `.in()` with thousands of ids risks URL/statement
+    // limits, and the window above already bounds this to a few hundred.
+    const ORG_LOOKUP_CHUNK = 200;
+    for (let start = 0; start < matchedOrgIds.length; start += ORG_LOOKUP_CHUNK) {
+      const { data: orgData, error: orgError } = await supabase
+        .from("organisations")
+        .select("id, legal_name, organisation_type, sector, city, country_code, outreach_status, website, owner_id")
+        .in("id", matchedOrgIds.slice(start, start + ORG_LOOKUP_CHUNK));
+      if (orgError) {
+        await reportError(orgError, { operation: "admin.import_status.get_matched_orgs", runId: id });
+        break;
+      }
 
-    const orgRows = (orgData ?? []) as OrganisationRow[];
-    for (const org of orgRows) {
-      orgMap.set(org.id, {
-        id: org.id,
-        legalName: org.legal_name,
-        organisationType: org.organisation_type,
-        sector: org.sector,
-        city: org.city,
-        countryCode: org.country_code,
-        outreachStatus: org.outreach_status,
-        website: org.website,
-        ownerId: org.owner_id,
-        ownerName: null,
-        ownerEmail: null,
-      });
+      const orgRows = (orgData ?? []) as OrganisationRow[];
+      for (const org of orgRows) {
+        orgMap.set(org.id, {
+          id: org.id,
+          legalName: org.legal_name,
+          organisationType: org.organisation_type,
+          sector: org.sector,
+          city: org.city,
+          countryCode: org.country_code,
+          outreachStatus: org.outreach_status,
+          website: org.website,
+          ownerId: org.owner_id,
+          ownerName: null,
+          ownerEmail: null,
+        });
+      }
     }
   }
 
@@ -146,7 +161,7 @@ export default async function IngestionRunDetailPage({
               <h1 className="text-3xl font-bold font-body text-foreground">
                 {formatSource(runRow.api_source)} Import
               </h1>
-              <StatusBadge status={runRow.job_status} />
+              <StatusBadge status={runView.status} />
             </div>
             <span className="font-mono text-xs text-foreground/45">
               Run #{runRow.id.slice(0, 8)}
@@ -232,6 +247,9 @@ export default async function IngestionRunDetailPage({
                       ? "organisation"
                       : "organisations"}{" "}
                   listed
+                  {typeof rawTotal === "number" && rawTotal > recordViews.length
+                    ? ` of ${rawTotal.toLocaleString()} — showing the ${RAW_RECORD_WINDOW} most recent`
+                    : ""}
                 </p>
               </Rise>
 

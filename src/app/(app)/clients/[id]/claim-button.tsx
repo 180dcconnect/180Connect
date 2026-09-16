@@ -6,8 +6,8 @@ import { OriginButton } from "@/components/ui/origin-button";
 
 /**
  * F162 — claims an unowned client for the signed-in CAM/admin. Used on both the
- * profile page (src/app/clients/[id]/page.tsx) and the client list
- * (src/app/clients/page.tsx), which is why it takes a `compact` variant rather than
+ * profile page (src/app/(app)/clients/[id]/page.tsx) and the client list
+ * (src/app/(app)/clients/page.tsx), which is why it takes a `compact` variant rather than
  * being two separate components.
  *
  * On a 409 the server is reporting AC2's conflict case — someone else claimed this

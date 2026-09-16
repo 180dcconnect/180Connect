@@ -5,6 +5,7 @@ import { OriginButton } from "@/components/ui/origin-button";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
 import { reportError } from "@/lib/error-logging";
+import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 
 export type DataQualityEventRow = {
   id: string;
@@ -80,10 +81,12 @@ export function ReviewPanel({
   initialEvents,
   initialFlags,
   initialUnmatchedReplies,
+  canReview = true,
 }: {
   initialEvents: DataQualityEventRow[];
   initialFlags: StatusFlagRow[];
   initialUnmatchedReplies: UnmatchedReplyRow[];
+  canReview?: boolean;
 }) {
   const [events, setEvents] = useState(initialEvents);
   const [flags, setFlags] = useState(initialFlags);
@@ -132,6 +135,9 @@ export function ReviewPanel({
 
   return (
     <div className="mt-8 space-y-10">
+      {!canReview && (
+        <p className="text-sm leading-relaxed text-foreground/55">{VIEW_ONLY_CONTROL_NOTE}</p>
+      )}
       <div className="min-h-6">
         {status && <InlineAlert tone={status.tone} message={status.text} />}
       </div>
@@ -189,28 +195,32 @@ export function ReviewPanel({
                 <p className="mt-1 text-xs text-foreground/50">
                   Detected {new Date(flag.detected_at).toLocaleString("en-GB")}
                 </p>
-                <label className="mt-3 block text-sm font-bold" htmlFor={`flag-note-${flag.id}`}>
-                  Note (optional)
-                </label>
-                <textarea
-                  className="mt-1 w-full rounded-lg border border-black/15 bg-white px-3 py-2"
-                  disabled={busy}
-                  id={`flag-note-${flag.id}`}
-                  onChange={(event) =>
-                    setNotes((current) => ({ ...current, [flag.id]: event.target.value }))
-                  }
-                  rows={2}
-                  value={notes[flag.id] ?? ""}
-                />
-                <OriginButton
-                  className="mt-3"
-                  disabled={busy}
-                  size="sm"
-                  onClick={() => decide("status_flag", flag.id, "Acknowledged.")}
-                  type="button"
-                >
-                  Acknowledge
-                </OriginButton>
+                {canReview && (
+                  <>
+                    <label className="mt-3 block text-sm font-bold" htmlFor={`flag-note-${flag.id}`}>
+                      Note (optional)
+                    </label>
+                    <textarea
+                      className="mt-1 w-full rounded-lg border border-black/15 bg-white px-3 py-2"
+                      disabled={busy}
+                      id={`flag-note-${flag.id}`}
+                      onChange={(event) =>
+                        setNotes((current) => ({ ...current, [flag.id]: event.target.value }))
+                      }
+                      rows={2}
+                      value={notes[flag.id] ?? ""}
+                    />
+                    <OriginButton
+                      className="mt-3"
+                      disabled={busy}
+                      size="sm"
+                      onClick={() => decide("status_flag", flag.id, "Acknowledged.")}
+                      type="button"
+                    >
+                      Acknowledge
+                    </OriginButton>
+                  </>
+                )}
               </li>
             ))}
           </ul>
@@ -237,28 +247,32 @@ export function ReviewPanel({
                 <p className="mt-1 text-xs text-foreground/50">
                   {new Date(event.created_at).toLocaleString("en-GB")}
                 </p>
-                <label className="mt-3 block text-sm font-bold" htmlFor={`event-note-${event.id}`}>
-                  Note (optional)
-                </label>
-                <textarea
-                  className="mt-1 w-full rounded-lg border border-black/15 bg-white px-3 py-2"
-                  disabled={busy}
-                  id={`event-note-${event.id}`}
-                  onChange={(eventChange) =>
-                    setNotes((current) => ({ ...current, [event.id]: eventChange.target.value }))
-                  }
-                  rows={2}
-                  value={notes[event.id] ?? ""}
-                />
-                <OriginButton
-                  className="mt-3"
-                  disabled={busy}
-                  size="sm"
-                  onClick={() => decide("data_quality_event", event.id, "Marked reviewed.")}
-                  type="button"
-                >
-                  Mark reviewed
-                </OriginButton>
+                {canReview && (
+                  <>
+                    <label className="mt-3 block text-sm font-bold" htmlFor={`event-note-${event.id}`}>
+                      Note (optional)
+                    </label>
+                    <textarea
+                      className="mt-1 w-full rounded-lg border border-black/15 bg-white px-3 py-2"
+                      disabled={busy}
+                      id={`event-note-${event.id}`}
+                      onChange={(eventChange) =>
+                        setNotes((current) => ({ ...current, [event.id]: eventChange.target.value }))
+                      }
+                      rows={2}
+                      value={notes[event.id] ?? ""}
+                    />
+                    <OriginButton
+                      className="mt-3"
+                      disabled={busy}
+                      size="sm"
+                      onClick={() => decide("data_quality_event", event.id, "Marked reviewed.")}
+                      type="button"
+                    >
+                      Mark reviewed
+                    </OriginButton>
+                  </>
+                )}
               </li>
             ))}
           </ul>

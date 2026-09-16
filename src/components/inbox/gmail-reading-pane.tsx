@@ -1,5 +1,6 @@
 "use client";
 
+import { isViewOnly } from "@/lib/auth/permissions";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
@@ -43,7 +44,7 @@ import { ThreadOwnershipBanner } from "./thread-ownership-banner";
 import type { AppRole } from "@/lib/auth/permissions";
 import type { PendingSendRequest } from "./gmail-compose-modal";
 import { emailHtmlToPlainText, isRichEmailHtml, sanitizeEmailHtml } from "@/lib/outreach/email-html";
-import { StatusSelect } from "@/app/clients/[id]/status-select";
+import { StatusSelect } from "@/app/(app)/clients/[id]/status-select";
 import { formatOutreachStatus } from "@/lib/organisation-format";
 
 export type GmailReadingPaneProps = {
@@ -276,6 +277,7 @@ function SingleMessageCard({
   onReply,
   onSuppressClient,
   forceExpanded = false,
+  isViewer = false,
 }: {
   message: InboxEmailMessage;
   isLatest?: boolean;
@@ -287,6 +289,7 @@ function SingleMessageCard({
   /** Printing expands every message: a collapsed card would print its
       100-character snippet instead of the email body. */
   forceExpanded?: boolean;
+  isViewer?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(isCollapsedByDefault);
   const [showDetails, setShowDetails] = useState(false);
@@ -460,14 +463,16 @@ function SingleMessageCard({
               month: "short",
             })}
           </span>
-          <button
-            type="button"
-            title="Reply to this message"
-            onClick={() => onReply(message)}
-            className="flex h-7 w-7 items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper hover:text-ink print:hidden"
-          >
-            <Reply className="h-3.5 w-3.5" />
-          </button>
+          {!isViewer && (
+            <button
+              type="button"
+              title="Reply to this message"
+              onClick={() => onReply(message)}
+              className="flex h-7 w-7 items-center justify-center rounded-inset text-faint transition-colors hover:bg-paper hover:text-ink print:hidden"
+            >
+              <Reply className="h-3.5 w-3.5" />
+            </button>
+          )}
           <div className="relative print:hidden" ref={menuRef}>
             <button
               type="button"
@@ -483,17 +488,19 @@ function SingleMessageCard({
             </button>
             {menuOpen && (
               <div className="absolute top-full right-0 z-20 mt-1 w-56 rounded-inset border border-rule bg-white py-1 shadow-[0_18px_40px_-18px_rgba(15,23,42,0.4)]">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onReply(message);
-                  }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] font-medium text-ink transition-colors hover:bg-paper"
-                >
-                  <Reply className="h-3.5 w-3.5 text-faint" />
-                  Reply
-                </button>
+                {!isViewer && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onReply(message);
+                    }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] font-medium text-ink transition-colors hover:bg-paper"
+                  >
+                    <Reply className="h-3.5 w-3.5 text-faint" />
+                    Reply
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={downloadMessage}
@@ -510,18 +517,22 @@ function SingleMessageCard({
                   <Copy className="h-3.5 w-3.5 text-faint" />
                   Copy message text
                 </button>
-                <div className="my-1 border-t border-rule-soft" />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onSuppressClient();
-                  }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] font-medium text-stop transition-colors hover:bg-stop-wash disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Ban className="h-3.5 w-3.5" />
-                  Suppress client
-                </button>
+                {!isViewer && (
+                  <>
+                    <div className="my-1 border-t border-rule-soft" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onSuppressClient();
+                      }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] font-medium text-stop transition-colors hover:bg-stop-wash disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Ban className="h-3.5 w-3.5" />
+                      Suppress client
+                    </button>
+                  </>
+                )}
                 {menuFeedback && (
                   <p className="px-3 py-1.5 text-[12px] font-medium text-dim" role="status">
                     {menuFeedback}
@@ -591,6 +602,7 @@ export function GmailReadingPane({
   viewerRole = null,
   onOwnershipChanged,
 }: GmailReadingPaneProps) {
+  const isViewer = viewerRole !== null && viewerRole !== undefined && isViewOnly(viewerRole);
   // Unowned threads keep the reply composer's claim-first dialog; only a client
   // someone else owns swaps Reply for the banner.
   const ownedByOther =
@@ -760,7 +772,8 @@ export function GmailReadingPane({
       someone else's client bypasses the banner the same way Reply anyway
       does — their send is allowed server-side. */
   function handleMessageReply(msg: InboxEmailMessage) {
-    if (ownedByOther && viewerRole === "admin") setReplyAnyway(true);
+    if (isViewer) return;
+    if (ownedByOther && (viewerRole !== null && viewerRole === "admin")) setReplyAnyway(true);
     setReplyToMessageId(msg.isFromClient ? msg.id : null);
     setReplyOpen(true);
   }
@@ -810,34 +823,38 @@ export function GmailReadingPane({
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            onClick={() => onDelete(thread.id)}
-            title="Delete"
-            className={`${HEADER_BTN} hover:text-stop`}
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => onMarkUnread(thread.id)}
-            title="Mark as unread"
-            className={HEADER_BTN}
-          >
-            <Mail className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => onToggleStar(thread.id)}
-            title={thread.isStarred ? "Starred" : "Star"}
-            className={HEADER_BTN}
-          >
-            <Star
-              className={`h-4 w-4 ${
-                thread.isStarred ? "fill-amber-400 text-amber-500" : ""
-              }`}
-            />
-          </button>
+          {!isViewer && (
+            <>
+              <button
+                type="button"
+                onClick={() => onDelete(thread.id)}
+                title="Delete"
+                className={`${HEADER_BTN} hover:text-stop`}
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onMarkUnread(thread.id)}
+                title="Mark as unread"
+                className={HEADER_BTN}
+              >
+                <Mail className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleStar(thread.id)}
+                title={thread.isStarred ? "Starred" : "Star"}
+                className={HEADER_BTN}
+              >
+                <Star
+                  className={`h-4 w-4 ${
+                    thread.isStarred ? "fill-amber-400 text-amber-500" : ""
+                  }`}
+                />
+              </button>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-1">
@@ -929,7 +946,7 @@ export function GmailReadingPane({
               <span className="font-body text-[12px] uppercase font-bold tracking-[-0.01em] text-ink">
                 Stage
               </span>
-              {canSetStatus ? (
+              {canSetStatus && !isViewer ? (
                 <StatusSelect
                   organisationId={thread.id}
                   currentStatus={thread.outreachStatus ?? "not_contacted"}
@@ -937,11 +954,9 @@ export function GmailReadingPane({
                   showNudge={false}
                 />
               ) : (
-                thread.outreachStatus && (
-                  <span className="inline-flex items-center rounded-full border border-rule bg-white px-3 py-1 text-[13.5px] font-medium text-ink">
-                    {formatOutreachStatus(thread.outreachStatus)}
-                  </span>
-                )
+                <span className="inline-flex items-center rounded-full border border-rule bg-white px-3 py-1 text-[13.5px] font-medium text-ink">
+                  {formatOutreachStatus(thread.outreachStatus ?? "not_contacted")}
+                </span>
               )}
             </div>
           </div>
@@ -957,10 +972,10 @@ export function GmailReadingPane({
             <div className="min-w-0 flex-1 text-[13px] leading-snug">
               <p className="font-semibold text-hold">Scheduled to be sent</p>
               <p className="text-dim" suppressHydrationWarning>
-                Goes out {formatScheduledFor(thread.scheduledFor)}. You can still
-                edit it, change the time or cancel it until then.
+                Goes out {formatScheduledFor(thread.scheduledFor)}.
+                {!isViewer && " You can still edit it, change the time or cancel it until then."}
               </p>
-              {scheduledMessage && (onCancelScheduled || onRescheduleScheduled || onScheduledEdited) && (
+              {!isViewer && scheduledMessage && (onCancelScheduled || onRescheduleScheduled || onScheduledEdited) && (
                 <div className="mt-2.5 flex flex-wrap items-center gap-2">
                   {onScheduledEdited && !editingScheduled && (
                     <button
@@ -1109,6 +1124,7 @@ export function GmailReadingPane({
                   forceExpanded={printing}
                   onReply={handleMessageReply}
                   onSuppressClient={() => setSuppressOpen(true)}
+                  isViewer={isViewer}
                 />
               );
             })}
@@ -1122,26 +1138,27 @@ export function GmailReadingPane({
             gate entirely. ReplyComposer generates a Stage 2 draft and hands it
             to EmailReviewPanel, which is the one component allowed to render
             the approval control (see lib/outreach/human-send-control.test.ts). */}
-        <div className="pt-4 print:hidden" ref={replyBoxRef}>
-          {ownedByOther && viewerRole && thread.ownerId && !replyAnyway ? (
-            <ThreadOwnershipBanner
-              organisationId={thread.id}
-              ownerId={thread.ownerId}
-              ownerName={thread.camOwner.name}
-              viewerRole={viewerRole}
-              onOwnershipChanged={() => onOwnershipChanged?.()}
-              onReplyAnyway={
-                viewerRole === "admin" ? () => setReplyAnyway(true) : undefined
-              }
-            />
-          ) : (
-          <>
-            {ownedByOther && replyAnyway && viewerRole === "admin" && (
-              <p className="mb-3 text-[12px] leading-[1.6] text-dim">
-                Replying without taking ownership — {thread.camOwner.name} stays
-                the owner.
-              </p>
-            )}
+        {!isViewer && (
+          <div className="pt-4 print:hidden" ref={replyBoxRef}>
+            {ownedByOther && viewerRole && thread.ownerId && !replyAnyway ? (
+              <ThreadOwnershipBanner
+                organisationId={thread.id}
+                ownerId={thread.ownerId}
+                ownerName={thread.camOwner.name}
+                viewerRole={viewerRole}
+                onOwnershipChanged={() => onOwnershipChanged?.()}
+                onReplyAnyway={
+                  viewerRole === "admin" ? () => setReplyAnyway(true) : undefined
+                }
+              />
+            ) : (
+            <>
+              {ownedByOther && replyAnyway && viewerRole === "admin" && (
+                <p className="mb-3 text-[12px] leading-[1.6] text-dim">
+                  Replying without taking ownership — {thread.camOwner.name} stays
+                  the owner.
+                </p>
+              )}
           <AnimatePresence initial={false} mode="wait">
             {!replyOpen ? (
               <motion.button
@@ -1231,6 +1248,7 @@ export function GmailReadingPane({
           </>
           )}
         </div>
+        )}
       </div>
 
       {/* Change time — the same picker scheduling uses, so moving a send asks
@@ -1256,6 +1274,7 @@ export function GmailReadingPane({
             isOpen={notesOpen}
             onClose={() => setNotesOpen(false)}
             thread={thread}
+            viewerRole={viewerRole}
             onNotesCountChange={setNotesCount}
           />
         )}

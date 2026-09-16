@@ -1,6 +1,6 @@
 "use client";
 
-import { MIN_SAMPLE_EMAILS, type Leaderboard } from "@/lib/dashboard/cam-leaderboard";
+import { MIN_SAMPLE_CONTACTS, type Leaderboard } from "@/lib/dashboard/cam-leaderboard";
 
 /**
  * F212 (#207) — the whole team's CAMs in one table, with the rows that look
@@ -22,7 +22,13 @@ function pct(value: number | null): string {
   return `${Math.round(value * 100)}%`;
 }
 
-export function CamLeaderboardTable({ board }: { board: Leaderboard }) {
+export function CamLeaderboardTable({
+  board,
+  className = "",
+}: {
+  board: Leaderboard;
+  className?: string;
+}) {
   if (board.rows.length === 0) return null;
 
   const caption = [
@@ -36,7 +42,7 @@ export function CamLeaderboardTable({ board }: { board: Leaderboard }) {
     .join(" · ");
 
   return (
-    <div className="mt-4 rounded-[28px] border border-border bg-card p-6 shadow-[0_2px_10px_rgba(0,0,0,0.04)]">
+    <div className={`rounded-[28px] border border-border bg-card p-6 shadow-[0_2px_10px_rgba(0,0,0,0.04)] ${className || "mt-4"}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h3 className="text-[16px] font-semibold tracking-tight text-foreground">
           CAM comparison
@@ -45,6 +51,11 @@ export function CamLeaderboardTable({ board }: { board: Leaderboard }) {
           {caption || "Whole team"}
         </span>
       </div>
+
+      <p className="mt-1 text-[11px] text-foreground/45">
+        Sent is emails; every other column counts clients. Reply&nbsp;% is the share
+        of contacted clients who replied, Win&nbsp;% the share of those who converted.
+      </p>
 
       <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[540px] border-collapse text-[13px] tabular-nums table-fixed">
@@ -62,8 +73,8 @@ export function CamLeaderboardTable({ board }: { board: Leaderboard }) {
               <th scope="col" className="pb-2 text-right font-bold">Sent</th>
               <th scope="col" className="pb-2 text-right font-bold">Replies</th>
               <th scope="col" className="pb-2 text-right font-bold">Reply&nbsp;%</th>
-              <th scope="col" className="pb-2 text-right font-bold">Conv.</th>
-              <th scope="col" className="pb-2 text-right font-bold">Conv.&nbsp;%</th>
+              <th scope="col" className="pb-2 text-right font-bold">Won</th>
+              <th scope="col" className="pb-2 text-right font-bold">Win&nbsp;%</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-black/[0.04]">
@@ -86,7 +97,7 @@ export function CamLeaderboardTable({ board }: { board: Leaderboard }) {
                       )}
                       {row.lowConfidence && (
                         <span
-                          title={`Under ${MIN_SAMPLE_EMAILS} emails sent — the rates are indicative only.`}
+                          title={`Under ${MIN_SAMPLE_CONTACTS} clients contacted — the rates are indicative only.`}
                           className="shrink-0 rounded-full bg-black/[0.05] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-foreground/50"
                         >
                           Low sample
@@ -98,7 +109,7 @@ export function CamLeaderboardTable({ board }: { board: Leaderboard }) {
                     {row.emailsSent.toLocaleString()}
                   </td>
                   <td className="py-2.5 text-right text-foreground/70">
-                    {row.replies.toLocaleString()}
+                    {row.repliedClients.toLocaleString()}
                   </td>
                   <td
                     className={`py-2.5 text-right ${
@@ -112,14 +123,14 @@ export function CamLeaderboardTable({ board }: { board: Leaderboard }) {
                     {pct(row.replyRate)}
                   </td>
                   <td className="py-2.5 text-right text-foreground/70">
-                    {row.conversions.toLocaleString()}
+                    {row.convertedClients.toLocaleString()}
                   </td>
                   <td
                     className={`py-2.5 text-right font-semibold ${
                       muted ? "text-foreground/35" : "text-foreground"
                     }`}
                   >
-                    {pct(row.conversionRate)}
+                    {pct(row.winRate)}
                   </td>
                 </tr>
               );
@@ -133,7 +144,7 @@ export function CamLeaderboardTable({ board }: { board: Leaderboard }) {
                 <td className="pt-2.5 text-right" />
                 <td className="pt-2.5 text-right font-bold">{pct(board.teamReplyRate)}</td>
                 <td className="pt-2.5 text-right" />
-                <td className="pt-2.5 text-right" />
+                <td className="pt-2.5 text-right font-bold">{pct(board.teamWinRate)}</td>
               </tr>
             </tfoot>
           )}
@@ -143,7 +154,7 @@ export function CamLeaderboardTable({ board }: { board: Leaderboard }) {
 
       <p className="mt-3 text-[11px] leading-[1.6] text-foreground/35">
         &ldquo;Needs support&rdquo; means a reply rate under 60% of the team median, on at
-        least {MIN_SAMPLE_EMAILS} sent emails — a coaching signal, not a verdict.
+        least {MIN_SAMPLE_CONTACTS} contacted clients — a coaching signal, not a verdict.
       </p>
     </div>
   );

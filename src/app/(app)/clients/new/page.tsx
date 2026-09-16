@@ -1,7 +1,8 @@
+import { seesAdminView } from "@/lib/auth/permissions";
 import { redirect } from "next/navigation";
 
 import { adminRouteDestination } from "@/lib/auth/admin-route";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { reportError } from "@/lib/error-logging";
 import { manualDraftLoadErrorMessage } from "@/lib/manual-entry";
 import { createClient } from "@/lib/supabase/server";
@@ -37,10 +38,11 @@ export default async function NewManualClientPage({
     added?: string | string[];
   }>;
 }) {
-  const authorization = await getCurrentActor("client:edit", { route: "/clients/new" });
+  const authorization = await getViewingActor("client:edit", { route: "/clients/new" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
-  const isAdmin = authorization.actor.role === "admin";
+  // Viewers see the admin version of the form; submitting is refused.
+  const isAdmin = seesAdminView(authorization.actor.role);
   const params = await searchParams;
   const selectedValue = params.draft;
   const selectedId =

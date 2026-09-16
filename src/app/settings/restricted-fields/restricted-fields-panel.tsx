@@ -1,7 +1,8 @@
 "use client";
 
 import { useId, useState } from "react";
-import { Check, Loader2, Lock } from "lucide-react";
+import { Check, Loader2, Lock, Unlock } from "lucide-react";
+import { Switch } from "@/components/ui/material-design-3-switch";
 import { Rise } from "@/components/dashboard-stage";
 import {
   Select,
@@ -49,10 +50,12 @@ const NETWORK_ERROR = "Could not reach the server. Check your connection and try
 export function RestrictedFieldsPanel({
   initialFields,
   lockableFields,
+  readOnly = false,
 }: {
   initialFields: RestrictedFieldRow[];
   /** Every field the database will let an admin lock, locked or not. */
   lockableFields: string[];
+  readOnly?: boolean;
 }) {
   const [rows, setRows] = useState(initialFields);
   const [fieldName, setFieldName] = useState("");
@@ -199,18 +202,22 @@ export function RestrictedFieldsPanel({
                     {row.reason}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => unlock(row.field_name)}
-                  disabled={working === row.field_name}
-                  aria-busy={working === row.field_name || undefined}
-                  className={`${ROW_ACTION} inline-flex items-center gap-1.5 disabled:pointer-events-none disabled:opacity-50`}
-                >
-                  {working === row.field_name && (
-                    <Loader2 aria-hidden="true" className="size-3 animate-spin" strokeWidth={2.2} />
-                  )}
-                  Unlock<span className="sr-only"> {restrictedFieldLabel(row.field_name)}</span>
-                </button>
+                {!readOnly && (
+                  <Switch
+                    role="switch"
+                    aria-label={`Lock on ${restrictedFieldLabel(row.field_name)}`}
+                    checked={row.active}
+                    aria-busy={working === row.field_name || undefined}
+                    onCheckedChange={(checked) => {
+                      if (!checked) void unlock(row.field_name);
+                    }}
+                    disabled={working === row.field_name}
+                    variant="destructive"
+                    showIcons
+                    checkedIcon={<Lock aria-hidden="true" className="size-3" />}
+                    uncheckedIcon={<Unlock aria-hidden="true" className="size-3" />}
+                  />
+                )}
               </li>
             ))}
             {active.length === 0 && (
@@ -222,8 +229,9 @@ export function RestrictedFieldsPanel({
         </section>
       </Rise>
 
-      <Rise>
-        <section aria-labelledby="lock-heading" className={CARD}>
+      {!readOnly && (
+        <Rise>
+          <section aria-labelledby="lock-heading" className={CARD}>
           <h2 id="lock-heading" className={CARD_TITLE}>
             Lock another field
           </h2>
@@ -322,6 +330,7 @@ export function RestrictedFieldsPanel({
           )}
         </section>
       </Rise>
+      )}
     </>
   );
 }

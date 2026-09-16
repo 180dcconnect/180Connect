@@ -2,8 +2,8 @@ import Link from "next/link";
 
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
-import { hasPermission } from "@/lib/auth/permissions";
-import { formatCityWithRegion, formatOrganisationType } from "@/lib/organisation-format";
+import { hasPermission, isViewOnly } from "@/lib/auth/permissions";
+import { formatCityWithRegion, formatOrganisationType, formatOutreachStatus } from "@/lib/organisation-format";
 import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import type { OwnershipRequestStatus } from "@/lib/ownership-requests";
 import { buildCompleteness } from "@/lib/client-completeness";
@@ -217,30 +217,40 @@ function getOperationalInsights(
   return null;
 }
 
+/**
+ * One registration number, with the registry that issued it and — the part that
+ * was missing — whether anyone has confirmed it.
+ *
+ * The green tick used to be drawn on every chip unconditionally, and it claims
+ * "Verified against the register". Nothing writes `verified = true` today: the
+ * pipeline files its numbers as "await human verification" (see
+ * write-organisations.ts) and no screen offers the confirmation, so the tick
+ * was a claim no row supported — the exact opposite of what the docket exists
+ * for. It now appears only when `verified_at` says a check happened, and a
+ * number nobody has checked says so in words rather than staying silent, because
+ * "no mark" reads as "fine".
+ */
 function DocketChip({ row }: { row: IdentifierRow }) {
   const label = IDENTIFIER_LABELS[row.identifier_type] ?? row.identifier_type;
-  const checked = row.verified_at
-    ? new Date(row.verified_at).toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      })
-    : null;
+  const checked = row.verified_at ? formatShortDate(row.verified_at) : null;
+  const title = [row.registry_name, checked ? `checked ${checked}` : "not checked against the register yet"]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <span
       className="inline-flex items-center gap-2 rounded-inset border border-rule bg-white py-1 pr-2.5 pl-1.5 text-[12.5px] text-ink"
-      title={
-        row.registry_name
-          ? `${row.registry_name}${checked ? ` · checked ${checked}` : ""}`
-          : undefined
-      }
+      title={title}
     >
       <span className="rounded-[3px] bg-lead-wash px-1.5 py-0.5 font-mono text-[10px] tracking-[0.07em] text-lead uppercase">
         {label}
       </span>
       <span className="font-mono tabular-nums">{row.identifier_value}</span>
-      <VerifiedCheck />
+      {checked ? (
+        <VerifiedCheck />
+      ) : (
+        <span className="text-[11px] text-faint">not checked</span>
+      )}
     </span>
   );
 }
@@ -259,9 +269,10 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
       loadLatestFinancial(organisationId),
     ]);
 
-  const canEdit = hasPermission(actor.role, "client:edit");
+  const isViewer = isViewOnly(actor.role);
   const isAdmin = actor.role === "admin";
-  const isSelf = owner.ownerId === actor.id;
+  const canEdit = hasPermission(actor.role, "client:edit");
+  const isSelf = owner.ownerId === actor.id && !isViewer;
   const canSetStatus = isAdmin || isSelf;
 
   // F165 — a CAM looking at someone else's client. The escalation off this is
@@ -357,7 +368,7 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
       <div className="flex items-center justify-between gap-3 border-b border-rule-soft px-5 py-2.5">
         <BackButton href="/clients" />
         <RecordMenu
-          canRequestOwnership={ownershipConflict.hasConflict}
+          canRequestOwnership={!isViewer && ownershipConflict.hasConflict}
           canSuppress={canEdit}
           isAdmin={isAdmin}
           organisationId={organisationId}
@@ -526,15 +537,20 @@ export async function RecordHeader({ organisationId }: { organisationId: string 
           ownerName={owner.ownerName}
           team={team}
         />
-        {canSetStatus && (
-          <div className="flex min-w-0 items-center gap-2.5">
-            <span className="font-body text-[12px] uppercase font-bold tracking-[-0.01em] text-ink">Stage</span>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="font-body text-[12px] uppercase font-bold tracking-[-0.01em] text-ink">Stage</span>
+          {canSetStatus && (
             <StatusSelect
               currentStatus={client.outreach_status}
               organisationId={organisationId}
             />
-          </div>
-        )}
+          )}
+          {!canSetStatus && (
+            <span className="inline-flex h-8 items-center rounded-full border border-rule bg-white px-3 text-[13.5px] font-medium text-ink">
+              {formatOutreachStatus(client.outreach_status)}
+            </span>
+          )}
+        </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-2 text-[12px]">
           <span

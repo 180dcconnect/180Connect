@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
+import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import { OWNERSHIP_REQUEST_SELECT, type OwnershipRequestRow } from "@/lib/ownership-requests";
 import { OwnershipRequestsPanel } from "./ownership-requests-panel";
@@ -13,10 +14,14 @@ import { OwnershipRequestsPanel } from "./ownership-requests-panel";
  * same way F163's assign form is.
  */
 export default async function OwnershipRequestsPage() {
-  const authorization = await getCurrentActor("approval:manage", {
+  const authorization = await getViewingActor("approval:manage", {
     route: "/admin/ownership-requests",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
+
+  // Leadership sees who asked for which client and decides none of it; the
+  // PATCH route behind the two buttons asks the same question.
+  const canDecide = hasPermission(authorization.actor.role, "approval:manage");
 
   const supabase = await createClient();
 
@@ -35,9 +40,10 @@ export default async function OwnershipRequestsPage() {
       <section className="mx-auto w-full max-w-4xl rounded-2xl bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold">Ownership requests</h1>
         <p className="mt-3 text-sm text-foreground/65">
-          A CAM cannot take a client another CAM owns — they ask here instead. Approving
-          moves the client to them, along with their open actions, and records the
-          handover in the audit log. Rejecting leaves ownership exactly as it is.
+          A CAM cannot take a client another CAM owns — they ask here instead.{" "}
+          {canDecide
+            ? "Approving moves the client to them, along with their open actions, and records the handover in the audit log. Rejecting leaves ownership exactly as it is."
+            : "Each request shows who decided it and what happened to the client."}
         </p>
 
         {error && (
@@ -46,7 +52,7 @@ export default async function OwnershipRequestsPage() {
           </p>
         )}
 
-        <OwnershipRequestsPanel initialRequests={data ?? []} />
+        <OwnershipRequestsPanel initialRequests={data ?? []} canDecide={canDecide} />
       </section>
     </main>
   );

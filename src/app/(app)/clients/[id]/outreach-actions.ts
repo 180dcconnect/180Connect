@@ -39,6 +39,7 @@ import {
   createDefaultScrapeDependencies,
   fetchWebsiteContext,
 } from "@/lib/booklet/scrape-website";
+import { lookupLiveNewsHook, resolveNewsProvider } from "@/lib/outreach/news-hook";
 import { z } from "zod";
 
 export type ReviewedSendResult =
@@ -1368,4 +1369,59 @@ export async function detachDraftFile(input: unknown): Promise<DraftAttachmentRe
 
   revalidatePath(`/clients/${organisationId}`);
   return { ok: true };
+}
+
+export type ClientNewsCandidateResult =
+  | { ok: true; hook: { text: string; url: string | null } | null }
+  | { ok: false; error: string };
+
+/**
+ * Looks up one recent news item for the client on demand (for pre-generation preview).
+ * Returns null hook when lookups are disabled or nothing relevant was found.
+ */
+export async function lookupClientNewsCandidate(
+  organisationId: unknown,
+): Promise<ClientNewsCandidateResult> {
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) return { ok: false, error: actorFailureMessage(authorization.reason) };
+
+  const parsed = safeValidate(z.uuid(), organisationId);
+  if (!parsed.success) return { ok: false, error: "That client could not be found." };
+
+  if (resolveNewsProvider() === "none") {
+    return { ok: true, hook: null };
+  }
+
+  const supabase = await createClient();
+  const { data: organisation, error } = await supabase
+    .from("organisations")
+    .select("legal_name, trading_name, website, city, country_code, geographic_reach, sector")
+    .eq("id", parsed.data)
+    .maybeSingle<{
+      legal_name: string;
+      trading_name: string | null;
+      website: string | null;
+      city: string | null;
+      country_code: string | null;
+      geographic_reach: string | null;
+      sector: string | null;
+    }>();
+
+  if (error || !organisation) {
+    if (error) await reportError(error, { operation: "outreach.news_candidate_lookup", organisationId: parsed.data });
+    return { ok: false, error: "That client could not be loaded." };
+  }
+
+  const hook = await lookupLiveNewsHook({
+    organisationId: parsed.data,
+    organisationName: organisation.legal_name,
+    tradingName: organisation.trading_name,
+    website: organisation.website,
+    city: organisation.city,
+    countryCode: organisation.country_code,
+    geographicReach: organisation.geographic_reach,
+    sector: organisation.sector,
+  });
+
+  return { ok: true, hook };
 }

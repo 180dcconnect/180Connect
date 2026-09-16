@@ -227,6 +227,11 @@ const FIELDS: {
     })),
   },
   {
+    label: "Sector",
+    read: (state) => state.organisation.sector ?? null,
+    column: "sector",
+  },
+  {
     label: "Pipeline stage",
     read: (_state, info) => info.status,
     column: null,
@@ -326,6 +331,7 @@ export function BasicInfoPanel({
   action?: ReactNode;
 }) {
   const editable = new Set(editableFields ?? []);
+  const isViewer = actorRole === "viewer";
   const isAdmin = actorRole === "admin";
   const isCam = actorRole === "cam";
   const [state, setState] = useState<BasicInfoState>({
@@ -445,9 +451,9 @@ export function BasicInfoPanel({
   );
   const fieldErrors = fieldErrorsFrom(result);
 
-  /** Columns this viewer may write, in row order. */
+  /** Columns this viewer may write, in row order. Empty for viewers. */
   const writableColumns = FIELDS.flatMap(({ column, options }) => {
-    if (!column) return [];
+    if (!column || isViewer) return [];
     // Mission is not a column on organisations — it is the newest enrichment
     // row — so it can never be a suggestion. An admin writes it directly; a CAM
     // has nowhere to send it.
@@ -818,13 +824,21 @@ export function BasicInfoPanel({
 
       <AnimatePresence initial={false}>
         {changes.length > 0 && (
+          // Floating save bar, not an end-of-card footer. The card holds a
+          // dozen rows, so a bar in normal flow sits below the fold while the
+          // row being edited is on screen — readers never find it. `sticky`
+          // keeps it pinned to the viewport bottom while the card is in view
+          // and docks it at the card's end when scrolled there, centred on the
+          // card itself — the same pattern as the accessibility save bar.
+          // `z-20`, below an open row's `z-30`, so a town autocomplete
+          // dropdown near the bottom paints over the bar, never under it.
           <motion.div
             key="draft-bar"
-            initial={{ opacity: 0, y: -14, scale: 0.98, height: 0, marginTop: 0 }}
-            animate={{ opacity: 1, y: 0, scale: 1, height: "auto", marginTop: 16 }}
-            exit={{ opacity: 0, y: -14, scale: 0.98, height: 0, marginTop: 0 }}
+            initial={{ opacity: 0, y: 12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.98 }}
             transition={DRAFT_BAR_TRANSITION}
-            className="overflow-hidden"
+            className="sticky bottom-4 z-20 mx-auto mt-4 w-full max-w-md"
           >
             <EditDraftBar
               count={changes.length}

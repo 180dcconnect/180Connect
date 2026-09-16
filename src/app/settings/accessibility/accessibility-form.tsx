@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition, type FormEvent } from "react";
 import { Check, Loader2, RotateCcw, TriangleAlert } from "lucide-react";
-import { Key, Pill } from "@/app/clients/[id]/section-card";
+import { Key, Pill } from "@/app/(app)/clients/[id]/section-card";
 import { ShortcutList } from "@/components/keyboard-shortcut-list";
 import { useAccessibility } from "@/components/accessibility-provider";
 import {

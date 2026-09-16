@@ -2,9 +2,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchPaged } from "@/lib/supabase/fetch-paged";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
-import { hasPermission } from "@/lib/auth/permissions";
+import { canView } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import { getActiveScoutConfig } from "@/lib/scoring/configured-weights";
 import {
@@ -23,6 +23,7 @@ import {
   filterByType,
   filterBySector,
   filterValues,
+  grantCountOf,
   SECTOR_FILTER_LABELS,
   SECTOR_FILTER_OPTIONS,
   PRIORITY_SCORE_FILTERS,
@@ -108,7 +109,7 @@ type TeamMember = { id: string; full_name: string | null; role?: string | null }
 type SavedViewRow = { id: string; name: string; filters: unknown };
 
 // Next.js 16: searchParams is a Promise on App Router pages — same pattern as
-// src/app/admin/audit-log/page.tsx.
+// src/app/(app)/admin/audit-log/page.tsx.
 type SearchParams = Promise<{
   owner?: string;
   q?: string;
@@ -210,7 +211,7 @@ const SELECT_SLOT = "flex w-5 shrink-0 justify-center";
 /**
  * F051 — the charity list view. Every organisation regardless of import method
  * or manual entry (F031/F032/F036) shows here, minus anything F251 has actively
- * suppressed. Row click leads to the F067/F068 detail page (src/app/clients/[id]).
+ * suppressed. Row click leads to the F067/F068 detail page (src/app/(app)/clients/[id]).
  *
  * F162 (#157): the claim button sits beside the row's Link rather than inside it —
  * a button nested in an anchor is invalid markup and would fire both handlers on
@@ -240,7 +241,7 @@ export default async function ClientsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const authorization = await getCurrentActor("client:view", { route: "/clients" });
+  const authorization = await getViewingActor("client:view", { route: "/clients" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
   const {
@@ -267,7 +268,8 @@ export default async function ClientsPage({
   } = await searchParams;
 
   const supabase = await createClient();
-  const canAddClient = hasPermission(authorization.actor.role, "client:edit");
+  // Viewers (leadership) see every control and are refused when they use one.
+  const canAddClient = canView(authorization.actor.role, "client:edit");
   /**
    * F062 AC1 names the CAM: "CAM can select multiple individual clients from the
    * list via checkboxes". Selection was gated on `isAdmin`, so the role the whole
@@ -275,36 +277,77 @@ export default async function ClientsPage({
    *
    * Selection itself grants nothing — it is a way of pointing at rows — so it is
    * offered to anyone who can act on a client (`client:edit`, i.e. CAMs and
-   * admins) rather than to admins alone. A viewer, who can only read, still gets
-   * none. What you may then *do* with a selection stays permission-checked
+   * admins) rather than to admins alone, and shown to viewers, who are refused
+   * when they apply a bulk change. What you may then *do* with a selection stays permission-checked
    * separately: the bulk assign action below is still admin-only, because
    * reassigning ownership needs `ownership:reassign`.
    */
-  const canSelect = hasPermission(authorization.actor.role, "client:edit");
-  const canBulkAssign = hasPermission(authorization.actor.role, "ownership:reassign");
+  const canSelect = canView(authorization.actor.role, "client:edit");
+  const canBulkAssign = canView(authorization.actor.role, "ownership:reassign");
   // F063 — bulk tagging rides the same permission as F191's single assignment
   // (`tags:manage`, held by CAMs and admins), so both paths to org_tags agree.
-  const canBulkTag = hasPermission(authorization.actor.role, "tags:manage");
+  const canBulkTag = canView(authorization.actor.role, "tags:manage");
   /**
    * F062/F064/F065 — which rows this actor may bulk-change status for.
    * The header checkbox only selects those, but every row is selectable for
    * commenting (F065) — the narrower status rule rides per-row.
    */
 
+  // F215 — mission search term. Parsed through the same safeValidate funnel as
+  // every other param: junk or over-long values filter nothing rather than
+  // throwing, and the banner below says so instead of pretending to search.
+  // Parsed before the list read because it decides what that read selects.
+  const missionTerm = parseMissionTerm(missionParam);
+
+  /**
+   * What the list reads for every client. Every column is paid for on every
+   * visit, for every client, so this carries only what a filter, sort, count or
+   * row actually uses:
+   *
+   * - `grant_total:grants(count)` — the list only asks how many grants a client
+   *   has (the "360Giving" filter and the similarity factor). Selecting every
+   *   grant row made grants the largest part of the payload.
+   * - `financial_periods` — capped at the 3 most recent periods (see
+   *   fetchAllOrganisations). Income resolution only ever reads the newest
+   *   period carrying a figure, so a decade of filings per client would be
+   *   payload with no reader.
+   */
+  const listColumns = [
+    "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id",
+    "owner:users!organisations_owner_id_fkey(full_name)",
+    "org_tags(tag_id)",
+    "financial_periods(income_band, total_income, period_end)",
+    "grant_total:grants(count)",
+    "latest_scores(priority_score, priority_band, scored_at)",
+    ...(missionTerm ? ["charity_activities"] : []),
+  ].join(", ");
+
   // PostgREST caps a single response at 1000 rows — same truncation the
   // dashboard hit at 1794 orgs. Paginate organisations + suppressions so the
-  // client count and filters reflect the full pipeline.
+  // client count and filters reflect the full pipeline. The organisation list
+  // runs to a few thousand rows, so its windows are requested together rather
+  // than one after another.
   const fetchAllOrganisations = () =>
-    fetchPaged<ClientListRow>((from, to) =>
-      supabase
-        .from("organisations")
-        .select(
-          "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, charity_activities, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name), org_tags(tag_id), financial_periods(income_band, total_income, period_end), grants(id, amount_awarded, funder_name, award_date), latest_scores(priority_score, priority_band, scored_at)",
-        )
-        .order("legal_name", { ascending: true })
-        .order("id", { ascending: true })
-        .range(from, to)
-        .overrideTypes<ClientListRow[], { merge: false }>(),
+    fetchPaged<ClientListRow>(
+      (from, to) =>
+        supabase
+          .from("organisations")
+          .select(listColumns)
+          // Newest filing first inside the embed, capped at 3: income
+          // resolution reads the newest period carrying a figure, so older
+          // filings are dead payload. A plain LEFT embed — organisations
+          // without filings must still list (the "no records" filter).
+          .order("period_end", {
+            foreignTable: "financial_periods",
+            ascending: false,
+            nullsFirst: false,
+          })
+          .limit(3, { foreignTable: "financial_periods" })
+          .order("legal_name", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to)
+          .overrideTypes<ClientListRow[], { merge: false }>(),
+      { pagesPerRound: 3 },
     );
 
   const fetchAllOpenSuppressions = () =>
@@ -317,6 +360,13 @@ export default async function ClientsPage({
         .range(from, to)
         .overrideTypes<OpenSuppression[], { merge: false }>(),
     );
+
+  // F215 AC2 — widen the term through Gemini when it is configured. Started
+  // before the database reads so the model call overlaps them instead of
+  // blocking the render after they finish. Depends only on the URL param, so
+  // there is nothing to wait for; awaited where the keywords are needed below.
+  // All failure modes degrade to `keywords: []` (plain keyword matching).
+  const missionExpansionPromise = missionTerm ? expandMissionQuery(missionTerm) : null;
 
   const [organisations, openSuppressions, team, allTags, outreachPrefs, savedViews] = await Promise.all([
     fetchAllOrganisations(),
@@ -422,19 +472,12 @@ export default async function ClientsPage({
   // Financial records filter: charity_commission, 360giving, any, none
   const financialValues = filterValues(financialsParam);
 
-  // F215 — mission search term. Parsed through the same safeValidate funnel as
-  // every other param: junk or over-long values filter nothing rather than
-  // throwing, and the banner below says so instead of pretending to search.
-  const missionTerm = parseMissionTerm(missionParam);
   /**
-   * F215 AC2 — widen the term through Gemini when it is configured. Runs during
-   * the render request, after the (parallel) data fetch above, so the expansion
-   * overlaps nothing. All failure modes degrade to `keywords: []`, which the
-   * filter reads as plain keyword matching and the banner below reports.
-   * Cached per normalised query in the module, so revisiting the same view does
-   * not re-call the API.
+   * F215 AC2 — the widened mission keywords, awaited here where the filter
+   * needs them. The request itself started before the database reads above,
+   * so this only blocks when the model is slower than the database.
    */
-  const missionExpansion = missionTerm ? await expandMissionQuery(missionTerm) : null;
+  const missionExpansion = missionTerm ? await missionExpansionPromise : null;
   const missionKeywords = missionExpansion?.keywords ?? [];
 
   /**
@@ -463,10 +506,10 @@ export default async function ClientsPage({
   const similarIneligible =
     reference !== null && !isSimilarityReference(reference.outreach_status);
   const eligibleReference = similarIneligible ? null : reference;
-  /** F092's input is a matched grant count; the list embeds grant rows. */
+  /** F092's input is a matched grant count; the list embeds the count itself. */
   const withGrantCounts = (client: VisibleClient) => ({
     ...client,
-    matched_grant_count: client.grants?.length ?? 0,
+    matched_grant_count: grantCountOf(client),
   });
   // "Same priority area" uses the towns saved in score settings — the one list
   // scoring and imports share. Loaded only when a shortlist is actually asked for.

@@ -54,8 +54,13 @@ const ASSUMED_COUNTRY_CODE = "GB";
  * The register prints an address across five numbered lines with no field
  * saying which is the town. The last populated line is it — that is how the
  * register orders them, and how the API mapper reads its equivalent.
+ *
+ * Exported for F042's review screen (dedup/register-record.ts), which shows the
+ * incoming record's address beside the client's. It reuses this rather than
+ * ordering the lines again: a second opinion on which line is the street would
+ * make every pair look like it disagreed on the address.
  */
-function splitBulkAddress(charity: RawCharityCommissionBulkRecord["charity"]): {
+export function splitBulkAddress(charity: RawCharityCommissionBulkRecord["charity"]): {
   addressLine1: string;
   city: string;
 } {

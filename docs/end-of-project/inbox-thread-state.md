@@ -48,7 +48,7 @@ Delivered:
   the daily 30-day purge job. Rollbacks for both.
 - `docs/rls-permission-matrix.md` §3.25; Data Model tab 04 Entities + tab 02 +
   step 28.0.
-- `src/app/inbox/actions.ts` — `applyInboxThreadFlags`, one round trip per
+- `src/app/(app)/inbox/actions.ts` — `applyInboxThreadFlags`, one round trip per
   action however many threads it covers.
 - `src/lib/inbox/thread-flags.ts` — server-backed optimistic store. The
   localStorage path is gone rather than kept as a fallback: two stores that can

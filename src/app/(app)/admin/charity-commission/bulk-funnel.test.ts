@@ -1,7 +1,24 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { bulkFunnel, discoveryReach, formatCount } from "./bulk-funnel.ts";
+import { bulkFunnel, discoveryReach, formatCount, summariseRun } from "./bulk-funnel.ts";
+
+const NOW = new Date("2026-08-15T12:00:00.000Z");
+
+function funnelRun(overrides = {}) {
+  return {
+    id: "run-1",
+    api_source: "charity_commission_bulk",
+    started_at: "2026-08-15T11:55:00.000Z",
+    job_status: "completed",
+    records_fetched: 100,
+    records_inserted: 10,
+    records_skipped: 90,
+    records_failed: 0,
+    run_stats: null,
+    ...overrides,
+  };
+}
 
 const full = {
   charitiesScanned: 185_574,
@@ -90,5 +107,21 @@ describe("formatCount", () => {
   it("groups thousands", () => {
     assert.equal(formatCount(185_574), "185,574");
     assert.equal(formatCount(0), "0");
+  });
+});
+
+describe("summariseRun", () => {
+  it("keeps calling a just-started run running", () => {
+    assert.equal(summariseRun(funnelRun({ job_status: "running" }), NOW), "Running now.");
+  });
+
+  it("calls an old running run stalled", () => {
+    assert.equal(
+      summariseRun(
+        funnelRun({ job_status: "running", started_at: "2026-08-15T10:00:00.000Z" }),
+        NOW,
+      ),
+      "Stalled — started 2 hours ago and never finished. Running it again is safe.",
+    );
   });
 });

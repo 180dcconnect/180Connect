@@ -56,9 +56,13 @@ export type SizeScoreResult = {
  */
 export const DEFAULT_SIZE_BAND_SCORES: Readonly<Record<IncomeBand, number>> = {
   under_10k: 0.2,
-  "10k_100k": 0.4,
-  "100k_1m": 0.6,
-  over_1m: 0.9,
+  "10k_100k": 0.45,
+  "100k_500k": 0.8,
+  "500k_1m": 0.85,
+  "1m_10m": 0.85,
+  "10m_50m": 0.75,
+  "50m_100m": 0.55,
+  over_100m: 0.4,
 };
 
 /**

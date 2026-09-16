@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { OriginButton } from "@/components/ui/origin-button";
 import type { OwnershipRequestRow } from "@/lib/ownership-requests";
+import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 
 const STATUS_STYLE: Record<OwnershipRequestRow["status"], string> = {
   pending: "bg-amber-50 text-amber-800",
@@ -17,8 +18,15 @@ function personLabel(person: { full_name: string | null; email: string } | null)
 
 export function OwnershipRequestsPanel({
   initialRequests,
+  canDecide,
 }: {
   initialRequests: OwnershipRequestRow[];
+  /**
+   * Whether this reader may decide a request. False for leadership, who see who
+   * asked for which client and give none of them away — the PATCH route behind
+   * these two buttons refuses them.
+   */
+  canDecide: boolean;
 }) {
   const [rows, setRows] = useState(initialRequests);
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -68,6 +76,10 @@ export function OwnershipRequestsPanel({
         {message}
       </p>
 
+      {!canDecide && (
+        <p className="text-sm text-foreground/55">{VIEW_ONLY_CONTROL_NOTE}</p>
+      )}
+
       <div>
         <h2 className="text-sm font-bold">Pending</h2>
         {pending.length === 0 ? (
@@ -92,38 +104,42 @@ export function OwnershipRequestsPanel({
                     it now before approving.
                   </p>
                 )}
-                <label className="mt-3 block text-sm font-bold" htmlFor={`note-${row.id}`}>
-                  Note (optional)
-                </label>
-                <textarea
-                  className="mt-1 w-full rounded-lg border border-black/15 bg-white px-3 py-2"
-                  disabled={busy}
-                  id={`note-${row.id}`}
-                  onChange={(event) =>
-                    setNotes((current) => ({ ...current, [row.id]: event.target.value }))
-                  }
-                  rows={2}
-                  value={notes[row.id] ?? ""}
-                />
-                <div className="mt-3 flex gap-3">
-                  <OriginButton
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => decide(row.id, true)}
-                    type="button"
-                  >
-                    Approve and move the client
-                  </OriginButton>
-                  <OriginButton
-                    size="sm"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => decide(row.id, false)}
-                    type="button"
-                  >
-                    Reject
-                  </OriginButton>
-                </div>
+                {canDecide && (
+                  <>
+                    <label className="mt-3 block text-sm font-bold" htmlFor={`note-${row.id}`}>
+                      Note (optional)
+                    </label>
+                    <textarea
+                      className="mt-1 w-full rounded-lg border border-black/15 bg-white px-3 py-2"
+                      disabled={busy}
+                      id={`note-${row.id}`}
+                      onChange={(event) =>
+                        setNotes((current) => ({ ...current, [row.id]: event.target.value }))
+                      }
+                      rows={2}
+                      value={notes[row.id] ?? ""}
+                    />
+                    <div className="mt-3 flex gap-3">
+                      <OriginButton
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => decide(row.id, true)}
+                        type="button"
+                      >
+                        Approve and move the client
+                      </OriginButton>
+                      <OriginButton
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => decide(row.id, false)}
+                        type="button"
+                      >
+                        Reject
+                      </OriginButton>
+                    </div>
+                  </>
+                )}
               </li>
             ))}
           </ul>

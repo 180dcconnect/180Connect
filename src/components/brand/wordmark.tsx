@@ -120,7 +120,8 @@ export function Wordmark({
 /**
  * Hand-drawn tree used as the menu sheet's corner motif. The source PNG is white
  * line-art on a transparent ground, so it needs no keying — opacity alone gives
- * it the low-contrast, drawn-on feel.
+ * it the low-contrast, drawn-on feel. Lazy: the sheet is hidden until opened,
+ * so this must never join the landing first paint.
  */
 export function TreeMark() {
   return (
@@ -129,6 +130,7 @@ export function TreeMark() {
       alt=""
       fill
       sizes="(max-width: 640px) 60vw, 660px"
+      loading="lazy"
       className="object-contain object-bottom"
       priority={false}
     />

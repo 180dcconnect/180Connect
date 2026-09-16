@@ -249,6 +249,8 @@ export function SourcesCard({
                         alt=""
                         width={56}
                         height={56}
+                        sizes="56px"
+                        loading="lazy"
                         className={`max-h-full object-contain ${
                           source.source === "360giving"
                             ? "max-w-none w-auto h-12 scale-85"

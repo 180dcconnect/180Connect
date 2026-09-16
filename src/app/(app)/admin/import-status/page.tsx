@@ -30,8 +30,8 @@
 // already renders the `main` this is slotted into.
 
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
-import { hasPermission } from "@/lib/auth/permissions";
+import { getViewingActor } from "@/lib/auth/actor";
+import { canView } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
@@ -49,7 +49,7 @@ import { labelForStatus } from "./status-helpers.ts";
 export type { IngestionRunRow };
 
 // Next.js 16: searchParams is a Promise on App Router pages — same pattern as
-// src/app/admin/audit-log/page.tsx.
+// src/app/(app)/admin/audit-log/page.tsx.
 type SearchParams = Promise<{
   source?: string;
   status?: string;
@@ -162,7 +162,7 @@ export default async function AdminImportStatusPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const authorization = await getCurrentActor("client:edit", {
+  const authorization = await getViewingActor("client:edit", {
     route: "/admin/import-status",
   });
   if (!authorization.ok) {
@@ -430,7 +430,7 @@ export default async function AdminImportStatusPage({
             {views.length > 0 ? (
               <ImportFeed
                 groups={groups}
-                canInspect={hasPermission(authorization.actor.role, "platform-settings:manage")}
+                canInspect={canView(authorization.actor.role, "platform-settings:manage")}
               />
             ) : (
               <Rise>

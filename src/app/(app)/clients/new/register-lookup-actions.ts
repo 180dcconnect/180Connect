@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor, actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { reportError } from "@/lib/error-logging";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -314,7 +314,7 @@ export async function searchRegister(
   _previous: RegisterSearchState,
   formData: FormData,
 ): Promise<RegisterSearchState> {
-  const authorization = await getCurrentActor("client:edit", { route: "/clients/new" });
+  const authorization = await getViewingActor("client:edit", { route: "/clients/new" });
   if (!authorization.ok) {
     return { kind: "error", message: actorFailureMessage(authorization.reason) };
   }

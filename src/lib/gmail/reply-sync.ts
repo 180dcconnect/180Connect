@@ -32,8 +32,8 @@ export type ReplySyncResult = {
 
 type Dependencies = {
   admin: SupabaseClient;
-  config: GmailConfig;
-  sender: string;
+  config: GmailConfig | null;
+  sender: string | null;
   fetchImpl?: typeof fetch;
   tokenProvider?: () => Promise<string>;
   lookbackDays?: number;
@@ -159,8 +159,8 @@ export type ReplySyncOptions = {
 export async function syncGmailReplies(deps?: Dependencies, options: ReplySyncOptions = {}): Promise<ReplySyncResult> {
   const result: ReplySyncResult = { scanned: 0, captured: 0, duplicates: 0, ignored: 0, unmatched: 0, failed: 0 };
   const admin = deps?.admin ?? createAdminClient();
-  const config = deps?.config ?? resolveGmailConfig();
-  const sender = deps?.sender ?? resolveGmailSender();
+  const config = deps?.config === undefined ? resolveGmailConfig() : deps.config;
+  const sender = deps?.sender === undefined ? resolveGmailSender() : deps.sender;
   if (!admin || !config || !sender) throw new Error("Reply sync is not configured.");
   const fetchImpl = deps?.fetchImpl ?? fetch;
   const sendNotification = deps?.sendNotification ?? sendNotificationEmail;

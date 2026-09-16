@@ -19,7 +19,11 @@ export type PermissionFailureReason =
   | "unauthenticated"
   | "inactive"
   | "profile_missing"
-  | "forbidden";
+  | "forbidden"
+  // A viewer reached for something that changes data. Distinct from `forbidden`
+  // so the refusal can say "your access is view-only" rather than "you lack
+  // permission", and so the browser can be told to show the view-only notice.
+  | "view_only";
 
 export type AuthorizableUser = {
   id: string;
@@ -54,17 +58,65 @@ export function hasPermission(
   return ROLE_PERMISSIONS[role].has(permission);
 }
 
+/**
+ * A viewer is 180DC leadership — the branch president and vice president, and
+ * the Global Leadership Team. They see everything an admin sees and change
+ * nothing (decision of the Project Leader, 15 Sep 2026; docs/open-questions.md
+ * Q-06).
+ */
+export function isViewOnly(role: AppRole): boolean {
+  return role === "viewer";
+}
+
+/**
+ * Whether a role may *see* what a permission guards: the page, the list, the
+ * button. Every role that holds the permission may, and so may a viewer, who
+ * sees the whole app but is refused when they press a control that changes
+ * something.
+ *
+ * Use this for what renders. Never use it to decide whether a write may happen
+ * — that is `hasPermission`, which a viewer never passes for a write.
+ */
+export function canView(role: AppRole, permission: Permission): boolean {
+  return hasPermission(role, permission) || isViewOnly(role);
+}
+
+/**
+ * Whether a role is shown what an admin is shown — admin panels, admin copy,
+ * the admin version of a control. True for admins and for viewers.
+ *
+ * Display only, like `canView`. What an admin may *do* is still decided by
+ * `hasPermission` on the server, which a viewer never passes.
+ */
+export function seesAdminView(role: AppRole): boolean {
+  return role === "admin" || isViewOnly(role);
+}
+
+/**
+ * `access` says what the caller is about to do with the permission:
+ * - `"use"` (default) — perform the action it guards. Server actions and
+ *   mutating API routes. A viewer is always refused, with reason `view_only`.
+ * - `"view"` — render the screen it guards. Pages and read-only endpoints.
+ *   A viewer passes (see `canView`).
+ */
 export function authorizeUserProfile(
   user: AuthorizableUser | null,
   profile: UserProfile | null,
   permission?: Permission,
+  access: "use" | "view" = "use",
 ): AuthorizedProfileResult {
   if (!user) return { ok: false, reason: "unauthenticated" };
   if (!profile) return { ok: false, reason: "profile_missing" };
   if (!profile.is_active) return { ok: false, reason: "inactive" };
   if (!isAppRole(profile.role)) return { ok: false, reason: "forbidden" };
-  if (permission && !hasPermission(profile.role, permission)) {
-    return { ok: false, reason: "forbidden" };
+  if (permission) {
+    const allowed =
+      access === "view"
+        ? canView(profile.role, permission)
+        : hasPermission(profile.role, permission);
+    if (!allowed) {
+      return { ok: false, reason: isViewOnly(profile.role) ? "view_only" : "forbidden" };
+    }
   }
   return { ok: true, role: profile.role };
 }

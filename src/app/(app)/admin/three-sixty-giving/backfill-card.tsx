@@ -5,6 +5,7 @@ import { Check, Loader2 } from "lucide-react";
 
 import type { JobStatus } from "@/lib/ingestion/type";
 import { HorizontalStickGauge } from "@/components/ui/horizontal-stick-gauge";
+import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import {
   getBackfillAttemptStatus,
   runBackfillBatchNow,
@@ -54,6 +55,7 @@ export function BackfillCard({
   maxBatchSize,
   cronBatchSize,
   oldestPending,
+  readOnly = false,
 }: {
   checked: number;
   total: number;
@@ -65,6 +67,12 @@ export function BackfillCard({
   cronBatchSize: number;
   /** When the least recently checked organisation was last looked at. */
   oldestPending: string | null;
+  /**
+   * Set for leadership: coverage and the oldest pending date still render —
+   * they are the reading this card exists for — but the batch control does not,
+   * because the action behind it asks for `user:manage` and refuses a viewer.
+   */
+  readOnly?: boolean;
 }) {
   const [state, action, pending] = useActionState(runBackfillBatchNow, INITIAL);
   // Slice size for the next press. Kept as the raw input string so typing
@@ -137,10 +145,10 @@ export function BackfillCard({
       </h2>
       <p className="mt-1.5 text-[13px] leading-[1.55] text-dim">
         We look up your clients in the 360Giving grants database a few at a
-        time. The system checks {cronBatchSize.toLocaleString()} automatically
-        every fifteen minutes — this button checks the next{" "}
-        {selectedBatch.toLocaleString()} now instead of waiting (about{" "}
-        {formatDuration(estimatedTotal)}).
+        time.{" "}
+        {readOnly
+          ? `The system checks ${cronBatchSize.toLocaleString()} automatically every fifteen minutes.`
+          : `The system checks ${cronBatchSize.toLocaleString()} automatically every fifteen minutes — this button checks the next ${selectedBatch.toLocaleString()} now instead of waiting (about ${formatDuration(estimatedTotal)}).`}
       </p>
 
       <p className="mt-4 flex items-baseline gap-2">
@@ -173,109 +181,116 @@ export function BackfillCard({
       )}
 
       <div className="mt-4 border-t border-rule-soft pt-4">
-        <form
-          action={action}
-          onSubmit={() => {
-            setElapsed(0);
-            setLive(null);
-            // The poll selects this attempt by start time with a backwards
-            // margin: a client clock running ahead of the server would otherwise
-            // place `since` after the run's own started_at and miss it. Latest
-            // first, so an older press never shadows the live one.
-            setAttemptSince(new Date(Date.now() - 60_000).toISOString());
-          }}
-          className="flex flex-wrap items-center gap-x-3 gap-y-3"
-        >
-          <label
-            htmlFor="backfill-batch-size"
-            className="text-[13px] font-medium text-dim"
-          >
-            Clients per check
-          </label>
-          <input
-            id="backfill-batch-size"
-            name="batchSize"
-            type="number"
-            min={1}
-            max={maxBatchSize}
-            step={1}
-            value={batchInput}
-            onChange={(event) => setBatchInput(event.target.value)}
-            disabled={pending}
-            inputMode="numeric"
-            aria-describedby="backfill-batch-size-hint"
-            className="h-10 w-20 rounded-inset border border-rule bg-white px-3 text-sm font-semibold tabular-nums text-ink outline-none focus:border-lead disabled:opacity-50"
-          />
-          <span id="backfill-batch-size-hint" className="sr-only">
-            A whole number from 1 to {maxBatchSize}. Larger slices take longer.
-          </span>
-          <button
-            type="submit"
-            disabled={pending}
-            aria-busy={pending || undefined}
-            className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-inset border border-lead bg-lead px-2.5 py-1 text-[13px] font-medium text-white transition-colors hover:bg-lead-mid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30 disabled:pointer-events-none disabled:opacity-50"
-          >
-            {pending && <Loader2 className="size-3.5 animate-spin" strokeWidth={2.2} />}
-            {pending ? "Checking…" : `Check the next ${selectedBatch.toLocaleString()} now`}
-          </button>
-          {state.kind !== "idle" && !pending && (
-            <p
-              className={`flex w-full items-start gap-1.5 text-xs font-semibold ${
-                state.kind === "error" ? "text-stop" : "text-go"
-              }`}
-              role="status"
+        {readOnly ? (
+          <p className="text-[13px] text-dim">{VIEW_ONLY_CONTROL_NOTE}</p>
+        ) : (
+          <>
+            <form
+              action={action}
+              onSubmit={() => {
+                setElapsed(0);
+                setLive(null);
+                // The poll selects this attempt by start time with a backwards
+                // margin: a client clock running ahead of the server would
+                // otherwise place `since` after the run's own started_at and
+                // miss it. Latest first, so an older press never shadows the
+                // live one.
+                setAttemptSince(new Date(Date.now() - 60_000).toISOString());
+              }}
+              className="flex flex-wrap items-center gap-x-3 gap-y-3"
             >
-              {state.kind === "success" && (
-                <Check
-                  aria-hidden="true"
-                  className="mt-0.5 size-3.5 shrink-0 text-go"
-                  strokeWidth={2.5}
-                />
+              <label
+                htmlFor="backfill-batch-size"
+                className="text-[13px] font-medium text-dim"
+              >
+                Clients per check
+              </label>
+              <input
+                id="backfill-batch-size"
+                name="batchSize"
+                type="number"
+                min={1}
+                max={maxBatchSize}
+                step={1}
+                value={batchInput}
+                onChange={(event) => setBatchInput(event.target.value)}
+                disabled={pending}
+                inputMode="numeric"
+                aria-describedby="backfill-batch-size-hint"
+                className="h-10 w-20 rounded-inset border border-rule bg-white px-3 text-sm font-semibold tabular-nums text-ink outline-none focus:border-lead disabled:opacity-50"
+              />
+              <span id="backfill-batch-size-hint" className="sr-only">
+                A whole number from 1 to {maxBatchSize}. Larger slices take longer.
+              </span>
+              <button
+                type="submit"
+                disabled={pending}
+                aria-busy={pending || undefined}
+                className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-inset border border-lead bg-lead px-2.5 py-1 text-[13px] font-medium text-white transition-colors hover:bg-lead-mid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30 disabled:pointer-events-none disabled:opacity-50"
+              >
+                {pending && <Loader2 className="size-3.5 animate-spin" strokeWidth={2.2} />}
+                {pending ? "Checking…" : `Check the next ${selectedBatch.toLocaleString()} now`}
+              </button>
+              {state.kind !== "idle" && !pending && (
+                <p
+                  className={`flex w-full items-start gap-1.5 text-xs font-semibold ${
+                    state.kind === "error" ? "text-stop" : "text-go"
+                  }`}
+                  role="status"
+                >
+                  {state.kind === "success" && (
+                    <Check
+                      aria-hidden="true"
+                      className="mt-0.5 size-3.5 shrink-0 text-go"
+                      strokeWidth={2.5}
+                    />
+                  )}
+                  {state.message}
+                </p>
               )}
-              {state.message}
-            </p>
-          )}
-        </form>
+            </form>
 
-        {pending && (
-          <div className="mt-3" aria-live="polite">
-            {hasLiveCount ? (
-              <>
-                <p className="text-xs font-semibold text-ink" role="status">
-                  {finishing ? "Done checking — saving the grants to the client records." : liveCountLabel}{" "}
-                  <span className="font-normal text-dim">{formatDuration(elapsed)} so far.</span>
+            {pending && (
+              <div className="mt-3" aria-live="polite">
+                {hasLiveCount ? (
+                  <>
+                    <p className="text-xs font-semibold text-ink" role="status">
+                      {finishing ? "Done checking — saving the grants to the client records." : liveCountLabel}{" "}
+                      <span className="font-normal text-dim">{formatDuration(elapsed)} so far.</span>
+                    </p>
+                    <div className="mt-2">
+                      <HorizontalStickGauge
+                        checked={liveWalked}
+                        total={liveTotal}
+                        ariaLabel="Current batch progress"
+                        stickHeight={12}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs font-semibold text-ink" role="status">
+                      Checking {selectedBatch.toLocaleString()} clients, one by one —{" "}
+                      {formatDuration(elapsed)} so far · about {formatDuration(estimatedLeft)} to go.
+                    </p>
+                    <div className="mt-2">
+                      <HorizontalStickGauge
+                        checked={Math.min(selectedBatch - 1, Math.round((attemptPercent / 100) * selectedBatch))}
+                        total={selectedBatch}
+                        ariaLabel="Current batch progress (estimated)"
+                        stickHeight={12}
+                      />
+                    </div>
+                  </>
+                )}
+                <p className="mt-1.5 text-xs text-dim">
+                  You can leave this page open — the results will appear here when
+                  the check finishes. You don&apos;t need to wait: the system keeps
+                  working through the list on its own.
                 </p>
-                <div className="mt-2">
-                  <HorizontalStickGauge
-                    checked={liveWalked}
-                    total={liveTotal}
-                    ariaLabel="Current batch progress"
-                    stickHeight={12}
-                  />
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="text-xs font-semibold text-ink" role="status">
-                  Checking {selectedBatch.toLocaleString()} clients, one by one —{" "}
-                  {formatDuration(elapsed)} so far · about {formatDuration(estimatedLeft)} to go.
-                </p>
-                <div className="mt-2">
-                  <HorizontalStickGauge
-                    checked={Math.min(selectedBatch - 1, Math.round((attemptPercent / 100) * selectedBatch))}
-                    total={selectedBatch}
-                    ariaLabel="Current batch progress (estimated)"
-                    stickHeight={12}
-                  />
-                </div>
-              </>
+              </div>
             )}
-            <p className="mt-1.5 text-xs text-dim">
-              You can leave this page open — the results will appear here when
-              the check finishes. You don&apos;t need to wait: the system keeps
-              working through the list on its own.
-            </p>
-          </div>
+          </>
         )}
       </div>
     </section>

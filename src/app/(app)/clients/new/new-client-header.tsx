@@ -1,4 +1,4 @@
-import { DataImportsHeader } from "@/app/admin/data-imports-header";
+import { DataImportsHeader } from "@/app/(app)/admin/data-imports-header";
 
 /**
  * The heading block for "Add a client", which is a Data imports tab: it renders

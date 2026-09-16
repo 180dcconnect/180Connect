@@ -136,7 +136,7 @@ test("AC2: explanations quote the shared state, and describeSimilarity renders a
   assert.equal(sector.description, "both work in Education & Youth");
   const size = best.sharedDimensions.find((d) => d.key === "size");
   assert.ok(size);
-  assert.equal(size.description, "both sit in the Medium income band");
+  assert.equal(size.description, "both sit in the Emerging income band");
   const outcome = best.sharedDimensions.find((d) => d.key === "pipeline");
   assert.ok(outcome);
   assert.equal(outcome.description, "both converted");

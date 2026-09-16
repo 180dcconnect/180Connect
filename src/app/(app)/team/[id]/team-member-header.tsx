@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 import { BackButton } from "@/components/ui/back-button";
-import { Pill } from "@/app/clients/[id]/section-card";
+import { Pill } from "@/app/(app)/clients/[id]/section-card";
 import { OriginButton } from "@/components/ui/origin-button";
 
 import { AccountControls, type HandoverDestination } from "./account-controls";
@@ -38,6 +38,10 @@ export type TeamMemberHeaderData = {
     closedCount: number;
     sentMessagesCount: number;
     notesCount: number;
+    /** Clients who replied or converted — the win rate's denominator. */
+    respondedClients: number;
+    /** Converted ÷ responded clients; null until somebody replies. */
+    winRate: number | null;
   };
   /** Active CAMs/admins who could take this member's clients on. Empty unless admin. */
   destinations: HandoverDestination[];
@@ -202,6 +206,8 @@ export function TeamMemberHeader({ member }: { member: TeamMemberHeaderData }) {
           <PerformanceDial
             totalClients={member.stats.totalClients}
             convertedCount={member.stats.convertedCount}
+            respondedClients={member.stats.respondedClients}
+            winRate={member.stats.winRate}
             inProgressCount={inProgressCount}
             discoveryCount={member.stats.discoveryCount}
             closedCount={member.stats.closedCount}

@@ -107,6 +107,24 @@ export function formatDuration(ms: number): string {
   return `${hours}h ${minutes % 60}m`;
 }
 
+/**
+ * How often a scheduled job ticks, in the words of the job: "every 5 minutes",
+ * "every day", "every week". Used where a job is still waiting for its first
+ * run — pg_cron records past runs only, so the cadence from the job's
+ * migration is the only honest answer to "when?".
+ */
+export function formatCadence(everyMs: number): string {
+  if (!Number.isFinite(everyMs) || everyMs <= 0) return "on its schedule";
+  const minutes = Math.round(everyMs / MINUTE);
+  if (minutes < 60) return `every ${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.round(everyMs / HOUR);
+  if (hours < 24) return `every ${hours} hour${hours === 1 ? "" : "s"}`;
+  const days = Math.round(everyMs / DAY);
+  if (days === 1) return "every day";
+  if (days === 7) return "every week";
+  return `every ${days} days`;
+}
+
 /** Local-calendar key, not the ISO date: 23:30 on the 3rd is the 3rd. */
 export function dayKeyOf(when: Date): string {
   const month = String(when.getMonth() + 1).padStart(2, "0");

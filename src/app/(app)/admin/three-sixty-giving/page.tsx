@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
+import { hasPermission } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
@@ -19,11 +20,16 @@ import { BACKFILL_BATCH_SIZE, MANUAL_BACKFILL_BATCH_SIZE, MANUAL_BACKFILL_MAX, R
 export const maxDuration = 300;
 
 export default async function ThreeSixtyGivingPage() {
-  const authorization = await getCurrentActor("user:manage");
+  const authorization = await getViewingActor("user:manage");
   if (!authorization.ok) {
     if (authorization.reason === "unauthenticated") redirect("/login");
     redirect("/dashboard?error=admin-access-required");
   }
+
+  // `user:manage` is what the backfill action asks for, and what this page's own
+  // gate asks for. Leadership passes the gate and would fail the action, so they
+  // get the coverage without the control.
+  const canBackfill = hasPermission(authorization.actor.role, "user:manage");
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -103,6 +109,10 @@ export default async function ThreeSixtyGivingPage() {
     if (oldestPending === null || seen < oldestPending) oldestPending = seen;
   }
 
+  // One clock for the page, read here rather than inside a component: a server
+  // component's render must stay pure, and two reads could disagree.
+  const now = new Date();
+
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto max-w-6xl space-y-8">
@@ -125,6 +135,7 @@ export default async function ThreeSixtyGivingPage() {
               maxBatchSize={MANUAL_BACKFILL_MAX}
               cronBatchSize={BACKFILL_BATCH_SIZE}
               oldestPending={oldestPending}
+              readOnly={!canBackfill}
             />
           </Rise>
 
@@ -135,7 +146,7 @@ export default async function ThreeSixtyGivingPage() {
                 message="Import history could not be loaded. This has been recorded — refresh and try again."
               />
             ) : (
-              <ThreeSixtyRecentRuns runs={runs} />
+              <ThreeSixtyRecentRuns runs={runs} now={now} />
             )}
           </Rise>
 

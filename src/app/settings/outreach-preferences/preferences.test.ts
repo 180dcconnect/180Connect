@@ -24,7 +24,7 @@ import {
   SECTOR_CATEGORY_GROUPS,
   SECTOR_PRESETS,
 } from "./constants.ts";
-import { CANONICAL_SECTOR_GROUPS } from "../../clients/visible-clients.ts";
+import { CANONICAL_SECTOR_GROUPS } from "../../(app)/clients/visible-clients.ts";
 
 describe("outreach preferences constants and configuration (F195 / F196 / F197 / F198 / F199 / F202)", () => {
   it("defines standard follow-up timing thresholds and clamping (F202)", () => {
@@ -62,14 +62,28 @@ describe("outreach preferences constants and configuration (F195 / F196 / F197 /
   });
 
   it("defines income band options, labels, and descriptions (F198)", () => {
-    assert.deepEqual(INCOME_BAND_OPTIONS, ["under_10k", "10k_100k", "100k_1m", "over_1m"]);
+    assert.deepEqual(INCOME_BAND_OPTIONS, [
+      "under_10k",
+      "10k_100k",
+      "100k_500k",
+      "500k_1m",
+      "1m_10m",
+      "10m_50m",
+      "50m_100m",
+      "over_100m",
+    ]);
     assert.equal(INCOME_BAND_LABELS.under_10k, "Under £10k");
     assert.equal(INCOME_BAND_LABELS["10k_100k"], "£10k – £100k");
-    assert.equal(INCOME_BAND_LABELS["100k_1m"], "£100k – £1m");
-    assert.equal(INCOME_BAND_LABELS.over_1m, "Over £1m");
+    assert.equal(INCOME_BAND_LABELS["100k_500k"], "£100k – £500k");
+    assert.equal(INCOME_BAND_LABELS["500k_1m"], "£500k – £1m");
+    assert.equal(INCOME_BAND_LABELS["1m_10m"], "£1m – £10m");
+    assert.equal(INCOME_BAND_LABELS["10m_50m"], "£10m – £50m");
+    assert.equal(INCOME_BAND_LABELS["50m_100m"], "£50m – £100m");
+    assert.equal(INCOME_BAND_LABELS.over_100m, "Over £100m");
 
     assert.ok(INCOME_BAND_DESCRIPTIONS.under_10k.includes("< £10k"));
-    assert.ok(INCOME_BAND_DESCRIPTIONS["100k_1m"].includes("£100k – £1m"));
+    assert.ok(INCOME_BAND_DESCRIPTIONS["100k_500k"].includes("£100k – £500k"));
+    assert.ok(INCOME_BAND_DESCRIPTIONS["500k_1m"].includes("£500k – £1m"));
   });
 
   it("correctly derives income bands from numeric total income (F198)", () => {
@@ -78,11 +92,21 @@ describe("outreach preferences constants and configuration (F195 / F196 / F197 /
     assert.equal(deriveIncomeBand(10_000), "10k_100k");
     assert.equal(deriveIncomeBand(50_000), "10k_100k");
     assert.equal(deriveIncomeBand(100_000), "10k_100k");
-    assert.equal(deriveIncomeBand(100_001), "100k_1m");
-    assert.equal(deriveIncomeBand(750_000), "100k_1m");
-    assert.equal(deriveIncomeBand(1_000_000), "100k_1m");
-    assert.equal(deriveIncomeBand(1_000_001), "over_1m");
-    assert.equal(deriveIncomeBand(5_000_000), "over_1m");
+    assert.equal(deriveIncomeBand(100_001), "100k_500k");
+    assert.equal(deriveIncomeBand(350_000), "100k_500k");
+    assert.equal(deriveIncomeBand(500_000), "100k_500k");
+    assert.equal(deriveIncomeBand(500_001), "500k_1m");
+    assert.equal(deriveIncomeBand(750_000), "500k_1m");
+    assert.equal(deriveIncomeBand(1_000_000), "500k_1m");
+    assert.equal(deriveIncomeBand(1_000_001), "1m_10m");
+    assert.equal(deriveIncomeBand(5_000_000), "1m_10m");
+    assert.equal(deriveIncomeBand(10_000_000), "1m_10m");
+    assert.equal(deriveIncomeBand(10_000_001), "10m_50m");
+    assert.equal(deriveIncomeBand(50_000_000), "10m_50m");
+    assert.equal(deriveIncomeBand(50_000_001), "50m_100m");
+    assert.equal(deriveIncomeBand(100_000_000), "50m_100m");
+    assert.equal(deriveIncomeBand(100_000_001), "over_100m");
+    assert.equal(deriveIncomeBand(300_000_000), "over_100m");
 
     assert.equal(deriveIncomeBand(null), null);
     assert.equal(deriveIncomeBand(undefined), null);

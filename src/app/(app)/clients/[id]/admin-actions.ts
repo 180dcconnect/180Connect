@@ -17,6 +17,12 @@ import {
   type EditBatchState,
   type FieldSubmissionResult,
 } from "@/lib/edit-suggestions";
+import { reportRescoreFailure, rescoreOrganisation } from "@/lib/scoring/rescore";
+
+/** Fields that feed a scoring factor — an edit to one of these leaves
+ *  LATEST_SCORES stale until the next rescore hook fires, so we trigger one
+ *  here too. See score-client.ts's ScoreableOrganisation for the full input set. */
+const SCORE_RELEVANT_FIELDS = new Set(["sector", "sub_sector", "city"]);
 
 /**
  * Fields an admin may write straight onto the record, no proposal step.
@@ -220,6 +226,17 @@ export async function adminDirectEditsAction(input: {
 
   if (results.some((result) => result.ok)) {
     revalidatePath(`/clients/${organisationId}`, "layout");
+  }
+
+  // A score-relevant column just changed on the record; refresh LATEST_SCORES
+  // in the same request so the breakdown stops showing a pre-edit snapshot.
+  // Best-effort — see rescore.ts.
+  if (results.some((result) => result.ok && SCORE_RELEVANT_FIELDS.has(result.fieldName))) {
+    await reportRescoreFailure(
+      await rescoreOrganisation(organisationId),
+      "clients.admin_direct_edits.rescore",
+      organisationId,
+    );
   }
 
   return summariseBatch(results, "saved");

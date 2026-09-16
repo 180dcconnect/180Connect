@@ -16,7 +16,7 @@ import {
 import { Liquid } from "liquid-gooey";
 
 import { Group, Rise } from "@/components/dashboard-stage";
-import { Pill, SectionCard } from "@/app/clients/[id]/section-card";
+import { Pill, SectionCard } from "@/app/(app)/clients/[id]/section-card";
 import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
 import { describeIncomeRange, incomeRangeFromBands } from "@/lib/income-range";
 import type { IncomeBand } from "@/lib/income-band";
@@ -74,7 +74,10 @@ export type TeamMemberViewProps = {
     closedCount: number;
     sentMessagesCount: number;
     notesCount: number;
-    conversionRate: string;
+    /** Clients who replied or converted — the win rate's denominator. */
+    respondedClients: number;
+    /** Converted ÷ responded clients across this member's book; null when nobody replied. */
+    winRate: number | null;
   };
 };
 
@@ -208,10 +211,12 @@ export function TeamMemberView({
                 <TrendingUp aria-hidden="true" className="size-4 text-go" />
               </div>
               <p className="mt-2.5 font-mono text-3xl font-bold tracking-tight text-ink">
-                {stats.conversionRate}%
+                {stats.winRate === null ? "—" : `${Math.round(stats.winRate * 100)}%`}
               </p>
               <p className="mt-1 text-[12px] text-dim">
-                <strong className="text-go font-medium">{stats.convertedCount}</strong> {stats.convertedCount === 1 ? "client won" : "clients won"}
+                <strong className="text-go font-medium">{stats.convertedCount}</strong>{" "}
+                {stats.convertedCount === 1 ? "client won" : "clients won"} of{" "}
+                {stats.respondedClients} who replied
               </p>
             </Rise>
 

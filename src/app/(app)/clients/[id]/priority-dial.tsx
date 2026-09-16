@@ -4,6 +4,27 @@ import { useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
 import type { ScoreFactorsRecord } from "@/lib/scoring/persist-latest-score.ts";
+import {
+  interpolatePriorityColor,
+  PRIORITY_CX as CX,
+  PRIORITY_CY as CY,
+  PRIORITY_HUB_FILL,
+  PRIORITY_ZONE_COLOURS,
+  PRIORITY_SWEEP_DEG as SWEEP_DEG,
+  PRIORITY_ZONE_SPANS,
+  priorityAngleAt as angleAt,
+  priorityPointAt as pointAt,
+  priorityRound as round,
+  priorityZoneOf,
+  type PriorityZoneId,
+} from "@/lib/scoring/priority-scale.ts";
+
+/**
+ * The scale's colours and zone cuts live in
+ * `src/lib/scoring/priority-scale.ts`, shared with the dashboard
+ * opportunity cards' miniature gauge. What stays here is geometry (sweep,
+ * radii, ticks) and interaction — this file draws, it does not define.
+ */
 
 /**
  * The priority score as an instrument gauge, in the record header.
@@ -37,87 +58,26 @@ const FACTOR_ORDER: {
   { key: "previousContact" },
 ];
 
-export type PriorityZoneId =
-  | "critical_low"
-  | "low"
-  | "low_medium"
-  | "high_medium"
-  | "high"
-  | "extremely_high";
-
-/** Gradient interpolation stops inspired by the Financial Sankey ramps. */
-interface ColorStop {
-  fraction: number;
-  r: number;
-  g: number;
-  b: number;
-}
-
-const COLOR_STOPS: ColorStop[] = [
-  { fraction: 0.00, r: 140, g: 58, b: 43 },   // #8C3A2B - Sankey OUT_RAMP[0] Deep Terracotta
-  { fraction: 0.20, r: 176, g: 88, b: 64 },   // #B05840 - Sankey OUT_RAMP[1] Burnt Orange
-  { fraction: 0.40, r: 217, g: 125, b: 56 },  // #D97D38 - Warm Amber-Orange
-  { fraction: 0.55, r: 220, g: 165, b: 36 },  // #DCA524 - Golden Amber / Yellow
-  { fraction: 0.70, r: 125, g: 155, b: 74 },  // #7D9B4A - Olive / Lime-Green
-  { fraction: 0.85, r: 53, g: 107, b: 88 },   // #356B58 - Sankey IN_RAMP[1] Jade Green
-  { fraction: 1.00, r: 32, g: 74, b: 62 },    // #204A3E - Sankey IN_RAMP[0] Deep Emerald Green
-];
-
-function interpolateColor(fraction: number): string {
-  const f = Math.max(0, Math.min(1, fraction));
-  let lower = COLOR_STOPS[0];
-  let upper = COLOR_STOPS[COLOR_STOPS.length - 1];
-
-  for (let i = 0; i < COLOR_STOPS.length - 1; i++) {
-    if (f >= COLOR_STOPS[i].fraction && f <= COLOR_STOPS[i + 1].fraction) {
-      lower = COLOR_STOPS[i];
-      upper = COLOR_STOPS[i + 1];
-      break;
-    }
-  }
-
-  const span = upper.fraction - lower.fraction;
-  const t = span <= 0 ? 0 : (f - lower.fraction) / span;
-
-  const r = Math.round(lower.r + t * (upper.r - lower.r));
-  const g = Math.round(lower.g + t * (upper.g - lower.g));
-  const b = Math.round(lower.b + t * (upper.b - lower.b));
-
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-/** The zone a fraction of the scale belongs to. */
-export function zoneOf(fraction: number): PriorityZoneId {
-  if (fraction < 0.20) return "critical_low";
-  if (fraction < 0.40) return "low";
-  if (fraction < 0.55) return "low_medium";
-  if (fraction < 0.70) return "high_medium";
-  if (fraction < 0.85) return "high";
-  return "extremely_high";
-}
-
 /** The band's ink and label for its readout row. */
 const BAND_STYLE: Record<PriorityZoneId, { text: string; label: string; colour: string }> = {
-  critical_low: { text: "text-[#8C3A2B]", label: "Critical Low", colour: "#8C3A2B" },
-  low: { text: "text-[#B05840]", label: "Low", colour: "#B05840" },
-  low_medium: { text: "text-[#D97D38]", label: "Low Medium", colour: "#D97D38" },
-  high_medium: { text: "text-[#C08416]", label: "High Medium", colour: "#DCA524" },
-  high: { text: "text-[#356B58]", label: "High", colour: "#356B58" },
-  extremely_high: { text: "text-[#204A3E]", label: "Extremely High", colour: "#204A3E" },
+  critical_low: { text: "text-[#8C3A2B]", label: "Critical Low", colour: PRIORITY_ZONE_COLOURS.critical_low },
+  low: { text: "text-[#B05840]", label: "Low", colour: PRIORITY_ZONE_COLOURS.low },
+  low_medium: { text: "text-[#D97D38]", label: "Low Medium", colour: PRIORITY_ZONE_COLOURS.low_medium },
+  high_medium: { text: "text-[#C08416]", label: "High Medium", colour: PRIORITY_ZONE_COLOURS.high_medium },
+  high: { text: "text-[#356B58]", label: "High", colour: PRIORITY_ZONE_COLOURS.high },
+  extremely_high: { text: "text-[#204A3E]", label: "Extremely High", colour: PRIORITY_ZONE_COLOURS.extremely_high },
 };
 
 /** What an unbanded (but scored) row falls back to. */
 const FALLBACK_BAND = { text: "text-ink", label: "—", colour: "#8b94a1" };
 
 /** The hub's soft seat, behind the needle's pivot. */
-const HUB_FILL = "#e2e5ea";
+const HUB_FILL = PRIORITY_HUB_FILL;
 
 // Geometry. 250° of sweep leaves a 110° gap at the bottom for the legend to
-// sit under without the comb's ends crowding it.
-const START_ANGLE_DEG = 145;
-const SWEEP_DEG = 250;
-const CX = 100;
-const CY = 100;
+// sit under without the comb's ends crowding it. Angles, centre and the
+// point helper live in `src/lib/scoring/priority-scale.ts`, shared with the
+// dashboard miniature.
 /** The comb: 60 radial bars between these two radii. */
 const R_TICK_INNER = 72;
 const R_TICK_OUTER = 94;
@@ -167,7 +127,7 @@ const ZONE_NOTES: {
     id: "critical_low",
     label: "Critical Low",
     range: "under 0.20",
-    colour: "#8C3A2B",
+    colour: PRIORITY_ZONE_COLOURS.critical_low,
     text: "text-[#8C3A2B]",
     body:
       "Severe engagement hurdles or non-target profile: usually explicit opt-outs, inactive registry status, or negligible operating capacity. Kept on record, but requires a direct outreach reset before re-engaging.",
@@ -178,7 +138,7 @@ const ZONE_NOTES: {
     id: "low",
     label: "Low",
     range: "0.20 to 0.40",
-    colour: "#B05840",
+    colour: PRIORITY_ZONE_COLOURS.low,
     text: "text-[#B05840]",
     body:
       "Not a bad organisation — a later one. Typically reflects unengaged outreach (unanswered follow-ups), modest filed income, or non-priority sector alignment. New activity, fresh filings, or updated contact data will lift this score.",
@@ -189,7 +149,7 @@ const ZONE_NOTES: {
     id: "low_medium",
     label: "Low Medium",
     range: "0.40 to 0.55",
-    colour: "#D97D38",
+    colour: PRIORITY_ZONE_COLOURS.low_medium,
     text: "text-[#D97D38]",
     body:
       "Baseline candidate profile with partial data: default neutral scores on missing fields (e.g. unknown sector or size) often keep clients here. Indicates a viable client that simply needs more recorded intelligence before prioritizing.",
@@ -200,7 +160,7 @@ const ZONE_NOTES: {
     id: "high_medium",
     label: "High Medium",
     range: "0.55 to 0.70",
-    colour: "#DCA524",
+    colour: PRIORITY_ZONE_COLOURS.high_medium,
     text: "text-[#C08416]",
     body:
       "Solid strategic fit with positive indicators: moderate verified income, relevant sector classification, or warm previous contact history. Strong candidate for outreach once top-tier queues are addressed.",
@@ -211,7 +171,7 @@ const ZONE_NOTES: {
     id: "high",
     label: "High",
     range: "0.70 to 0.85",
-    colour: "#356B58",
+    colour: PRIORITY_ZONE_COLOURS.high,
     text: "text-[#356B58]",
     body:
       "Prime outreach candidate: confirmed priority sector, substantial charitable income, matched grant funding history, or proven engagement track record. High conversion potential.",
@@ -222,7 +182,7 @@ const ZONE_NOTES: {
     id: "extremely_high",
     label: "Extremely High",
     range: "0.85 and up",
-    colour: "#204A3E",
+    colour: PRIORITY_ZONE_COLOURS.extremely_high,
     text: "text-[#204A3E]",
     body:
       "Exceptional alignment across all dimensions: top-tier income scale, multiple verified grant awards, priority sector focus, and active positive stakeholder relationships. Immediate outreach priority.",
@@ -232,28 +192,7 @@ const ZONE_NOTES: {
 ];
 
 /** The scale span each zone owns, for its hover target. */
-const ZONE_SPANS: Record<PriorityZoneId, { from: number; to: number }> = {
-  critical_low: { from: 0, to: 0.20 },
-  low: { from: 0.20, to: 0.40 },
-  low_medium: { from: 0.40, to: 0.55 },
-  high_medium: { from: 0.55, to: 0.70 },
-  high: { from: 0.70, to: 0.85 },
-  extremely_high: { from: 0.85, to: 1.00 },
-};
-
-const round = (value: number) => Math.round(value * 1000) / 1000;
-
-function angleAt(fraction: number): number {
-  return ((START_ANGLE_DEG + fraction * SWEEP_DEG) * Math.PI) / 180;
-}
-
-function pointAt(fraction: number, radius: number): { x: number; y: number } {
-  const angle = angleAt(fraction);
-  return {
-    x: round(CX + radius * Math.cos(angle)),
-    y: round(CY + radius * Math.sin(angle)),
-  };
-}
+const ZONE_SPANS = PRIORITY_ZONE_SPANS;
 
 /** An arc along the scale, as a stroke-able path. Used for the hover targets. */
 function arcPath(fromFraction: number, toFraction: number, radius: number): string {
@@ -380,7 +319,7 @@ export function PriorityDial({
 
   const clamped = score === null ? null : Math.max(0, Math.min(1, score));
 
-  const resolvedZone = clamped === null ? null : zoneOf(clamped);
+  const resolvedZone = clamped === null ? null : priorityZoneOf(clamped);
   const bandStyle = resolvedZone ? BAND_STYLE[resolvedZone] : FALLBACK_BAND;
   const bandLabel = resolvedZone ? BAND_STYLE[resolvedZone].label : (band ?? null);
 
@@ -401,8 +340,8 @@ export function PriorityDial({
       const tip = pointAt(centre, R_TICK_OUTER);
       out.push({
         index,
-        zone: zoneOf(centre),
-        colour: interpolateColor(centre),
+        zone: priorityZoneOf(centre),
+        colour: interpolatePriorityColor(centre),
         x1: base.x,
         y1: base.y,
         x2: tip.x,

@@ -20,7 +20,7 @@
 import {
   CANONICAL_SECTOR_GROUPS,
   UNCLASSIFIED_SECTOR,
-} from "../../app/clients/visible-clients.ts";
+} from "../../app/(app)/clients/visible-clients.ts";
 import { INCOME_BAND_OPTIONS } from "../income-band.ts";
 import { ORGANISATION_TYPES, PIPELINE_STATUSES } from "../organisation-format.ts";
 
@@ -111,7 +111,7 @@ export const NL_SEARCH_SYSTEM_PROMPT = [
   "",
   "Guidance:",
   '- Size words map to incomeBands: "tiny"/"grassroots" → under_10k, "small" → 10k_100k,',
-  '  "mid-sized" → 100k_1m, "large"/"major" → over_1m. A range takes every band it spans.',
+  '  "mid-sized" → 100k_500k/500k_1m, "large" → 1m_10m, "regional anchor" → 10m_50m, "national" → 50m_100m, "major" → over_100m. A range takes every band it spans.',
   '- "warm", "promising" or "worth a call" → scoreBands ["high"]. "untouched"/"not contacted yet"',
   "  → statuses [\"not_contacted\"]. Only use a status the user actually implied.",
   "- Put a word in keywords only if it narrows meaningfully. An empty keywords array is fine.",
@@ -222,7 +222,7 @@ export function parseNlSearchPlan(raw: string): NlSearchPlan | null {
     sectors: enumArray(object.sectors, SECTOR_KEYS, 7),
     statuses: enumArray(object.statuses, PIPELINE_STATUSES, 10),
     types: enumArray(object.types, ORGANISATION_TYPES, 8),
-    incomeBands: enumArray(object.incomeBands, INCOME_BAND_OPTIONS, 4),
+    incomeBands: enumArray(object.incomeBands, INCOME_BAND_OPTIONS, 8),
     scoreBands: enumArray(object.scoreBands, NL_SCORE_BANDS, 4),
     keywords: stringArray(object.keywords, 8),
     unsupported: stringArray(object.unsupported, 4),

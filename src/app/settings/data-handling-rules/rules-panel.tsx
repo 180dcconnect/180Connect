@@ -1,9 +1,11 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
-import { Check, ChevronRight, Loader2 } from "lucide-react";
+import { useId, useState, useTransition, type ReactNode } from "react";
+import { Check, ChevronRight, Loader2, Lock, TriangleAlert, Unlock } from "lucide-react";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { Switch } from "@/components/ui/material-design-3-switch";
 import { Rise } from "@/components/dashboard-stage";
-import { Pill } from "@/app/clients/[id]/section-card";
+import { Pill } from "@/app/(app)/clients/[id]/section-card";
 import {
   Select,
   SelectContent,
@@ -35,7 +37,6 @@ import {
   PRIMARY_BUTTON,
   QUIET_BUTTON,
   ROW,
-  ROW_ACTION,
   SELECT_CONTENT,
   SELECT_GROUP_LABEL,
   SELECT_ITEM,
@@ -82,13 +83,29 @@ function EffectPill({ rule }: { rule: RuleRow }) {
  * Plain names come from `src/lib/data-handling-catalogue.ts`. Turning a
  * protection off asks first, because it is the one action here that weakens
  * privacy: personal data starts being saved from the next import.
+ *
+ * ── The order of the cards ──
+ *
+ * The reader arrives with one question — "is our data handling right?" — so the
+ * two cards that answer it come first: what is protected, then what the
+ * protections have actually removed. The card that *changes* them sits last,
+ * under its own heading, and `removedSoFar` is a slot rather than a third card
+ * here for exactly that reason: the evidence card is the page's to render, and
+ * it has to land between the two. Putting the form in the middle split the
+ * reading and pushed the evidence below a developer form, which is the wrong
+ * way round for the job people come here to do.
  */
 export function RulesPanel({
   initialRules,
   initialVersion,
+  readOnly = false,
+  removedSoFar,
 }: {
   initialRules: RuleRow[];
   initialVersion: number;
+  readOnly?: boolean;
+  /** "What has been removed so far" — see the note above on card order. */
+  removedSoFar?: ReactNode;
 }) {
   const [rules, setRules] = useState(initialRules);
   const [version, setVersion] = useState(initialVersion);
@@ -222,6 +239,12 @@ export function RulesPanel({
                   {groupRules.map((rule) => {
                     const { label, description } = ruleName(rule);
                     const confirming = confirmingId === rule.id;
+                    const turnOffNote = `From the next import, ${label.toLowerCase()} will be saved again.`;
+                    // The note is real text in the row, not just tooltip copy: a
+                    // tooltip is only announced while it is open, so the switch
+                    // points at this instead. `aria-description` would be shorter
+                    // and is not yet supported on `role="switch"`.
+                    const turnOffNoteId = `protection-off-note-${rule.id}`;
                     return (
                       <li key={rule.id} className={`${ROW} items-start`}>
                         <div className="min-w-0 flex-1">
@@ -260,15 +283,39 @@ export function RulesPanel({
                             </div>
                           )}
                         </div>
-                        {!confirming && (
-                          <button
-                            type="button"
-                            onClick={() => setConfirmingId(rule.id)}
-                            disabled={isPending}
-                            className={`${ROW_ACTION} disabled:pointer-events-none disabled:opacity-50`}
-                          >
-                            Turn off<span className="sr-only"> {label}</span>
-                          </button>
+                        {!readOnly && (
+                          // A switch has no room to say what it does, and this is
+                          // the control that decides whether a personal detail is
+                          // saved. The sentence below is the confirmation's own
+                          // wording, so the hover and the dialog agree.
+                          <>
+                            <span id={turnOffNoteId} className="sr-only">
+                              {turnOffNote}
+                            </span>
+                            <InfoTooltip
+                              title="Turning this off"
+                              content={turnOffNote}
+                              side="top"
+                              align="end"
+                            >
+                              <span className="inline-flex">
+                                <Switch
+                                  role="switch"
+                                  aria-label={`${label} protection from ${group}`}
+                                  aria-describedby={turnOffNoteId}
+                                  checked={rule.is_active}
+                                  onCheckedChange={(nextChecked) => {
+                                    if (!nextChecked) setConfirmingId(rule.id);
+                                  }}
+                                  disabled={isPending || confirming}
+                                  variant="destructive"
+                                  showIcons
+                                  checkedIcon={<Lock aria-hidden="true" className="size-3" />}
+                                  uncheckedIcon={<Unlock aria-hidden="true" className="size-3" />}
+                                />
+                              </span>
+                            </InfoTooltip>
+                          </>
                         )}
                       </li>
                     );
@@ -280,8 +327,39 @@ export function RulesPanel({
         </section>
       </Rise>
 
-      <Rise>
-        <section aria-labelledby="turn-on-heading" className={CARD}>
+      {removedSoFar}
+
+      {!readOnly && (
+        <>
+        {/* The one screen in Settings where a non-technical admin can do real
+            damage without any visible sign: a protection that quietly matches
+            nothing looks exactly like one that works, and the list above says
+            "on" either way. So the section is labelled as a developer's job
+            before anyone starts choosing from it — as a heading rather than a
+            tinted card, since most of what is under it is ordinary. */}
+        <Rise>
+          <section aria-labelledby="danger-zone-heading">
+            <div className="flex items-baseline gap-2">
+              <TriangleAlert
+                aria-hidden="true"
+                className="size-[15px] shrink-0 self-center text-stop/70"
+                strokeWidth={2.2}
+              />
+              <h2
+                id="danger-zone-heading"
+                className="font-body text-[19px] leading-[1.3] font-normal tracking-[-0.01em] text-stop"
+              >
+                Danger zone
+              </h2>
+            </div>
+            <p className="mt-1.5 text-[13px] leading-[1.55] text-dim">
+              If something here needs changing, it is better to ask a developer than
+              to guess.
+            </p>
+          </section>
+        </Rise>
+        <Rise>
+          <section aria-labelledby="turn-on-heading" className={CARD}>
           <h2 id="turn-on-heading" className={CARD_TITLE}>
             Turn a protection on
           </h2>
@@ -359,23 +437,43 @@ export function RulesPanel({
               <ul className="mt-1">
                 {inactiveRules.map((rule) => {
                   const { label } = ruleName(rule);
+                  const turnOnNote = `From the next import, ${label.toLowerCase()} will be removed again.`;
+                  const turnOnNoteId = `protection-on-note-${rule.id}`;
                   return (
                     <li key={rule.id} className={`${ROW} items-start`}>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm text-ink">{label}</p>
                         <p className="mt-1 text-[13px] text-dim">From {sourceLabel(rule.source)}</p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => toggle(rule, true)}
-                        disabled={isPending}
-                        className={`${ROW_ACTION} inline-flex items-center gap-1.5 disabled:pointer-events-none disabled:opacity-50`}
+                      {/* The same switch as the list above, so "on" looks the
+                          same wherever it is read. Turning one back on is the
+                          safe direction and needs no confirmation. */}
+                      <span id={turnOnNoteId} className="sr-only">
+                        {turnOnNote}
+                      </span>
+                      <InfoTooltip
+                        title="Turning this on"
+                        content={turnOnNote}
+                        side="top"
+                        align="end"
                       >
-                        {busyId === rule.id && (
-                          <Loader2 aria-hidden="true" className="size-3 animate-spin" />
-                        )}
-                        Turn back on<span className="sr-only"> {label}</span>
-                      </button>
+                        <span className="inline-flex">
+                          <Switch
+                            role="switch"
+                            aria-label={`${label} protection from ${sourceLabel(rule.source)}`}
+                            aria-describedby={turnOnNoteId}
+                            checked={rule.is_active}
+                            onCheckedChange={(nextChecked) => {
+                              if (nextChecked) toggle(rule, true);
+                            }}
+                            disabled={isPending}
+                            variant="destructive"
+                            showIcons
+                            checkedIcon={<Lock aria-hidden="true" className="size-3" />}
+                            uncheckedIcon={<Unlock aria-hidden="true" className="size-3" />}
+                          />
+                        </span>
+                      </InfoTooltip>
                     </li>
                   );
                 })}
@@ -482,6 +580,8 @@ export function RulesPanel({
           </p>
         </section>
       </Rise>
+        </>
+      )}
     </>
   );
 }

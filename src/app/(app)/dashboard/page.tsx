@@ -1,32 +1,35 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { fetchPaged } from "@/lib/supabase/fetch-paged";
 import { getOutreachEngineHealth, type OutreachEngineHealth } from "@/lib/gmail/engine-status.ts";
 import { fetchAdminQueueTally } from "@/lib/dashboard/admin-queue";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { getCurrentActor } from "@/lib/auth/actor";
-import { hasPermission } from "@/lib/auth/permissions";
-import { isActionOverdue } from "@/lib/actions";
+import { hasPermission, canView, seesAdminView } from "@/lib/auth/permissions";
+import { formatMyActions, type ActionRow } from "@/lib/actions";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import {
   computeDashboardMetrics,
   filterActiveSuppressed,
-  needsAttention,
   organisationGrowthSeries,
   type DashboardOrgRow,
   type GrowthPoint,
   type OpenSuppression,
-  type OverdueActionCandidate,
 } from "@/lib/dashboard-metrics";
 import {
   computePerformance,
+  FUNNEL_TREND_DAYS,
+  funnelTrendSeries,
   performanceInputForClient,
   pipelineTrendSeries,
   queueBands,
   sectorPerformance,
   trendWindowStart,
   type ConvertedOutcomeRow,
+  type FunnelTrendSeries,
   type LatestScoreRow,
   type PerformanceInput,
   type PerformanceSummary,
@@ -37,12 +40,6 @@ import {
   type TeamUserRow,
 } from "@/lib/performance-metrics";
 import { formatTeamActivities, type FormattedTeamActivity, type RawTeamActivityRow } from "@/lib/team-activity";
-import {
-  followUpRecommendations,
-  FOLLOW_UP_TRIGGER_STATUSES,
-  DEFAULT_FOLLOW_UP_THRESHOLDS,
-  type FollowUpRecommendation,
-} from "@/lib/outreach/follow-up-recommendations";
 import {
   buildRecentUpdates,
   recentUpdatesCutoff,
@@ -56,10 +53,32 @@ import {
   type OrganisationPreview,
 } from "@/lib/recent-updates";
 import { myWorkSummary, type MyWorkSummary } from "@/lib/dashboard/my-work";
-import { aiSpendSummary, type AiGenerationCostRow, type AiSpendSummary } from "@/lib/dashboard/ai-spend";
+import { summariseMyDesk, type DeskDraft, type MyDesk } from "@/lib/dashboard/my-desk";
+import { mergeDashboardFeed } from "@/lib/dashboard/recent-feed";
+import { camLeaderboard } from "@/lib/dashboard/cam-leaderboard";
+import {
+  DEFAULT_OUTREACH_DAILY_SEND_LIMIT,
+  dailySendWindowStart,
+} from "@/lib/outreach/daily-send-limit";
+import {
+  newestMissionPerOrg,
+  resolveMissionText,
+  type EnrichmentMissionRow,
+} from "@/lib/mission";
+import {
+  selectPriorityOpportunities,
+  type OpportunityFactors,
+  type PriorityOpportunity,
+} from "@/lib/priority-opportunities";
+import {
+  aiSpendSummary,
+  aiSpendWindowStart,
+  toAiGenerationActivity,
+  type AiGenerationCostRow,
+  type AiSpendSummary,
+} from "@/lib/dashboard/ai-spend";
 import { loadViewerState } from "@/lib/dashboard/viewer-state";
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
-import { TeamActivityFeed } from "@/components/team-activity-feed";
 import { RecentUpdatesFeed } from "@/components/recent-updates-feed";
 import { FirstRunGuide } from "@/components/first-run-guide";
 import { OriginButton } from "@/components/ui/origin-button";
@@ -67,9 +86,17 @@ import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { AdminActionCenter, type AdminQueueCounts } from "@/components/dashboard/admin-action-center";
 import { QueueQualityCard } from "@/components/dashboard/queue-quality-card";
 import { PerformanceSection } from "@/components/dashboard/performance-section";
+import { CamLeaderboardTable } from "@/components/dashboard/cam-leaderboard-table";
 import { MyWorkStrip } from "@/components/dashboard/my-work-strip";
-import { ActionCenterCard } from "@/components/dashboard/action-center-card";
+import { PriorityOpportunitiesCard } from "@/components/dashboard/priority-opportunities-card";
+import { MyActionsCard } from "@/components/dashboard/my-actions-card";
+import { SendingCapacityCard, type SendingCapacity } from "@/components/dashboard/sending-capacity-card";
 import { AiSpendCard } from "@/components/dashboard/ai-spend-card";
+import { DataHealthCard } from "@/components/dashboard/data-health-card";
+import { SystemHealthCard } from "@/components/dashboard/system-health-card";
+import { readDataHealth, readSystemHealth, type DataHealthReads } from "@/lib/dashboard/health-reads";
+import { countCreatedSince, summariseDataHealth } from "@/lib/dashboard/data-health";
+import { summariseSystemHealth, type SystemHealthInput } from "@/lib/dashboard/system-health";
 import {
   REVIEW_CLIENTS_EMPTY_STATE,
   guideProgress,
@@ -84,6 +111,23 @@ import {
   type ReplyTrackingRow,
 } from "@/lib/reply-analytics";
 import { StatCard } from "@/components/stat-card";
+
+/** An unsent draft as read, before it is narrowed to the viewer's own clients. */
+type DraftRow = { id: string; organisation_id: string; subject: string | null; updated_at: string };
+
+/** As read: `activity` is plain text until `toAiGenerationActivity` narrows it. */
+type RawAiGenerationCostRow = Omit<AiGenerationCostRow, "activity"> & { activity: string | null };
+
+/**
+ * The `latest_scores` read plus the persisted per-factor breakdown, which the
+ * Priority Opportunities card explains in plain English. Kept out of
+ * `LatestScoreRow` (and stripped back out before `performanceInputForClient`)
+ * so the breakdown never rides to the browser inside the Performance section's
+ * serialised input.
+ */
+type DashboardScoreRow = LatestScoreRow & {
+  score_factors: { factors: OpportunityFactors } | null;
+};
 
 /**
  * One outreach-engine check that is not reporting active.
@@ -119,8 +163,89 @@ function engineIssuesFrom(health: OutreachEngineHealth): EngineIssue[] {
 }
 
 /**
+ * The "Outreach engine needs attention" banner, streamed.
+ *
+ * The engine checks include a live round trip to Gmail that can take up to ~6s
+ * when Gmail is slow. Awaiting them in the page held every other card on the
+ * dashboard back for that long; awaited here, under a Suspense boundary with no
+ * fallback, the dashboard paints at once and the banner appears when — and only
+ * if — a check is not active. A healthy engine still renders nothing.
+ */
+async function EngineHealthBanner({ health }: { health: Promise<OutreachEngineHealth> }) {
+  const engineIssues = engineIssuesFrom(await health);
+  if (engineIssues.length === 0) return null;
+
+  // Whether the engine banner reads as "broken" or "not set up yet".
+  const engineStop = engineIssues.some((issue) => issue.severity === "stop");
+
+  return (
+    <Rise>
+      <section
+        aria-labelledby="engine-health-heading"
+        className={`rounded-panel border px-5 py-4 ${
+          engineStop ? "border-stop/25 bg-stop-wash/50" : "border-hold/25 bg-hold-wash/50"
+        }`}
+      >
+        <h2
+          id="engine-health-heading"
+          className={`font-body text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] ${
+            engineStop ? "text-stop" : "text-hold"
+          }`}
+        >
+          Outreach engine needs attention
+        </h2>
+        <ul className="mt-2 space-y-1">
+          {engineIssues.map((issue) => (
+            <li key={issue.label} className="font-body text-[13px] leading-[1.55] text-dim">
+              <span className="font-semibold text-ink">{issue.label}</span> — {issue.detail}
+            </li>
+          ))}
+        </ul>
+        <Link
+          href="/inbox"
+          className="mt-2 inline-block font-body text-[13px] font-semibold text-lead transition-colors hover:text-lead-mid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
+        >
+          Open the inbox →
+        </Link>
+      </section>
+    </Rise>
+  );
+}
+
+/**
+ * Data health and System health, streamed — admins and leadership only.
+ *
+ * Their reads start alongside the page's own and are awaited here, under a
+ * Suspense boundary, so a slow count or the Gmail round trip never holds the
+ * rest of the dashboard back. Both reads never reject (see health-reads.ts).
+ * `orgFacts` comes from the organisations the page has already loaded rather
+ * than three more queries for numbers already in memory.
+ */
+async function HealthCards({
+  reads,
+  orgFacts,
+}: {
+  reads: Promise<[DataHealthReads, Omit<SystemHealthInput, "now">]>;
+  orgFacts: { organisations: number; addedRecently: number; missingWebsite: number };
+}) {
+  const [dataReads, systemReads] = await reads;
+  const now = new Date();
+
+  return (
+    <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
+      <Rise className="h-full">
+        <DataHealthCard summary={summariseDataHealth({ now, ...orgFacts, ...dataReads })} />
+      </Rise>
+      <Rise className="h-full">
+        <SystemHealthCard summary={summariseSystemHealth({ now, ...systemReads })} />
+      </Rise>
+    </div>
+  );
+}
+
+/**
  * F021 — first screen after login. The sidebar (AppShell/F030) already wraps this
- * route via dashboard/layout.tsx; this page adds the top-level metrics (F022-F025)
+ * route via (app)/layout.tsx; this page adds the top-level metrics (F022-F025)
  * and Needs Attention panel (F027), all on one screen with no extra clicks (AC).
  * See src/lib/dashboard-metrics.ts for how the metrics are defined against the
  * F145 outreach_status pipeline.
@@ -171,12 +296,20 @@ export default async function DashboardPage({
   // Clients nobody owns. Read for every role rather than inside the admin block
   // below, because it is a CAM's only route into work when their own book is
   // empty — see the empty-book card in the render.
+  //
+  // This is the whole pool, and it is deliberately not the number the duty queue
+  // shows: see `unassignedHighPriorityCount` below, which narrows it to the
+  // clients worth chasing. Two counts because they answer two questions —
+  // "is there anything at all for a CAM to pick up" and "does an admin have
+  // valuable work to place".
   let unassignedCount = 0;
   // Actively-suppressed clients dropped from every total on this page.
   let suppressedCount = 0;
-  // Outreach-engine checks that are not reporting active. Empty means the
-  // dashboard says nothing about the engine at all.
-  let engineIssues: EngineIssue[] = [];
+  // The live outreach-engine checks, still in flight when the page renders. Not
+  // awaited here: the banner streams in behind its own Suspense boundary, so a
+  // slow Gmail check (it can take up to ~6s) no longer holds the whole dashboard
+  // back. Null for an actor who cannot send, which renders no banner at all.
+  let engineHealthPromise: Promise<OutreachEngineHealth> | null = null;
   // Owned organisations in `responded` status whose inbound reply has not been
   // read yet by this actor (INBOX_THREAD_STATE.read_state !== 'read').
   let unreadInboundOrgIds: Set<string> | undefined;
@@ -185,17 +318,31 @@ export default async function DashboardPage({
   // stretch it is compared against.
   let aiSpend: AiSpendSummary | null = null;
 
+  // Data health and System health — admins and leadership only. The reads are
+  // started with the others and streamed in by `HealthCards`; `orgHealthFacts`
+  // is filled from the organisations read once it lands.
+  let healthReads: Promise<[DataHealthReads, Omit<SystemHealthInput, "now">]> | null = null;
+  let orgHealthFacts: { organisations: number; addedRecently: number; missingWebsite: number } | null = null;
+
   // Performance section state — null when its reads fail, so the rest of the
   // dashboard still renders (every section here fails independently).
   let performance: {
     summary: PerformanceSummary;
     trend: GrowthPoint[];
+    funnel: FunnelTrendSeries;
     sectors: SectorPerformanceRow[];
     queue: { bands: QueueBands; scored: number };
     cams: TeamUserRow[];
     raw: PerformanceInput;
     sectorByOrg: Map<string, string | null>;
   } | null = null;
+
+  // "Your Priority Opportunities": this viewer's own book plus unclaimed
+  // clients, ranked by score. Built off the reads above — no extra query.
+  // `scoresLoaded` is false when the latest_scores read failed, so the card
+  // hides rather than claiming there is nothing worth talking to.
+  let priorityOpportunities: PriorityOpportunity[] = [];
+  let scoresLoaded = false;
 
   // Every read on this page that does not need another read's result is started
   // before the first one is awaited, so they all leave for the database together.
@@ -216,25 +363,56 @@ export default async function DashboardPage({
   const viewerState = loadViewerState(actor.id);
   viewerState.catch(() => {});
 
-  const followUpPreferences = canViewClients
-    ? start(
-        supabase
-          .from("outreach_preferences")
-          .select("first_follow_up_days, second_follow_up_days")
-          .eq("user_id", actor.id)
-          .maybeSingle(),
-      )
-    : null;
-
-  const overdueActionsRead = canViewClients
+  // "Your actions" — every open action assigned to this person, the same read
+  // the Actions page makes, so the card and that page agree about what is
+  // overdue. Only for accounts that can hold work; a view-only account has none.
+  const actionsRead = canWrite
     ? start(
         supabase
           .from("actions")
-          .select("organisation_id, title, due_date")
+          .select(
+            "id, title, description, due_date, status, organisation_id, created_by_user_id, created_at, " +
+              "organisation:organisations!actions_organisation_id_fkey(legal_name), " +
+              "created_by_user:users!actions_created_by_user_id_fkey(full_name)",
+          )
           .eq("assignee_user_id", actor.id)
           .eq("status", "open")
-          .not("due_date", "is", null),
+          .order("created_at", { ascending: true }),
       )
+    : null;
+
+  // Sending capacity — the branch-wide daily limit, what has gone out since
+  // UK midnight, and what is scheduled to go before the next one. The same day
+  // boundary the send RPCs enforce (daily-send-limit.ts). Three small counts.
+  const sendWindowStart = dailySendWindowStart();
+  // Noon tomorrow (UK) resolves to tomorrow's midnight, whatever the clock change.
+  const sendWindowEnd = dailySendWindowStart(
+    new Date(Date.parse(sendWindowStart) + 36 * 60 * 60 * 1000),
+  );
+  const sendingCapacityRead = canViewClients
+    ? Promise.all([
+        start(
+          supabase
+            .from("outreach_daily_send_limit")
+            .select("daily_limit")
+            .eq("id", true)
+            .maybeSingle(),
+        ),
+        start(
+          supabase
+            .from("outreach_messages")
+            .select("id", { count: "exact", head: true })
+            .eq("send_status", "sent")
+            .gte("sent_at", sendWindowStart),
+        ),
+        start(
+          supabase
+            .from("outreach_messages")
+            .select("id", { count: "exact", head: true })
+            .eq("send_status", "scheduled")
+            .lt("scheduled_at", sendWindowEnd),
+        ),
+      ])
     : null;
 
   if (canViewClients) {
@@ -257,28 +435,15 @@ export default async function DashboardPage({
     // many pages at once: a table that runs to a few thousand rows
     // (organisations, latest_scores) comes back in one round instead of one
     // round per thousand rows. Overshooting the end costs one empty page.
-    async function fetchAllRows<T>(
+    // The loop itself is the shared `fetchPaged`, which /clients, /inbox and
+    // /analytics page through too.
+    const fetchAllRows = <T,>(
       buildPage: (
         from: number,
         to: number,
       ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
       pagesPerRound = 1,
-    ): Promise<{ data: T[] | null; error: { message: string } | null }> {
-      const all: T[] = [];
-      const step = 1000;
-      for (let from = 0; ; from += step * pagesPerRound) {
-        const pages = await Promise.all(
-          Array.from({ length: pagesPerRound }, (_, page) =>
-            buildPage(from + page * step, from + (page + 1) * step - 1),
-          ),
-        );
-        for (const { data, error } of pages) {
-          if (error) return { data: null, error };
-          all.push(...(data ?? []));
-          if (!data || data.length < step) return { data: all, error: null };
-        }
-      }
-    }
+    ) => fetchPaged<T>(buildPage, { pagesPerRound });
 
     const fetchAllOrganisations = () =>
       fetchAllRows<DashboardOrgRow>(
@@ -286,7 +451,7 @@ export default async function DashboardPage({
           supabase
             .from("organisations")
             .select(
-              "id, legal_name, outreach_status, owner_id, updated_at, created_at, sector, organisation_type, city, country_code, website",
+              "id, legal_name, outreach_status, owner_id, updated_at, created_at, sector, organisation_type, city, country_code, website, charity_activities, cic_community_statement",
             )
             .order("created_at", { ascending: true })
             .order("id", { ascending: true })
@@ -321,14 +486,13 @@ export default async function DashboardPage({
       );
 
     // Live sending health — the Gmail transport plus the reply-sync and
-    // scheduled-send cron jobs. Started here so it overlaps the mailbox reads
-    // (it caps itself at ~6s, so a sick Gmail cannot hold the dashboard open),
-    // but awaited separately: adding a ninth element to the tuple below pushes
-    // TypeScript off Promise.all's tuple signature, which silently widens every
-    // other result in it to a union and breaks the `.error` checks under it.
+    // scheduled-send cron jobs. Started here so it overlaps the mailbox reads,
+    // and never awaited by the page itself: `EngineHealthBanner` awaits it
+    // inside a Suspense boundary, so the rest of the dashboard paints first.
     // Only for an actor who can actually send: a viewer has no outreach to be
     // broken, and the check is a live Gmail round trip.
-    const engineHealthPromise = canWrite ? getOutreachEngineHealth(supabase) : null;
+    // Viewers see sending health too: it is a reading, not a control.
+    engineHealthPromise = canView(actor.role, "client:edit") ? getOutreachEngineHealth(supabase) : null;
 
     const auditRead = start(
       supabase
@@ -377,6 +541,40 @@ export default async function DashboardPage({
     // interpolates filter values raw, so a Date would 400 every query.
     const perfCutoff = trendWindowStart(new Date()).toISOString();
 
+    // Funnel chart — the same three events over a full year, but organisation
+    // and date only: the chart buckets distinct clients per day server-side,
+    // so a year of events crosses to the browser as three small arrays rather
+    // than thousands of rows. Started with the reads above, awaited with them.
+    const funnelCutoff = trendWindowStart(new Date(), FUNNEL_TREND_DAYS).toISOString();
+    const funnelReads = Promise.all([
+      fetchAllRows<{ organisation_id: string; sent_at: string | null }>((from, to) =>
+        supabase
+          .from("outreach_messages")
+          .select("organisation_id, sent_at")
+          .eq("send_status", "sent")
+          .gte("sent_at", funnelCutoff)
+          .order("sent_at", { ascending: true })
+          .range(from, to),
+      ),
+      fetchAllRows<{ organisation_id: string; received_at: string }>((from, to) =>
+        supabase
+          .from("reply_events")
+          .select("organisation_id, received_at")
+          .gte("received_at", funnelCutoff)
+          .order("received_at", { ascending: true })
+          .range(from, to),
+      ),
+      fetchAllRows<{ organisation_id: string; created_at: string }>((from, to) =>
+        supabase
+          .from("outcomes")
+          .select("organisation_id, created_at")
+          .eq("outcome_type", "converted")
+          .gte("created_at", funnelCutoff)
+          .order("created_at", { ascending: true })
+          .range(from, to),
+      ),
+    ]);
+
     const performanceReads = Promise.all([
       fetchAllRows<SentMessageRow>((from, to) =>
         supabase
@@ -408,15 +606,17 @@ export default async function DashboardPage({
           .overrideTypes<ConvertedOutcomeRow[], { merge: false }>(),
       ),
       // The queue band distribution reads the whole table — a band added
-      // before the window still belongs to the queue.
-      fetchAllRows<LatestScoreRow>(
+      // before the window still belongs to the queue. score_factors rides
+      // along for the Priority Opportunities card's plain-English reasons
+      // (stripped back out before anything crosses to the client).
+      fetchAllRows<DashboardScoreRow>(
         (from, to) =>
           supabase
             .from("latest_scores")
-            .select("organisation_id, priority_band, priority_score, scored_at")
+            .select("organisation_id, priority_band, priority_score, scored_at, score_factors")
             .order("organisation_id", { ascending: true })
             .range(from, to)
-            .overrideTypes<LatestScoreRow[], { merge: false }>(),
+            .overrideTypes<DashboardScoreRow[], { merge: false }>(),
         4,
       ),
       fetchAllRows<TeamUserRow>((from, to) =>
@@ -430,38 +630,56 @@ export default async function DashboardPage({
     ]);
 
     // F213 — month-to-date spend needs the current month plus the equal-length
-    // stretch before it, so the window reaches back two months and
-    // `aiSpendSummary` splits it. Every role can read AI_GENERATIONS (§3.4),
-    // but the budget is an admin concern, so these reads are admin-only
-    // rather than the tile being hidden client-side.
+    // stretch before it, so the window starts where `aiSpendSummary` does and
+    // it splits the rows. The same `aiSpendNow` goes to both, so the fetch and
+    // the split agree on the boundary. Every role can read AI_GENERATIONS
+    // (§3.4), but the budget is an admin concern, so these reads are
+    // admin-only rather than the tile being hidden client-side.
+    const aiSpendNow = new Date();
     const adminReads =
-      actor.role === "admin"
+      seesAdminView(actor.role)
         ? (() => {
-            const aiWindowStart = (() => {
-              const now = new Date();
-              return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString();
-            })();
+            const aiWindowStart = aiSpendWindowStart(aiSpendNow).toISOString();
             return Promise.all([
-              // F181's approval queues, counted once for both screens
-              // (src/lib/dashboard/admin-queue.ts) — the admin dashboard prints
-              // these same numbers on its duty-queue card.
+              // F181's approval queues, counted in one place
+              // (src/lib/dashboard/admin-queue.ts).
               fetchAdminQueueTally(supabase),
-              fetchAllRows<AiGenerationCostRow>((from, to) =>
+              fetchAllRows<RawAiGenerationCostRow>((from, to) =>
                 supabase
                   .from("ai_generations")
-                  .select("created_at, cost_usd, total_tokens, model")
+                  .select("created_at, cost_usd, total_tokens, model, activity")
                   .gte("created_at", aiWindowStart)
                   .order("created_at", { ascending: true })
                   .range(from, to)
-                  .overrideTypes<AiGenerationCostRow[], { merge: false }>(),
+                  .overrideTypes<RawAiGenerationCostRow[], { merge: false }>(),
               ),
-              supabase
-                .from("booklet_generations")
-                .select("created_at, cost_usd, total_tokens, model, input_tokens, output_tokens")
-                .gte("created_at", aiWindowStart),
+              // Paged like ai_generations: a plain select would silently
+              // truncate past PostgREST's 1000-row window and undercount spend.
+              fetchAllRows<{
+                created_at: string;
+                cost_usd: number | null;
+                total_tokens: number | null;
+                model: string | null;
+                input_tokens: number | null;
+                output_tokens: number | null;
+              }>((from, to) =>
+                supabase
+                  .from("booklet_generations")
+                  .select("created_at, cost_usd, total_tokens, model, input_tokens, output_tokens")
+                  .gte("created_at", aiWindowStart)
+                  .order("created_at", { ascending: true })
+                  .range(from, to),
+              ),
             ]);
           })()
         : null;
+
+    // Started here so they overlap every read below; awaited only inside the
+    // Suspense boundary, so they never delay the page. Reuses the engine check
+    // above instead of asking Gmail a second time.
+    healthReads = seesAdminView(actor.role)
+      ? Promise.all([readDataHealth(supabase), readSystemHealth(supabase, engineHealthPromise)])
+      : null;
 
     const [organisations, openSuppressions, replyTracking, rawActivity, rawUpdateNotes, rawUpdateMessages, rawUpdateReplies, rawUpdateAudit] =
       await Promise.all([
@@ -527,11 +745,6 @@ export default async function DashboardPage({
       }
     }
 
-    // Reported whether or not the pipeline reads worked: a dead reply sync is
-    // exactly the sort of thing that should survive a failed query on this page.
-    const engineHealth = engineHealthPromise ? await engineHealthPromise : null;
-    engineIssues = engineHealth ? engineIssuesFrom(engineHealth) : [];
-
     if (!loadFailed) {
       rows = filterActiveSuppressed(organisations.data ?? [], openSuppressions.data ?? []);
       unassignedCount = rows.filter((row) => row.owner_id === null).length;
@@ -539,6 +752,17 @@ export default async function DashboardPage({
       // the totals until approved, which is what filterActiveSuppressed just
       // applied, so the two numbers tell one story instead of two.
       suppressedCount = (organisations.data?.length ?? 0) - rows.length;
+
+      if (healthReads) {
+        // Every record held, suppressed ones included: this is about the data,
+        // not the pipeline totals above.
+        const allOrganisations = organisations.data ?? [];
+        orgHealthFacts = {
+          organisations: allOrganisations.length,
+          addedRecently: countCreatedSince(allOrganisations, new Date()),
+          missingWebsite: allOrganisations.filter((row) => !row.website?.trim()).length,
+        };
+      }
 
       const respondedMineOrgIds = canViewClients
         ? rows
@@ -557,6 +781,10 @@ export default async function DashboardPage({
       const [perfMessages, perfReplies, perfConversions, perfScores, perfUsers] =
         await performanceReads;
 
+      // The funnel chart's year of events lands with the reads above — same
+      // fail-soft shape: a broken funnel read empties the chart, never the page.
+      const [funnelMessages, funnelReplies, funnelConversions] = await funnelReads;
+
       const perfErrors = [
         ["performance.messages", perfMessages.error],
         ["performance.replies", perfReplies.error],
@@ -572,6 +800,20 @@ export default async function DashboardPage({
         }
       }
 
+      // The funnel chart degrades on its own: a broken year-long read empties
+      // the chart (its card renders its own empty state), never the section.
+      let funnelFailed = false;
+      for (const [source, err] of [
+        ["performance.funnel.messages", funnelMessages.error],
+        ["performance.funnel.replies", funnelReplies.error],
+        ["performance.funnel.conversions", funnelConversions.error],
+      ] as const) {
+        if (err) {
+          await reportError(err, { operation: `dashboard.${source}` });
+          funnelFailed = true;
+        }
+      }
+
       if (!perfFailed) {
         const visibleOrgIds = new Set(rows.map((row) => row.id));
 
@@ -579,15 +821,42 @@ export default async function DashboardPage({
           messages: (perfMessages.data ?? []).filter((m) => visibleOrgIds.has(m.organisation_id)),
           replies: (perfReplies.data ?? []).filter((r) => visibleOrgIds.has(r.organisation_id)),
           conversions: (perfConversions.data ?? []).filter((c) => visibleOrgIds.has(c.organisation_id)),
-          scores: (perfScores.data ?? []).filter((s) => visibleOrgIds.has(s.organisation_id)),
+          // score_factors stays server-side for Priority Opportunities below:
+          // the browser's Performance input keeps the LatestScoreRow shape, so
+          // the serialised payload does not grow.
+          scores: (perfScores.data ?? [])
+            .filter((s) => visibleOrgIds.has(s.organisation_id))
+            .map((s) => ({
+              organisation_id: s.organisation_id,
+              priority_band: s.priority_band,
+              priority_score: s.priority_score,
+              scored_at: s.scored_at,
+            })),
           users: perfUsers.data ?? [],
         };
+        scoresLoaded = true;
         const sectorByOrg = new Map(rows.map((row) => [row.id, row.sector ?? null]));
         performance = {
           summary: computePerformance(perfInput),
           trend: pipelineTrendSeries(perfInput),
           sectors: sectorPerformance(perfInput, sectorByOrg),
           queue: queueBands(perfInput.scores),
+          // The funnel chart's three lines, bucketed server-side from the
+          // year-long narrow reads. Same visible-org filter as the summary, so
+          // suppressed clients stay out of both; empty on a funnel failure.
+          funnel: funnelFailed
+            ? { contacted: [], replied: [], converted: [] }
+            : funnelTrendSeries({
+                messages: (funnelMessages.data ?? []).filter((m) =>
+                  visibleOrgIds.has(m.organisation_id),
+                ),
+                replies: (funnelReplies.data ?? []).filter((r) =>
+                  visibleOrgIds.has(r.organisation_id),
+                ),
+                conversions: (funnelConversions.data ?? []).filter((c) =>
+                  visibleOrgIds.has(c.organisation_id),
+                ),
+              }),
           // Owner-eligible roles: an active CAM or admin can own clients, so
           // both appear here — same list the clients owner filter uses.
           cams: perfUsers.data
@@ -623,6 +892,72 @@ export default async function DashboardPage({
           { band: row.priority_band, score: row.priority_score },
         ]),
       );
+
+      // The duty queue's unassigned tile, narrowed to the clients an admin can
+      // act on: no owner **and** the high band. The whole pool is thousands and
+      // only rises, so counting it made the tile red on every load — and a
+      // queue that is always red is one nobody reads. Band comes from the
+      // stored `priority_band` rather than a re-cut threshold, the same way the
+      // clients list's own high-score filter reads it, so the tile's number and
+      // the list it links to cannot disagree.
+      const unassignedHighPriorityCount = rows.filter(
+        (row) => row.owner_id === null && scoreByOrg.get(row.id)?.band === "high",
+      ).length;
+
+      // "Your Priority Opportunities": this viewer's own book plus unclaimed
+      // clients, ranked by score — who they should actually talk to next.
+      // Gated on scoresLoaded (not just rows loading) so a failed scores read
+      // hides the card instead of claiming there is nothing worth talking to.
+      if (scoresLoaded) {
+        const factorsByOrg = new Map(
+          (perfScores.data ?? []).map((row) => [row.organisation_id, row.score_factors]),
+        );
+        priorityOpportunities = selectPriorityOpportunities(
+          rows.map((row) => ({
+            id: row.id,
+            legal_name: row.legal_name,
+            outreach_status: row.outreach_status,
+            owner_id: row.owner_id,
+            sector: row.sector ?? null,
+            city: row.city ?? null,
+            priority_score: scoreByOrg.get(row.id)?.score ?? null,
+            priority_band: scoreByOrg.get(row.id)?.band ?? null,
+            score_factors: factorsByOrg.get(row.id) ?? null,
+            charity_activities: row.charity_activities ?? null,
+            cic_community_statement: row.cic_community_statement ?? null,
+          })),
+          { ownerId: actor.id },
+        );
+
+        if (priorityOpportunities.length > 0) {
+          // Missions for the ranked few only: one batched enrichment read for
+          // the six ranked ids (the register-filed texts are already on the
+          // rows). Fails soft — without it the cards still rank, they just
+          // show no mission line.
+          const { data: missionRows, error: missionError } = await supabase
+            .from("enrichment_results")
+            .select("organisation_id, mission_statement, enriched_at")
+            .in(
+              "organisation_id",
+              priorityOpportunities.map((opportunity) => opportunity.id),
+            )
+            .order("enriched_at", { ascending: false })
+            .overrideTypes<EnrichmentMissionRow[], { merge: false }>();
+          if (missionError) {
+            await reportError(missionError, { operation: "dashboard.opportunity_missions" });
+          } else {
+            const enrichmentMissions = newestMissionPerOrg(missionRows ?? []);
+            priorityOpportunities = priorityOpportunities.map((opportunity) => ({
+              ...opportunity,
+              mission: resolveMissionText({
+                charity_activities: opportunity.charity_activities ?? null,
+                cic_community_statement: opportunity.cic_community_statement ?? null,
+                enrichment_mission: enrichmentMissions.get(opportunity.id) ?? null,
+              }),
+            }));
+          }
+        }
+      }
 
       // How many clients each CAM owns, counted once here rather than with a
       // `rows.find` per organisation (which was also looking up the wrong table).
@@ -686,9 +1021,12 @@ export default async function DashboardPage({
       }
 
       // Format team activities with preview data
+      // Everyone's actions, the viewer's own included: they merge into Recent
+      // updates, which already shows the viewer's own notes and emails, and a
+      // feed that hid only some of your own activity would read as missing it.
       teamActivities = formatTeamActivities(
         (rawActivity.data ?? []) as RawTeamActivityRow[],
-        actor.id,
+        null,
         new Date(),
         // ownedCounts — not read on this page; the previews are the 5th and 6th
         // parameters, and passing two placeholders here pushed them to 6th/7th.
@@ -714,20 +1052,21 @@ export default async function DashboardPage({
       if (adminReads) {
         // Started with every other read above, so the booklet read no longer
         // waits for the AI-cost read to finish first.
-        const [queue, aiCosts, { data: booklets }] = await adminReads;
+        const [queue, aiCosts, bookletCosts] = await adminReads;
 
         if (aiCosts.error) {
           await reportError(aiCosts.error, { operation: "dashboard.ai_spend" });
-        } else {
+        }
+        if (bookletCosts.error) {
+          await reportError(bookletCosts.error, { operation: "dashboard.booklet_spend" });
+        }
+        if (!aiCosts.error && !bookletCosts.error) {
           aiSpend = aiSpendSummary([
-            ...(aiCosts.data ?? []).map((row) => ({
-              ...row,
-              // `as const` or this widens to `string` and stops matching
-              // AiGenerationActivity — the booklet branch below already has it.
-              activity: "initial_email" as const,
-            })),
-            ...(booklets ?? []).map((row) => ({ ...row, activity: "client_booklet" as const, total_tokens: row.total_tokens ?? ((row.input_tokens ?? 0) + (row.output_tokens ?? 0)) })),
-          ]);
+            // The row's own classification: initial, regeneration and
+            // follow-up are told apart by the column, not assumed.
+            ...(aiCosts.data ?? []).map((row) => ({ ...row, activity: toAiGenerationActivity(row.activity) })),
+            ...(bookletCosts.data ?? []).map((row) => ({ ...row, activity: "client_booklet" as const, total_tokens: row.total_tokens ?? ((row.input_tokens ?? 0) + (row.output_tokens ?? 0)) })),
+          ], aiSpendNow);
         }
 
         if (queue.error) {
@@ -742,7 +1081,8 @@ export default async function DashboardPage({
           pendingSuppressions: queue.tally?.pendingSuppressions ?? 0,
           suggestedEdits: queue.tally?.suggestedEdits ?? 0,
           discrepancies: queue.tally?.discrepancies ?? 0,
-          unassignedOrgs: unassignedCount,
+          statusChanges: queue.tally?.statusChanges ?? 0,
+          unassignedHighPriorityOrgs: unassignedHighPriorityCount,
         };
       }
 
@@ -766,94 +1106,87 @@ export default async function DashboardPage({
 
   const replyTracking = summariseTrackedReplies(trackedReplies, rows);
   const metrics = computeDashboardMetrics(rows, replyTracking);
-  // F160 — silence is measured from the client's last real activity (latest of
-  // sent email, received reply, audited status change), aggregated per client by
-  // get_clients_last_activity; the thresholds are this CAM's own preferences
-  // (defaults 7/14). Both reads fail soft: a failed activity query degrades the
-  // panel back to its pre-F160 status-only list rather than hiding it.
-  // F172 AC3 — this actor's own open, overdue actions, regardless of the
-  // client's outreach status: an overdue action must surface here even for an
-  // otherwise-quiet (or already-converted) client, which is exactly what
-  // needsAttention's status-only candidate set would otherwise miss. Reuses
-  // isActionOverdue from @/lib/actions so "overdue" is decided the same way
-  // here as on the Actions tab itself (F168/F170/F172) — not re-derived.
-  // Fails soft: a failed query just means the panel falls back to its pre-F172
-  // status-only behaviour rather than hiding the whole panel. Gated on
-  // canViewClients the same as the rest of this data — a role that cannot see
-  // a client profile has nothing to link an overdue-action badge to.
-  let overdueActionCandidates: OverdueActionCandidate[] = [];
-  if (overdueActionsRead) {
-    const { data: overdueActionRows, error: overdueActionsError } = await overdueActionsRead;
-    if (overdueActionsError) {
-      await reportError(overdueActionsError, { operation: "dashboard.overdue_actions" });
+  // "Your actions": open actions overdue or due this week, and unsent drafts on
+  // this person's own clients. Replies waiting and follow-ups due are not here
+  // — the inbox's Inbound Replies and Follow-up Due tabs are their home. Both
+  // reads fail soft: a failed one empties its half of the card, never the page.
+  let myDesk: MyDesk | null = null;
+  if (actionsRead && !loadFailed) {
+    const myOrgNames = new Map(
+      rows.filter((row) => row.owner_id === actor.id).map((row) => [row.id, row.legal_name]),
+    );
+    const [actionsResult, draftsResult] = await Promise.all([
+      actionsRead,
+      myOrgNames.size > 0
+        ? supabase
+            .from("outreach_messages")
+            .select("id, organisation_id, subject, updated_at")
+            .eq("send_status", "draft")
+            .in("organisation_id", Array.from(myOrgNames.keys()))
+            .order("updated_at", { ascending: false })
+        : Promise.resolve({ data: [] as DraftRow[], error: null }),
+    ]);
+    if (actionsResult.error) {
+      await reportError(actionsResult.error, { operation: "dashboard.my_actions" });
     }
-    const now = new Date();
-    overdueActionCandidates = (overdueActionRows ?? [])
-      .filter((row) => isActionOverdue(row.due_date, now))
-      .map((row) => ({
-        organisationId: row.organisation_id as string,
-        title: row.title as string,
-        dueDate: row.due_date as string,
-      }));
+    if (draftsResult.error) {
+      await reportError(draftsResult.error, { operation: "dashboard.my_drafts" });
+    }
+
+    const drafts: DeskDraft[] = ((draftsResult.data ?? []) as DraftRow[]).flatMap((draft) => {
+      const organisationName = myOrgNames.get(draft.organisation_id);
+      return organisationName
+        ? [
+            {
+              id: draft.id,
+              organisationId: draft.organisation_id,
+              organisationName,
+              subject: draft.subject,
+              updatedAt: draft.updated_at,
+            },
+          ]
+        : [];
+    });
+
+    myDesk = summariseMyDesk(
+      formatMyActions((actionsResult.data ?? []) as unknown as ActionRow[], actor.id),
+      drafts,
+    );
   }
 
-  let followUps: FollowUpRecommendation[] = [];
-  if (!loadFailed && canViewClients) {
-    const myCandidates = rows
-      .filter((row) => row.owner_id === actor.id && FOLLOW_UP_TRIGGER_STATUSES.has(row.outreach_status))
-      .map((row) => ({ id: row.id, legal_name: row.legal_name, outreach_status: row.outreach_status }));
-    if (myCandidates.length > 0 && followUpPreferences) {
-      const [preferences, activity] = await Promise.all([
-        followUpPreferences,
-        supabase.rpc("get_clients_last_activity", {
-          p_organisation_ids: myCandidates.map((row) => row.id),
-        }),
-      ]);
-      if (activity.error) {
-        await reportError(activity.error, { operation: "dashboard.follow_up_activity" });
-      }
-      if (preferences.error) {
-        await reportError(preferences.error, { operation: "dashboard.follow_up_preferences" });
-      }
-
-      followUps = followUpRecommendations(
-        myCandidates,
-        new Map(
-          (activity.data ?? []).map(
-            (row: {
-              organisation_id: string;
-              last_email_sent_at: string | null;
-              last_reply_received_at: string | null;
-              last_status_change_at: string | null;
-            }) => [
-              row.organisation_id,
-              {
-                lastEmailSentAt: row.last_email_sent_at,
-                lastReplyReceivedAt: row.last_reply_received_at,
-                lastStatusChangeAt: row.last_status_change_at,
-              },
-            ],
-          ),
-        ),
-        {
-          first: preferences.data?.first_follow_up_days ?? DEFAULT_FOLLOW_UP_THRESHOLDS.first,
-          second: preferences.data?.second_follow_up_days ?? DEFAULT_FOLLOW_UP_THRESHOLDS.second,
-        },
-      );
+  // Null when any of the three counts failed: a capacity reading built on a
+  // missing count would say "250 left" on a day the limit is already reached.
+  let sendingCapacity: SendingCapacity | null = null;
+  if (sendingCapacityRead) {
+    const [limitResult, sentResult, scheduledResult] = await sendingCapacityRead;
+    const failed = [limitResult, sentResult, scheduledResult].find((result) => result.error);
+    if (failed?.error) {
+      await reportError(failed.error, { operation: "dashboard.sending_capacity" });
+    } else {
+      sendingCapacity = {
+        limit: limitResult.data?.daily_limit ?? DEFAULT_OUTREACH_DAILY_SEND_LIMIT,
+        sentToday: sentResult.count ?? 0,
+        scheduledToday: scheduledResult.count ?? 0,
+      };
     }
   }
-
-  const attentionItems = needsAttention(rows, actor.id, {
-    overdueActions: overdueActionCandidates,
-    followUps,
-    unreadOrgIds: unreadInboundOrgIds,
-  });
   // F022 — the total is now shown as a curve rather than a single number, so the
-  // dashboard says how the pipeline got here, not only where it is.
-  const growth = organisationGrowthSeries(rows);
-
-  // Whether the engine banner reads as "broken" or "not set up yet".
-  const engineStop = engineIssues.some((issue) => issue.severity === "stop");
+  // dashboard says how the pipeline got here, not only where it is. The series
+  // runs back to the earliest record so "All time" is the whole story rather
+  // than the last 30 days; the shorter presets slice the tail client-side.
+  const growthDays = (() => {
+    let earliest = Number.POSITIVE_INFINITY;
+    for (const row of rows) {
+      const created = Date.parse(row.created_at);
+      if (!Number.isNaN(created)) earliest = Math.min(earliest, created);
+    }
+    if (earliest === Number.POSITIVE_INFINITY) return 30;
+    return Math.max(30, Math.ceil((new Date().getTime() - earliest) / 86_400_000) + 1);
+  })();
+  const growth = organisationGrowthSeries(rows, growthDays);
+  // Year-to-date preset: 1 January this year (UTC) with no end, so the slice
+  // runs to today. Computed per request, so it rolls over on New Year's Day.
+  const yearStartDay = `${new Date().getUTCFullYear()}-01-01`;
 
   // The meters read as a share of the whole pipeline, so an empty pipeline has to
   // draw an empty bar rather than divide by zero.
@@ -944,6 +1277,11 @@ export default async function DashboardPage({
     }
   }
 
+  const leaderboard =
+    performance && seesAdminView(actor.role)
+      ? camLeaderboard(performance.summary, performance.cams)
+      : null;
+
   return (
     <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
       <Stage className="mx-auto w-full max-w-[1400px] space-y-10">
@@ -978,15 +1316,16 @@ export default async function DashboardPage({
 
         {!canWrite && (
           <Rise>
-            <div className="rounded-2xl border border-black/[0.06] bg-white px-5 py-4 shadow-sm">
-              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-                Read-only access
+            <section className="rounded-panel border border-rule bg-white px-5 py-4">
+              <h2 className="font-body text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink">
+                You have view-only access
+              </h2>
+              <p className="mt-1 font-body text-[13px] leading-[1.55] text-dim">
+                You can open every page an admin can, including team analytics, approvals
+                and the audit log. Nothing you press will change a client, import data or
+                send an email — if you try, we&rsquo;ll tell you, and nothing is saved.
               </p>
-              <p className="mt-2 text-sm leading-[1.7] text-foreground/65">
-                You can view client records and team activity, but not create, edit,
-                or send anything.
-              </p>
-            </div>
+            </section>
           </Rise>
         )}
 
@@ -994,40 +1333,10 @@ export default async function DashboardPage({
             speaks only when a check is not reporting active, because until now
             silence here meant both "the engine is running" and "reply sync died
             on Friday". */}
-        {engineIssues.length > 0 && (
-          <Rise>
-            <section
-              aria-labelledby="engine-health-heading"
-              className={`rounded-panel border px-5 py-4 ${
-                engineStop ? "border-stop/25 bg-stop-wash/50" : "border-hold/25 bg-hold-wash/50"
-              }`}
-            >
-              <h2
-                id="engine-health-heading"
-                className={`font-body text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] ${
-                  engineStop ? "text-stop" : "text-hold"
-                }`}
-              >
-                Outreach engine needs attention
-              </h2>
-              <ul className="mt-2 space-y-1">
-                {engineIssues.map((issue) => (
-                  <li
-                    key={issue.label}
-                    className="font-body text-[13px] leading-[1.55] text-dim"
-                  >
-                    <span className="font-semibold text-ink">{issue.label}</span> — {issue.detail}
-                  </li>
-                ))}
-              </ul>
-              <Link
-                href="/inbox"
-                className="mt-2 inline-block font-body text-[13px] font-semibold text-lead transition-colors hover:text-lead-mid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
-              >
-                Open the inbox →
-              </Link>
-            </section>
-          </Rise>
+        {engineHealthPromise && (
+          <Suspense fallback={null}>
+            <EngineHealthBanner health={engineHealthPromise} />
+          </Suspense>
         )}
 
         {/* AC1 — a new CAM meets the checklist first, above the metrics that mean
@@ -1102,23 +1411,28 @@ export default async function DashboardPage({
               )
             )}
 
-            {/* Unified Action Center: inbound replies, overdue actions, due follow-ups, stalled clients */}
-            {attentionItems.length > 0 && (
+            {/* Admin duty queue beside today's branch-wide sending limit. */}
+            {(adminCounts || sendingCapacity) && (
               <Group className="space-y-4">
-                <Rise>
-                  <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">
-                    Action Center
-                  </h2>
-                </Rise>
-
-                <Rise className="h-full">
-                  <ActionCenterCard items={attentionItems} actorId={actor.id} />
-                </Rise>
+                <div className="grid grid-cols-1 items-stretch gap-4 xl:grid-cols-3">
+                  {adminCounts && (
+                    <Rise className="h-full xl:col-span-2">
+                      <AdminActionCenter counts={adminCounts} />
+                    </Rise>
+                  )}
+                  {sendingCapacity && (
+                    <Rise className={`h-full ${!adminCounts ? "xl:col-span-3" : ""}`}>
+                      <SendingCapacityCard
+                        capacity={sendingCapacity}
+                        canChangeLimit={actor.role === "admin"}
+                      />
+                    </Rise>
+                  )}
+                </div>
               </Group>
             )}
 
             <Group className="space-y-4">
-
               {/* Side-by-side row: Total Organisations curve + Customer Segmentation dial */}
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-12 items-stretch">
                 <div className="relative z-20 flex flex-col xl:col-span-8">
@@ -1133,8 +1447,11 @@ export default async function DashboardPage({
                       period="Past 30 days"
                       periodOptions={[
                         { label: "Past 7 days", points: 7 },
-                        { label: "Past 14 days", points: 14 },
-                        { label: "Past 30 days" },
+                        { label: "Past 30 days", points: 30 },
+                        { label: "Last 3 months", points: 90 },
+                        { label: "Year to date", from: yearStartDay },
+                        { label: "Last 12 months", points: 365 },
+                        { label: "All time" },
                       ]}
                       allowCustomRange
                       showFooter={false}
@@ -1167,9 +1484,7 @@ export default async function DashboardPage({
                   actively-suppressed clients from every number in this group,
                   which is right — but the screen said nothing about it, so a
                   suppression landing quietly shrank the pipeline and only the
-                  admin who approved it could explain why. The same sentence the
-                  admin dashboard prints, so the two cannot tell different
-                  stories about one filter. */}
+                  admin who approved it could explain why. */}
               {suppressedCount > 0 && (
                 <Rise>
                   <p className="font-body text-[12.5px] leading-[1.55] text-dim">
@@ -1269,28 +1584,50 @@ export default async function DashboardPage({
                     actorId={actor.id}
                     actorRole={actor.role}
                     trend={performance.trend}
+                    funnel={performance.funnel}
                     sectors={performance.sectors}
                     raw={performance.raw}
                     sectorByOrg={performance.sectorByOrg}
+                    showLeaderboard={false}
                   />
                 </Rise>
               </Group>
             )}
 
+            {/* Your Priority Opportunities — the ranked SCOUT shortlist that says
+                who to actually talk to next, not the average score. Personal
+                scope (own book plus unclaimed clients), off the scores already
+                loaded above. A CAM with nothing ranked yet sees the card's
+                empty state rather than silence. */}
+            {scoresLoaded &&
+              (priorityOpportunities.length > 0 || (actor.role === "cam" && canWrite)) && (
+                <Group className="space-y-4">
+                  <Rise>
+                    <PriorityOpportunitiesCard opportunities={priorityOpportunities} />
+                  </Rise>
+                </Group>
+              )}
 
-            {actor.role === "admin" && (adminCounts || aiSpend) && (
+            {/* F212 (#207) — Manager Analytics: CAM comparison table */}
+            {leaderboard && (
               <Group className="space-y-4">
-                {/* The admin queues and the spend they generate, in one row:
-                    F213's number had no home on the platform, and the budget is
-                    an admin reading like everything else here. */}
+                <Rise>
+                  <CamLeaderboardTable board={leaderboard} className="mt-0" />
+                </Rise>
+              </Group>
+            )}
+
+            {/* Work with a date on it and drafts left unsent, beside AI spend summary for admins. */}
+            {(myDesk || (seesAdminView(actor.role) && aiSpend)) && (
+              <Group className="space-y-4">
                 <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
-                  {adminCounts && (
-                    <Rise className="h-full xl:col-span-2">
-                      <AdminActionCenter counts={adminCounts} />
+                  {myDesk && (
+                    <Rise className={`h-full ${seesAdminView(actor.role) && aiSpend ? "xl:col-span-2" : "xl:col-span-3"}`}>
+                      <MyActionsCard desk={myDesk} />
                     </Rise>
                   )}
-                  {aiSpend && (
-                    <Rise className="h-full">
+                  {seesAdminView(actor.role) && aiSpend && (
+                    <Rise className={`h-full ${!myDesk ? "xl:col-span-1" : ""}`}>
                       <AiSpendCard summary={aiSpend} />
                     </Rise>
                   )}
@@ -1298,32 +1635,26 @@ export default async function DashboardPage({
               </Group>
             )}
 
-            {/* F028 — what changed across the platform, above who did it. */}
+            {/* F028/F029 — what changed on clients and what the team did, as one
+                feed. They were two cards that both reported pipeline and
+                ownership moves; the merge drops the second copy. */}
             <Group className="space-y-4">
-              <Rise className="flex items-baseline justify-between gap-4">
+              <Rise>
                 <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">Recent updates</h2>
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                  All clients · past 14 days
-                </p>
               </Rise>
 
               <Rise>
-                <RecentUpdatesFeed items={recentUpdates} />
+                <RecentUpdatesFeed items={mergeDashboardFeed(recentUpdates, teamActivities)} />
               </Rise>
             </Group>
 
-            <Group className="space-y-4">
-              <Rise className="flex items-baseline justify-between gap-4">
-                <h2 className="text-xl font-semibold font-body tracking-[-0.02em]">Recent team activity</h2>
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                  The team · latest actions
-                </p>
-              </Rise>
-
-              <Rise>
-                <TeamActivityFeed items={teamActivities} />
-              </Rise>
-            </Group>
+            {/* Is the data in good shape, and is the machinery behind it running.
+                Streamed: the rest of the dashboard never waits for these. */}
+            {healthReads && orgHealthFacts && (
+              <Suspense fallback={null}>
+                <HealthCards reads={healthReads} orgFacts={orgHealthFacts} />
+              </Suspense>
+            )}
           </>
         )}
       </Stage>

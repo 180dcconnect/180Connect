@@ -3,10 +3,13 @@ import { describe, it } from "node:test";
 
 import {
   assignActionFailure,
+  assigneeOwnerNote,
   completeActionFailure,
   formatDueDate,
+  formatDueDateWithRelative,
   formatMyActions,
   formatTeamAssignedActions,
+  getOrdinalSuffix,
   groupMyActionsByDueDate,
   isActionOverdue,
   isAdminAssignedRow,
@@ -82,6 +85,58 @@ describe("formatDueDate", () => {
 
   it("returns the raw string for something that isn't a plain calendar date", () => {
     assert.equal(formatDueDate("not-a-date"), "not-a-date");
+  });
+});
+
+describe("getOrdinalSuffix", () => {
+  it("computes the correct ordinal suffix for days of the month", () => {
+    assert.equal(getOrdinalSuffix(1), "st");
+    assert.equal(getOrdinalSuffix(2), "nd");
+    assert.equal(getOrdinalSuffix(3), "rd");
+    assert.equal(getOrdinalSuffix(4), "th");
+    assert.equal(getOrdinalSuffix(11), "th");
+    assert.equal(getOrdinalSuffix(12), "th");
+    assert.equal(getOrdinalSuffix(13), "th");
+    assert.equal(getOrdinalSuffix(19), "th");
+    assert.equal(getOrdinalSuffix(21), "st");
+    assert.equal(getOrdinalSuffix(22), "nd");
+    assert.equal(getOrdinalSuffix(23), "rd");
+    assert.equal(getOrdinalSuffix(31), "st");
+  });
+});
+
+describe("formatDueDateWithRelative", () => {
+  const now = new Date("2026-09-16T12:00:00Z");
+
+  it("formats dates with ordinal, full month, year, and relative timing", () => {
+    assert.equal(
+      formatDueDateWithRelative("2026-09-19", now),
+      "19th September 2026 (in 3 days)",
+    );
+    assert.equal(
+      formatDueDateWithRelative("2026-09-17", now),
+      "17th September 2026 (tomorrow)",
+    );
+    assert.equal(
+      formatDueDateWithRelative("2026-09-16", now),
+      "16th September 2026 (today)",
+    );
+    assert.equal(
+      formatDueDateWithRelative("2026-09-15", now),
+      "15th September 2026 (yesterday)",
+    );
+    assert.equal(
+      formatDueDateWithRelative("2026-09-13", now),
+      "13th September 2026 (3 days ago)",
+    );
+    assert.equal(
+      formatDueDateWithRelative("2026-10-01", now),
+      "1st October 2026 (in 15 days)",
+    );
+  });
+
+  it("returns raw string if not a valid calendar date", () => {
+    assert.equal(formatDueDateWithRelative("invalid-date", now), "invalid-date");
   });
 });
 
@@ -400,5 +455,47 @@ describe("assignActionFailure (F169)", () => {
 
   it("hides a message-less error too", () => {
     assert.equal(assignActionFailure({ code: "42501", message: "  " }).status, 500);
+  });
+});
+
+/**
+ * The line under the assignee picker. It reports a difference, never blocks
+ * one — delegation to a non-owner is allowed — so every case here produces
+ * either the fact or nothing, and none of them produces a refusal.
+ */
+describe("assigneeOwnerNote (F169)", () => {
+  const base = {
+    assigneeUserId: OTHER_CAM_ID,
+    assigneeName: "Sam CAM",
+    clientOwnerId: ACTOR_ID,
+    clientOwnerName: "Dana Whitfield",
+  };
+
+  it("says nothing when the assignee owns the client", () => {
+    assert.equal(
+      assigneeOwnerNote({ ...base, clientOwnerId: OTHER_CAM_ID }),
+      "",
+    );
+  });
+
+  it("names both people when the assignee does not own the client", () => {
+    assert.equal(
+      assigneeOwnerNote(base),
+      "Sam CAM doesn't own this client — it's owned by Dana Whitfield.",
+    );
+  });
+
+  it("says nobody owns an unowned client, rather than blaming the assignee", () => {
+    assert.equal(
+      assigneeOwnerNote({ ...base, clientOwnerId: null, clientOwnerName: null }),
+      "No one owns this client yet.",
+    );
+  });
+
+  it("falls back when the owner's name did not come back with the row", () => {
+    assert.equal(
+      assigneeOwnerNote({ ...base, clientOwnerName: "  " }),
+      "Sam CAM doesn't own this client — it's owned by another team member.",
+    );
   });
 });

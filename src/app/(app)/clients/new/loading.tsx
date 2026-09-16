@@ -1,5 +1,5 @@
 import { Skeleton, SkeletonPanel } from "@/components/ui/skeleton";
-import { DataImportsHeader } from "@/app/admin/data-imports-header";
+import { DataImportsHeader } from "@/app/(app)/admin/data-imports-header";
 
 /**
  * Mirrors page.tsx's landing view — the import screens' `max-w-6xl space-y-8`

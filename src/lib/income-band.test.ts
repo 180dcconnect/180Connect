@@ -12,12 +12,16 @@ import {
 } from "./income-band.ts";
 
 describe("income-band constants", () => {
-  it("has exactly 4 discrete income bands in ascending order", () => {
+  it("has exactly 8 discrete income bands in ascending order", () => {
     assert.deepEqual(INCOME_BAND_OPTIONS, [
       "under_10k",
       "10k_100k",
-      "100k_1m",
-      "over_1m",
+      "100k_500k",
+      "500k_1m",
+      "1m_10m",
+      "10m_50m",
+      "50m_100m",
+      "over_100m",
     ]);
   });
 
@@ -36,10 +40,18 @@ describe("deriveIncomeBand", () => {
     assert.equal(deriveIncomeBand(9_999), "under_10k");
     assert.equal(deriveIncomeBand(10_000), "10k_100k");
     assert.equal(deriveIncomeBand(100_000), "10k_100k");
-    assert.equal(deriveIncomeBand(100_001), "100k_1m");
-    assert.equal(deriveIncomeBand(1_000_000), "100k_1m");
-    assert.equal(deriveIncomeBand(1_000_001), "over_1m");
-    assert.equal(deriveIncomeBand(50_000_000), "over_1m");
+    assert.equal(deriveIncomeBand(100_001), "100k_500k");
+    assert.equal(deriveIncomeBand(500_000), "100k_500k");
+    assert.equal(deriveIncomeBand(500_001), "500k_1m");
+    assert.equal(deriveIncomeBand(1_000_000), "500k_1m");
+    assert.equal(deriveIncomeBand(1_000_001), "1m_10m");
+    assert.equal(deriveIncomeBand(10_000_000), "1m_10m");
+    assert.equal(deriveIncomeBand(10_000_001), "10m_50m");
+    assert.equal(deriveIncomeBand(50_000_000), "10m_50m");
+    assert.equal(deriveIncomeBand(50_000_001), "50m_100m");
+    assert.equal(deriveIncomeBand(100_000_000), "50m_100m");
+    assert.equal(deriveIncomeBand(100_000_001), "over_100m");
+    assert.equal(deriveIncomeBand(300_000_000), "over_100m");
   });
 
   it("returns null for null, undefined, or NaN", () => {

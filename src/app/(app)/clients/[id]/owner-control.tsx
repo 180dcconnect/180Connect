@@ -178,7 +178,7 @@ export function OwnerControl({
               </span>
             </button>
           ) : (
-            <span className="flex min-w-0 items-center gap-2">
+            <span className="inline-flex items-center gap-2 rounded-full border border-rule bg-white px-2.5 py-1 text-[12px] font-medium text-ink">
               <span
                 aria-hidden="true"
                 className="flex size-[22px] shrink-0 items-center justify-center rounded-full bg-ink font-mono text-[9.5px] font-semibold text-white"

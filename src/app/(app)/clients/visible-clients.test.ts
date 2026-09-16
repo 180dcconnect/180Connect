@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   bandForScore,
-} from "../../lib/scoring/score-client.ts";
+} from "../../../lib/scoring/score-client.ts";
 import {
   filterByCity,
   filterByOwner,
@@ -613,7 +613,7 @@ describe("resolveClientIncomeBand (F198)", () => {
     const client = org({
       financial_periods: [{ total_income: 450_000, period_end: "2025-12-31" }],
     });
-    assert.equal(resolveClientIncomeBand(client), "100k_1m");
+    assert.equal(resolveClientIncomeBand(client), "100k_500k");
   });
 
   it("falls back to top-level total_income", () => {

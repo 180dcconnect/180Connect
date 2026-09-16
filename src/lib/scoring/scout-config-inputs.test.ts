@@ -25,7 +25,7 @@ describe("scout config inputs — conversion", () => {
     const payload = rpcPayloadFromInput(base());
     assert.deepEqual(payload.sectorScores, DEFAULT_SCORING_RULES.sectorScores);
     assert.equal(payload.geography.insideScore, 0.8);
-    assert.equal(payload.sizeScores.over_1m, 0.9);
+    assert.equal(payload.sizeScores.over_100m, 0.4);
     assert.deepEqual(payload.geography.priorityTowns, DEFAULT_SCORING_RULES.geography.priorityTowns);
   });
 
@@ -55,6 +55,16 @@ describe("scout config inputs — validation", () => {
     if (!result.success) assert.match(result.message, /zero/);
   });
 
+  it("refuses weights that do not add up to 100%", () => {
+    const input = {
+      ...base(),
+      weights: { sector: 30, geography: 30, size: 30, partnershipHistory: 30, previousContact: 30 },
+    };
+    const result = validateScoutConfigInput(input);
+    assert.equal(result.success, false);
+    if (!result.success) assert.match(result.message, /100%/);
+  });
+
   it("refuses a score above 100", () => {
     const input = { ...base(), geography: { inside: 120, outside: 30 } };
     assert.equal(validateScoutConfigInput(input).success, false);
@@ -79,7 +89,7 @@ describe("scout config inputs — change detection", () => {
     assert.equal(configInputsEqual(a, { ...a, sectorOrder: [...a.sectorOrder].reverse() }), false);
     assert.equal(configInputsEqual(a, { ...a, priorityTowns: [...a.priorityTowns, "Leeds"] }), false);
     assert.equal(
-      configInputsEqual(a, { ...a, sizeScores: { ...a.sizeScores, over_1m: 50 } }),
+      configInputsEqual(a, { ...a, sizeScores: { ...a.sizeScores, over_100m: 50 } }),
       false,
     );
   });

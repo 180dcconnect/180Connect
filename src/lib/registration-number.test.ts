@@ -15,10 +15,16 @@ describe("registerIdForName", () => {
     assert.equal(registerIdForName("charity commission"), "ccew");
     assert.equal(registerIdForName("CCEW"), "ccew");
     assert.equal(registerIdForName("OSCR"), "oscr");
+    // The long form with an ampersand, which the register's own name spells out.
+    assert.equal(registerIdForName("Charity Commission for England & Wales"), "ccew");
   });
 
   it("treats anything else as another register, and nothing as nothing", () => {
     assert.equal(registerIdForName("FCA Mutuals Register"), "other");
+    // A different country's regulator, named under "Another register": not ours
+    // to shape-check a number against, and not ours to file as a UK charity
+    // number (app.identifier_type_for_registry mirrors this rule).
+    assert.equal(registerIdForName("Charity Commission of Kenya"), "other");
     assert.equal(registerIdForName("  "), null);
     assert.equal(registerIdForName(null), null);
   });

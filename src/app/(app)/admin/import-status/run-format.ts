@@ -20,8 +20,8 @@ import {
   humaniseToken,
   // Relative, not `@/lib/...`: node --test strips types but does not resolve the
   // tsconfig path alias, and this module is tested directly.
-} from "../../../lib/display-format.ts";
-import { labelForStatus } from "./status-helpers.ts";
+} from "../../../../lib/display-format.ts";
+import { labelForStatus, runDisplayStatus, stalledRunSummary } from "./status-helpers.ts";
 
 /**
  * The six sources in `public.data_source_name`, plus `charity_commission` from
@@ -61,6 +61,7 @@ const TONES: Record<string, RunTone> = {
   partial: "warning",
   failed: "danger",
   running: "info",
+  stalled: "warning",
 };
 
 export function toneForStatus(status: string): RunTone {
@@ -203,10 +204,15 @@ const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n ==
  * added nothing are not the same event, and the status badge cannot tell them
  * apart.
  */
-export function summariseRun(run: IngestionRunRow): string {
+export function summariseRun(run: IngestionRunRow, now: Date = new Date()): string {
   const { records_fetched: fetched, records_inserted: inserted } = run;
 
   if (run.job_status === "running") {
+    // A run interrupted mid-write holds frozen counts that would mislead, so
+    // the stalled sentence carries no numbers — see `stalledRunSummary`.
+    if (runDisplayStatus(run.job_status, run.started_at, now) === "stalled") {
+      return stalledRunSummary(run.started_at, now);
+    }
     return fetched > 0
       ? `Running now — ${plural(fetched, "record")} fetched so far`
       : "Running now — nothing fetched yet";
@@ -248,13 +254,18 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
   const triggerLabel =
     triggeredBy === "manual" ? "Manual" : triggeredBy === "schedule" ? "Scheduled" : null;
 
+  // Display-only: a run the database still calls `running` reads as `stalled`
+  // past the threshold, and the badge, tone and sentence all follow that one
+  // answer. The stored row is untouched.
+  const status = runDisplayStatus(run.job_status, run.started_at, now);
+
   return {
     id: run.id,
     source: formatSource(run.api_source),
-    status: run.job_status,
-    statusLabel: labelForStatus(run.job_status),
-    tone: toneForStatus(run.job_status),
-    summary: summariseRun(run),
+    status,
+    statusLabel: labelForStatus(status),
+    tone: toneForStatus(status),
+    summary: summariseRun(run, now),
     counts,
     // The collapsed row carries only what happened. A row of five counts where
     // four are zero is four pieces of furniture around one fact.

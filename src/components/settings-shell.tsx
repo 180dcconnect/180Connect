@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
-import { hasPermission } from "@/lib/auth/permissions";
+import { canView, isViewOnly } from "@/lib/auth/permissions";
 import { logout } from "@/lib/auth/logout";
 import { ShellWash } from "./shell-wash";
 import { SkipLink } from "./skip-link";
 import { KeyboardShortcutsDialog } from "./keyboard-shortcuts-dialog";
 import { AccessibilityAccountSync } from "./accessibility-account-sync";
+import { ViewOnlyNotice } from "./view-only-notice";
 import { SettingsSidebar, type SettingsNavSection } from "./settings-sidebar";
 
 /**
@@ -13,7 +14,7 @@ import { SettingsSidebar, type SettingsNavSection } from "./settings-sidebar";
  * area, in place of the app shell rather than inside it.
  *
  * Like `AppShell` this only checks that *a* session exists, to decide what the
- * rail should list. Each page keeps its own `getCurrentActor` gate for the
+ * rail should list. Each page keeps its own `getViewingActor` gate for the
  * permission it actually needs.
  */
 export async function SettingsShell({ children }: { children: React.ReactNode }) {
@@ -36,9 +37,9 @@ export async function SettingsShell({ children }: { children: React.ReactNode })
   // all active roles), so this row is unconditional too, same as Accessibility.
   personal.items.push({ href: "/settings/notifications", label: "Notifications" });
 
-  // Outreach preferences steer a CAM's own queue, so the row is only shown to
-  // someone who can act on that queue — a viewer has no outreach to target.
-  if (hasPermission(actor.role, "client:edit")) {
+  // Outreach preferences steer a CAM's own queue. Shown to viewers too, who see
+  // every screen an admin does and are refused only when they save.
+  if (canView(actor.role, "client:edit")) {
     personal.items.push({
       href: "/settings/outreach-preferences",
       label: "Outreach preferences",
@@ -51,7 +52,7 @@ export async function SettingsShell({ children }: { children: React.ReactNode })
   // each page keeps its own (differing) check.
   const sections: SettingsNavSection[] = [personal];
 
-  if (hasPermission(actor.role, "platform-settings:manage")) {
+  if (canView(actor.role, "platform-settings:manage")) {
     sections.push({
       label: "Platform",
       items: [
@@ -59,6 +60,7 @@ export async function SettingsShell({ children }: { children: React.ReactNode })
         { href: "/settings/data-handling-rules", label: "Data handling rules" },
         { href: "/settings/restricted-fields", label: "Restricted fields" },
         { href: "/settings/sending-limits", label: "Outreach sending limit" },
+        { href: "/settings/cycles", label: "Outreach cycles" },
       ],
     });
   }
@@ -68,6 +70,7 @@ export async function SettingsShell({ children }: { children: React.ReactNode })
       <SkipLink />
       <KeyboardShortcutsDialog />
       <AccessibilityAccountSync userId={actor.id} />
+      {isViewOnly(actor.role) && <ViewOnlyNotice />}
       <ShellWash />
       <div className="flex min-h-screen">
         <SettingsSidebar

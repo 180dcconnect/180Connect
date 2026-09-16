@@ -86,14 +86,49 @@ describe("summariseRun", () => {
   });
 
   it("reports a still-running job as running", () => {
+    const started = "2026-08-15T11:55:00.000Z";
     assert.equal(
-      summariseRun(run({ job_status: "running", records_fetched: 12 })),
+      summariseRun(run({ job_status: "running", records_fetched: 12, started_at: started }), NOW),
       "Running now — 12 records fetched so far",
     );
     assert.equal(
-      summariseRun(run({ job_status: "running", records_fetched: 0 })),
+      summariseRun(run({ job_status: "running", records_fetched: 0, started_at: started }), NOW),
       "Running now — nothing fetched yet",
     );
+  });
+
+  it("calls a run stalled once it cannot still be going, without its frozen counts", () => {
+    // Started two hours ago: six times the longest legitimate run.
+    const view = describeRun(
+      run({ job_status: "running", completed_at: null, records_fetched: 12 }),
+      NOW,
+    );
+    assert.equal(view.status, "stalled");
+    assert.equal(view.statusLabel, "Stalled");
+    assert.equal(view.tone, "warning");
+    assert.equal(
+      view.summary,
+      "Stalled — started 2 hours ago and never finished. Running it again is safe.",
+    );
+  });
+
+  it("keeps calling a just-started run running", () => {
+    const view = describeRun(
+      run({
+        job_status: "running",
+        completed_at: null,
+        started_at: "2026-08-15T11:55:00.000Z",
+      }),
+      NOW,
+    );
+    assert.equal(view.status, "running");
+    assert.equal(view.statusLabel, "Running");
+    assert.equal(view.tone, "info");
+  });
+
+  it("lets a stalled run be found by searching for it", () => {
+    const view = describeRun(run({ job_status: "running", completed_at: null }), NOW);
+    assert.equal(matchesRunQuery(view, "stalled"), true);
   });
 
   it("does not call an empty source a failure", () => {
@@ -129,7 +164,14 @@ describe("describeRun", () => {
   });
 
   it("refuses to invent a duration for a run still going", () => {
-    const view = describeRun(run({ job_status: "running", completed_at: null }), NOW);
+    const view = describeRun(
+      run({
+        job_status: "running",
+        completed_at: null,
+        started_at: "2026-08-15T11:55:00.000Z",
+      }),
+      NOW,
+    );
     assert.equal(view.duration, "—");
     assert.equal(view.finishedExact, null);
   });

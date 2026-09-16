@@ -7,18 +7,32 @@ export interface AdminQueueCounts {
   pendingSuppressions: number;
   ownershipRequests: number;
   suggestedEdits: number;
-  unassignedOrgs: number;
+  /**
+   * High-priority clients with no owner — **not** the whole unowned pool.
+   *
+   * The pool is thousands on staging and grows with every import, so counting
+   * it here made this tile read "urgent" permanently, which is how a duty queue
+   * teaches people to ignore it. The number that earns the red badge is the one
+   * an admin can act on: high score, nobody owns it. The full pool is still
+   * counted on the dashboard, where it is a CAM's way into work when their own
+   * book is empty.
+   */
+  unassignedHighPriorityOrgs: number;
   discrepancies: number;
+  statusChanges: number;
 }
 
 export function AdminActionCenter({ counts }: { counts: AdminQueueCounts }) {
   const queues = [
     {
-      title: "Unassigned Clients",
-      count: counts.unassignedOrgs,
-      href: "/clients?owner=unassigned",
-      description: "Imported clients awaiting an owner",
-      urgent: counts.unassignedOrgs > 0,
+      // The href and the count have to describe the same set, or the queue
+      // sends an admin to a list of 2,700 to find the 225 it just named. Same
+      // two filters the tile is counting: no owner, high score band.
+      title: "High-Priority Unassigned Clients",
+      count: counts.unassignedHighPriorityOrgs,
+      href: "/clients?owner=unassigned&score=high",
+      description: "High score, no owner yet",
+      urgent: counts.unassignedHighPriorityOrgs > 0,
     },
     {
       title: "Ownership Requests",
@@ -48,6 +62,13 @@ export function AdminActionCenter({ counts }: { counts: AdminQueueCounts }) {
       description: "Conflicts from automated ingestion",
       urgent: counts.discrepancies > 0,
     },
+    {
+      title: "Register Status Changes",
+      count: counts.statusChanges,
+      href: "/admin/review",
+      description: "Clients whose Charity Commission or Companies House status changed",
+      urgent: counts.statusChanges > 0,
+    },
   ];
 
   const totalActions = queues.reduce((sum, q) => sum + q.count, 0);
@@ -61,15 +82,15 @@ export function AdminActionCenter({ counts }: { counts: AdminQueueCounts }) {
         </span>
       </div>
       
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x border-black/[0.06]">
-        {queues.map((queue, i) => (
+      {/* Hairlines come from the 1px gap showing the grid's own fill, so every
+          row and column divides cleanly however many queues there are. */}
+      <div className="grid gap-px bg-black/[0.06] sm:grid-cols-2 lg:grid-cols-3">
+        {queues.map((queue) => (
           <Link
             key={queue.title}
             href={queue.href}
             className={cn(
-              "group p-6 flex flex-col hover:bg-black/[0.02] transition-colors border-b sm:border-b-0 border-black/[0.06]",
-              (i === 0 || i === 1 || i === 2) && "border-b",
-              (i === 3 || i === 4) && "sm:border-t"
+              "group p-6 flex flex-col bg-white hover:bg-[#fafafa] transition-colors"
             )}
           >
             <div className="flex items-center justify-between mb-2">

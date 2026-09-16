@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
 import {
@@ -13,14 +13,14 @@ import {
 } from "@/lib/outreach/generation-history";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { InlineAlert } from "@/components/ui/inline-alert";
-import { Key, Pill, SectionCard } from "@/app/clients/[id]/section-card";
+import { Key, Pill, SectionCard } from "@/app/(app)/clients/[id]/section-card";
 import { AiHeader } from "../ai-header";
 import { ModelBreakdown } from "./model-breakdown";
 import { ModelFilterSelect } from "./model-filter-select";
 import { SpendOverTime } from "./spend-over-time";
 
 // Next.js 16: searchParams is a Promise on App Router pages — same pattern as
-// src/app/clients/page.tsx.
+// src/app/(app)/clients/page.tsx.
 type SearchParams = Promise<{ model?: string; metric?: string; client?: string }>;
 
 type GenerationRow = {
@@ -70,7 +70,7 @@ function formatCostCell(costUsd: number | null): string {
 /**
  * F113 — Track Model Used (#110) / F213 — LLM Cost Tracking (#208) / F112 — Save
  * AI Prompt and Output (#109). Admin-only (platform-settings:manage).
- * One tab of the Artificial Intelligence group — see `src/app/admin/ai-group.ts`.
+ * One tab of the Artificial Intelligence group — see `src/app/(app)/admin/ai-group.ts`.
  *
  * AC1/AC2 of F113 (which model, snapshotted at generation time), F213's
  * token/cost figures, and F112's exact prompt/output are all satisfied upstream,
@@ -106,7 +106,7 @@ export default async function AiGenerationsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const authorization = await getCurrentActor("platform-settings:manage", {
+  const authorization = await getViewingActor("platform-settings:manage", {
     route: "/admin/ai-generations",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));

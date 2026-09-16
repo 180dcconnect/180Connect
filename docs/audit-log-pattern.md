@@ -69,7 +69,7 @@ is the worked example. Copy its shape:
 
 ## 4. What you get for free
 
-Nothing on `src/app/admin/audit-log/page.tsx` needs to change. That page reads
+Nothing on `src/app/(app)/admin/audit-log/page.tsx` needs to change. That page reads
 `audit_log` generically — it has no per-action-type logic — so any row your new
 RPC inserts shows up there automatically, filterable by actor and by target,
 with no further work.

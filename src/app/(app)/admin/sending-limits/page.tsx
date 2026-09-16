@@ -1,14 +1,15 @@
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
 import { dailySendWindowStart, DEFAULT_OUTREACH_DAILY_SEND_LIMIT } from "@/lib/outreach/daily-send-limit";
+import { isViewOnly } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { SendingLimitPanel } from "./sending-limit-panel";
 
 /** F128 — admin control for the branch-wide daily outreach sending cap. */
 export default async function SendingLimitsPage() {
-  const authorization = await getCurrentActor("platform-settings:manage", {
+  const authorization = await getViewingActor("platform-settings:manage", {
     route: "/admin/sending-limits",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
@@ -51,6 +52,7 @@ export default async function SendingLimitsPage() {
           currentLimit={limitResult.data?.daily_limit ?? DEFAULT_OUTREACH_DAILY_SEND_LIMIT}
           sentToday={volumeResult.count ?? 0}
           updatedAt={limitResult.data?.updated_at ?? null}
+          readOnly={isViewOnly(authorization.actor.role)}
         />
       </section>
     </main>

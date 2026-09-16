@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentActor } from "@/lib/auth/actor";
 import type { AppRole } from "@/lib/auth/permissions";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
-import { ROLE_OPTIONS } from "@/app/admin/users/role-options";
+import { ROLE_OPTIONS } from "@/app/(app)/admin/users/role-options";
 import { PasswordPanel } from "./password-panel";
 import { ProfilePanel } from "./profile-panel";
 

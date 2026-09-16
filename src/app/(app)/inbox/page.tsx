@@ -24,6 +24,13 @@
  * move megabytes per request to render none of it. Bodies arrive per thread
  * from /api/inbox/[orgId]/thread when the reading pane opens one.
  *
+ * Deliberately not every organisation either. Only organisations with outreach
+ * on them become threads, so only those are read — in a second round, once the
+ * messages and replies say which they are. Compose's full recipient directory
+ * (every client with an address, thousands of rows) arrives from
+ * /api/inbox/directory when a compose window first opens, instead of on every
+ * load and every realtime refresh of this page.
+ *
  * Sending still never happens from this list. The reading pane's reply goes
  * through ReplyComposer → EmailReviewPanel → the approved server actions (PRD
  * §12.1), which re-check suppression, ownership, rate limits and human review
@@ -43,6 +50,7 @@ import {
   parseCategoryTabParam,
   tabForThreadStatus,
 } from "@/lib/inbox/category-tabs.ts";
+import { INBOX_CONTACT_SELECT, INBOX_ORG_SELECT } from "@/lib/inbox/inbox-selects";
 import {
   buildAddressableClients,
   buildRealInboxThreads,
@@ -55,21 +63,11 @@ import type { InboxThreadStateRow } from "@/lib/inbox/thread-flags";
 import { DEFAULT_FOLLOW_UP_THRESHOLDS } from "@/lib/outreach/follow-up-recommendations";
 import type { InboxMessageRow, InboxReplyRow } from "@/lib/outreach-inbox";
 import type { InboxThreadTag } from "@/lib/inbox-thread-view";
+import { fetchPaged, fetchPagedForOrgs } from "@/lib/supabase/fetch-paged";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/validation";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
-
-/** Column sets for the directory reads below, shared with the ?compose=
-// top-up so the two can never drift apart. */
-const INBOX_ORG_SELECT =
-  "id, legal_name, organisation_type, city, country_code, contact_email, sector, sub_sector, is_seed, outreach_status, owner_id, owner:users!organisations_owner_id_fkey(full_name, email)";
-const INBOX_CONTACT_SELECT =
-  "id, organisation_id, first_name, last_name, email, job_title, phone, is_primary";
-
-/** PostgREST caps a response at 1000 rows, so history is paged the same way
-    the dashboard pages its own reads. */
-const PAGE_STEP = 1000;
 
 type MessageListRow = InboxMessageRow & {
   send_status: string;
@@ -120,34 +118,30 @@ function collectOrgTags(
 /**
  * Reads a whole table through PostgREST's 1000-row window.
  *
- * Every read on this page needs this, not only the messages one. The mailbox
- * assembles a thread from four tables at once and drops any thread whose
- * *organisation* row is missing (see buildInboxThreads) — so an unpaged
- * `select` on `organisations` does not lose the 1001st client's name, it loses
- * that client's mailbox entirely, silently, with a full-looking inbox as the
- * only symptom. Same for `contacts` and `reply_events`.
+ * Every whole-table read on this page needs this, not only the messages one.
+ * The mailbox assembles a thread from several tables at once, so an unpaged
+ * `select` does not lose the 1001st row quietly — it loses that client's
+ * thread, with a full-looking inbox as the only symptom.
  *
  * `order` is passed in because a paged read needs a stable sort to page
  * against: without one, PostgREST may return the same row on two pages and
- * skip another.
+ * skip another. The loop is the shared `fetchPaged`; this only widens the row
+ * type, because these selects embed relations the generated types do not model.
  */
-async function fetchAllPages<T>(
+function fetchAllPages<T>(
   buildPage: (
     from: number,
     to: number,
   ) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>,
-): Promise<{ data: T[] | null; error: { message: string } | null }> {
-  const all: T[] = [];
-  let from = 0;
-  while (true) {
-    const { data, error } = await buildPage(from, from + PAGE_STEP - 1);
-    if (error) return { data: null, error };
-    if (!data || data.length === 0) break;
-    all.push(...(data as T[]));
-    if (data.length < PAGE_STEP) break;
-    from += PAGE_STEP;
-  }
-  return { data: all, error: null };
+  pagesPerRound = 4,
+) {
+  return fetchPaged<T>(
+    buildPage as (
+      from: number,
+      to: number,
+    ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+    { pagesPerRound },
+  );
 }
 
 /**
@@ -174,7 +168,9 @@ function fetchMessages(supabase: SupabaseClient) {
 /**
  * organisation_id → row count. A `head: true` count would be one query per
  * client, so this reads the key column alone and tallies in memory: one
- * column, no bodies, no joins.
+ * column, no bodies, no joins. Paged through the 1000-row window like every
+ * other whole-table read here — a single select would silently truncate past
+ * 1000 rows and undercount badges at scale.
  *
  * `column` differs per table because the two do not agree on how they name an
  * organisation. notes has an `organisation_id` FK; audit_log is polymorphic
@@ -184,13 +180,18 @@ function fetchMessages(supabase: SupabaseClient) {
 async function countByOrganisation(
   operation: string,
   column: "organisation_id" | "target_id",
-  result: PromiseLike<{
+  buildPage: (
+    from: number,
+    to: number,
+  ) => PromiseLike<{
     data: Record<string, unknown>[] | null;
     error: { message: string } | null;
   }>,
 ): Promise<Map<string, number>> {
   const counts = new Map<string, number>();
-  const { data, error } = await result;
+  const { data, error } = await fetchPaged<Record<string, unknown>>(buildPage, {
+    pagesPerRound: 4,
+  });
   if (error) {
     await reportError(error, { operation });
     return counts;
@@ -238,14 +239,25 @@ export default async function InboxPage({
 
   const supabase = await createClient();
 
+  // Live outreach-engine checks for the sidebar's status card: Gmail transport
+  // (caps itself at ~6s) plus the reply-sync / scheduled-send pg_cron jobs.
+  // Started now and handed to the shell unawaited — the card streams its rows
+  // in when the checks finish, so a slow Gmail no longer holds the whole
+  // mailbox open. getOutreachEngineHealth never rejects: each check degrades
+  // to its own X instead.
+  const engineHealth = getOutreachEngineHealth(supabase);
+
+  // Round one: every read that does not depend on which organisations have
+  // outreach on them, all in flight together.
   const [
     messageResult,
     replyResult,
-    orgResult,
-    contactResult,
     orgTagResult,
     tagResult,
-    engineHealth,
+    noteCounts,
+    handoverCounts,
+    preferences,
+    threadState,
   ] = await Promise.all([
     fetchMessages(supabase),
     fetchAllPages<InboxReplyRow>((from, to) =>
@@ -256,32 +268,9 @@ export default async function InboxPage({
         .order("id", { ascending: true })
         .range(from, to),
     ),
-    fetchAllPages<InboxOrganisationRow>((from, to) =>
-      supabase
-        .from("organisations")
-        .select(
-          INBOX_ORG_SELECT,
-        )
-        // Real data only: seed/demo rows (npm run seed, seed:demo) never enter
-        // the mailbox — not as threads, not as compose recipients. Production
-        // refuses seeding outright, but staging/local can hold both, and without
-        // this the demo scenario's invented clients would read as real mail.
-        // buildRealInboxThreads / buildAddressableClients also skip is_seed
-        // defensively, so callers that pass unfiltered rows stay honest too.
-        .eq("is_seed", false)
-        .order("id", { ascending: true })
-        .range(from, to),
-    ),
-    fetchAllPages<InboxContactRow>((from, to) =>
-      supabase
-        .from("contacts")
-        .select(INBOX_CONTACT_SELECT)
-        .order("id", { ascending: true })
-        .range(from, to),
-    ),
-    // Tags on organisations (ORG_TAGS, F191). Kept out of the four core
-    // queries above because a thread with no tags is the common case and this
-    // is one cheap join. Shared-read under RLS.
+    // Tags on organisations (ORG_TAGS, F191). Kept out of the core queries
+    // because a thread with no tags is the common case and this is one cheap
+    // join. Shared-read under RLS.
     fetchAllPages<OrgTagJoinRow>((from, to) =>
       supabase
         .from("org_tags")
@@ -298,60 +287,25 @@ export default async function InboxPage({
         .order("name", { ascending: true })
         .range(from, to),
     ),
-    // Live outreach-engine checks for the sidebar's status card: Gmail
-    // transport (caps itself at ~6s) plus the reply-sync / scheduled-send
-    // pg_cron jobs. Runs alongside the mailbox reads so a sick check
-    // degrades its row to an X instead of holding the whole page open.
-    getOutreachEngineHealth(supabase),
-  ]);
-
-  // Fail-soft per source: one dead query degrades the mailbox rather than
-  // blanking it.
-  for (const [operation, result] of [
-    ["inbox.messages", messageResult],
-    ["inbox.replies", replyResult],
-    ["inbox.organisations", orgResult],
-    ["inbox.contacts", contactResult],
-    ["inbox.org_tags", orgTagResult],
-    ["inbox.tags", tagResult],
-  ] as const) {
-    if (result.error) {
-      await reportError(result.error, { operation });
-    }
-  }
-
-  const messages = (messageResult.data ?? []) as MessageListRow[];
-  const sent = messages.filter((row) => row.send_status === "sent");
-  const pending: InboxPendingRow[] = messages
-    .filter((row) => row.send_status === "draft" || row.send_status === "scheduled")
-    .map((row) => ({
-      id: row.id,
-      organisation_id: row.organisation_id,
-      subject: row.subject,
-      send_status: row.send_status as "draft" | "scheduled",
-      scheduled_at: row.scheduled_at,
-      updated_at: row.updated_at,
-      created_at: row.created_at,
-    }));
-
-  // F160: the viewer's own first-follow-up threshold drives the Follow-Up Due
-  // tab, so it agrees with the dashboard's Needs Attention panel rather than
-  // assuming the AC default for everyone.
-  const [noteCounts, handoverCounts, preferences, threadState] = await Promise.all([
-    countByOrganisation(
-      "inbox.counts.notes",
-      "organisation_id",
-      supabase.from("notes").select("organisation_id"),
+    countByOrganisation("inbox.counts.notes", "organisation_id", (from, to) =>
+      supabase
+        .from("notes")
+        .select("organisation_id")
+        .order("organisation_id", { ascending: true })
+        .range(from, to),
     ),
-    countByOrganisation(
-      "inbox.counts.handovers",
-      "target_id",
+    countByOrganisation("inbox.counts.handovers", "target_id", (from, to) =>
       supabase
         .from("audit_log")
         .select("target_id")
         .eq("target_table", "organisations")
-        .eq("action", "ownership_reassigned"),
+        .eq("action", "ownership_reassigned")
+        .order("target_id", { ascending: true })
+        .range(from, to),
     ),
+    // F160: the viewer's own first-follow-up threshold drives the Follow-Up Due
+    // tab, so it agrees with the dashboard's Needs Attention panel rather than
+    // assuming the AC default for everyone.
     supabase
       .from("outreach_preferences")
       .select("first_follow_up_days")
@@ -368,6 +322,76 @@ export default async function InboxPage({
       .eq("user_id", actor.id)
       .returns<InboxThreadStateRow[]>(),
   ]);
+
+  const messages = (messageResult.data ?? []) as MessageListRow[];
+  const replies = (replyResult.data ?? []) as unknown as InboxReplyRow[];
+  const sent = messages.filter((row) => row.send_status === "sent");
+  const pending: InboxPendingRow[] = messages
+    .filter((row) => row.send_status === "draft" || row.send_status === "scheduled")
+    .map((row) => ({
+      id: row.id,
+      organisation_id: row.organisation_id,
+      subject: row.subject,
+      send_status: row.send_status as "draft" | "scheduled",
+      scheduled_at: row.scheduled_at,
+      updated_at: row.updated_at,
+      created_at: row.created_at,
+    }));
+
+  // Round two: the organisations the mailbox actually shows — every one with a
+  // sent, drafted, scheduled or replied-to message — plus the ?compose= target,
+  // whose row opens the composer addressed. Their contacts come with them.
+  //
+  // Seed rows are not filtered out here: buildRealInboxThreads never makes a
+  // thread of one, and buildAddressableClients admits one only when it is the
+  // ?compose= target named below — the narrow exception a deep link from a seed
+  // record needs to open addressed.
+  const composeTargetId = composeParam && isUuid(composeParam) ? composeParam : null;
+  const mailboxOrganisationIds = [
+    ...new Set(
+      [
+        ...messages.map((row) => row.organisation_id),
+        ...replies.map((row) => row.organisation_id),
+        ...(composeTargetId ? [composeTargetId] : []),
+      ].filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  ];
+
+  const [orgResult, contactResult] = await Promise.all([
+    fetchPagedForOrgs<InboxOrganisationRow>(mailboxOrganisationIds, (ids, from, to) =>
+      supabase
+        .from("organisations")
+        .select(INBOX_ORG_SELECT)
+        .in("id", ids)
+        .order("id", { ascending: true })
+        .range(from, to)
+        .overrideTypes<InboxOrganisationRow[], { merge: false }>(),
+    ),
+    fetchPagedForOrgs<InboxContactRow>(mailboxOrganisationIds, (ids, from, to) =>
+      supabase
+        .from("contacts")
+        .select(INBOX_CONTACT_SELECT)
+        .in("organisation_id", ids)
+        .order("id", { ascending: true })
+        .range(from, to)
+        .overrideTypes<InboxContactRow[], { merge: false }>(),
+    ),
+  ]);
+
+  // Fail-soft per source: one dead query degrades the mailbox rather than
+  // blanking it.
+  for (const [operation, result] of [
+    ["inbox.messages", messageResult],
+    ["inbox.replies", replyResult],
+    ["inbox.organisations", orgResult],
+    ["inbox.contacts", contactResult],
+    ["inbox.org_tags", orgTagResult],
+    ["inbox.tags", tagResult],
+  ] as const) {
+    if (result.error) {
+      await reportError(result.error, { operation });
+    }
+  }
   if (preferences.error) {
     await reportError(preferences.error, { operation: "inbox.follow_up_preferences" });
   }
@@ -386,12 +410,15 @@ export default async function InboxPage({
     .filter((row) => row.id && row.name?.trim())
     .map((row) => ({ id: row.id, name: row.name, colour: row.colour ?? null }));
 
+  const orgRows = orgResult.data ?? [];
+  const contactRows = contactResult.data ?? [];
+
   const real = buildRealInboxThreads({
     messages: sent as unknown as InboxMessageRow[],
-    replies: (replyResult.data ?? []) as unknown as InboxReplyRow[],
+    replies,
     pending,
-    organisations: (orgResult.data ?? []) as unknown as InboxOrganisationRow[],
-    contacts: (contactResult.data ?? []) as unknown as InboxContactRow[],
+    organisations: orgRows,
+    contacts: contactRows,
     noteCounts,
     handoverCounts,
     orgTags,
@@ -410,43 +437,14 @@ export default async function InboxPage({
       ? tabForThreadStatus(threads.find((thread) => thread.id === threadParam)?.status)
       : "primary");
 
-  // Who Compose may write to. Every organisation with an address, NOT just the
-  // ones with outreach history — `real` excludes an organisation nobody has
-  // emailed, which is exactly the client a first email is being written to.
-  // Plus the ?compose= target when it is missing from those rows: seed rows
-  // are excluded from the directory by design, so without this top-up a
-  // deep link from such a record opens a composer that can resolve nothing —
-  // blank To, "Add a recipient" context, disabled Send. The fetch is
-  // RLS-scoped, so a bogus or invisible id yields nothing and the window
-  // opens as it does today; the thread list below is built separately and
-  // stays seed-free either way.
-  const orgRows = (orgResult.data ?? []) as unknown as InboxOrganisationRow[];
-  const contactRows = (contactResult.data ?? []) as unknown as InboxContactRow[];
-  let composeOrgRows: InboxOrganisationRow[] = [];
-  let composeContactRows: InboxContactRow[] = [];
-  if (
-    composeParam &&
-    isUuid(composeParam) &&
-    !orgRows.some((row) => row.id === composeParam)
-  ) {
-    const [{ data: composeOrg, error: composeOrgError }, { data: composeContacts, error: composeContactsError }] =
-      await Promise.all([
-        supabase.from("organisations").select(INBOX_ORG_SELECT).eq("id", composeParam).maybeSingle(),
-        supabase.from("contacts").select(INBOX_CONTACT_SELECT).eq("organisation_id", composeParam),
-      ]);
-    if (composeOrgError) {
-      await reportError(composeOrgError, { operation: "inbox.compose_org" });
-    }
-    if (composeContactsError) {
-      await reportError(composeContactsError, { operation: "inbox.compose_contacts" });
-    }
-    if (composeOrg) composeOrgRows = [composeOrg as unknown as InboxOrganisationRow];
-    composeContactRows = (composeContacts ?? []) as unknown as InboxContactRow[];
-  }
+  // The recipients Compose can resolve before its full directory arrives: the
+  // mailbox's own organisations plus the ?compose= target. That is what lets a
+  // "Write to this client" deep link open already addressed. The shell swaps in
+  // every addressable client from /api/inbox/directory once a composer opens.
   const addressableClients = buildAddressableClients({
-    organisations: [...orgRows, ...composeOrgRows],
-    contacts: [...contactRows, ...composeContactRows],
-    includeSeedIds: composeParam ? [composeParam] : [],
+    organisations: orgRows,
+    contacts: contactRows,
+    includeSeedIds: composeTargetId ? [composeTargetId] : [],
   });
 
   return (

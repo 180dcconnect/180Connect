@@ -10,8 +10,8 @@ import {
   formatExactTime,
   formatRelativeTime,
   humaniseToken,
-} from "../../../../lib/display-format.ts";
-import type { OrganisationPreview } from "../../../../lib/recent-updates.ts";
+} from "../../../../../lib/display-format.ts";
+import type { OrganisationPreview } from "../../../../../lib/recent-updates.ts";
 
 export type ProcessingStatus = "pending" | "validated" | "matched" | "rejected" | "error";
 

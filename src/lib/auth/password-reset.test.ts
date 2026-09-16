@@ -98,6 +98,18 @@ describe("validation", () => {
     assert.deepEqual(result.error?.issues[0]?.path, ["confirmPassword"]);
   });
 
+  // The recovery form does not render a name field, so nothing is submitted
+  // for it. Absent must validate — the Server Action is what enforces a name
+  // where one is actually required.
+  it("accepts a submission with no name field at all", () => {
+    const result = newPasswordSchema.safeParse({
+      password: "A-secure-password-123",
+      confirmPassword: "A-secure-password-123",
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.data?.fullName, undefined);
+  });
+
   it("normalises and strips control/invisible characters from full names", () => {
     assert.equal(normalizeFullName("  Jane   Doe  "), "Jane Doe");
     assert.equal(normalizeFullName("Jane\u200BDoe"), "Jane Doe");
@@ -180,6 +192,14 @@ describe("recovery confinement", () => {
       "/auth/confirm",
       "/auth/recovery",
     ]) {
+      assert.equal(isRecoveryAllowedPath(path), true, path);
+    }
+  });
+
+  // The form links to both, and previews them in an iframe on hover: confined,
+  // the preview would show the reset page inside itself.
+  it("allows the legal pages the form links to", () => {
+    for (const path of ["/terms", "/privacy"]) {
       assert.equal(isRecoveryAllowedPath(path), true, path);
     }
   });

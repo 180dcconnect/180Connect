@@ -57,7 +57,7 @@ function reply(overrides: Partial<CamReplyRow> = {}): CamReplyRow {
   };
 }
 
-const NO_REPLIES = { totalReplies: 0, respondingClients: 0 };
+const NO_REPLIES = { totalReplies: 0, respondingClients: 0, byClient: new Map<string, number>() };
 
 describe("myClients (F206)", () => {
   it("keeps only the rows the actor owns", () => {
@@ -77,7 +77,7 @@ describe("computeCamOutreach (F206)", () => {
     assert.equal(totals.contacted, 0);
     assert.equal(totals.conversions, 0);
     assert.equal(totals.replyRate, null);
-    assert.equal(totals.conversionRate, null);
+    assert.equal(totals.winRate, null);
   });
 
   it("never returns NaN for a rate when nothing has been contacted", () => {
@@ -85,7 +85,7 @@ describe("computeCamOutreach (F206)", () => {
 
     assert.equal(totals.contacted, 0);
     assert.equal(totals.replyRate, null);
-    assert.equal(totals.conversionRate, null);
+    assert.equal(totals.winRate, null);
   });
 
   it("counts contacted and converted from the shared pipeline predicates", () => {
@@ -100,7 +100,11 @@ describe("computeCamOutreach (F206)", () => {
     assert.equal(totals.clientsOwned, 3);
     assert.equal(totals.contacted, 2);
     assert.equal(totals.conversions, 1);
-    assert.equal(totals.conversionRate, 0.5);
+    // A converted client with no reply on record still counts as a response:
+    // the win-rate denominator is replied ∪ converted, so 1 won out of 1 who
+    // responded is 100%, not 50% of every client owned and not 0% of replies.
+    assert.equal(totals.respondedClients, 1);
+    assert.equal(totals.winRate, 1);
   });
 
   it("counts emails sent to my clients whoever pressed send, and splits out the ones I sent", () => {
@@ -146,6 +150,9 @@ describe("computeCamOutreach (F206)", () => {
     assert.equal(totals.repliesReceived, 4);
     assert.equal(totals.respondingClients, 1);
     assert.equal(totals.replyRate, 0.5);
+    // One client responded and none of them converted: 0% is a real finding
+    // here, unlike the null above where there was nothing to divide by.
+    assert.equal(totals.winRate, 0);
   });
 });
 

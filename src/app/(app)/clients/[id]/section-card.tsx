@@ -138,7 +138,7 @@ export function SectionCard({
               className={`mt-1 leading-[1.55] ${
                 numbered
                   ? "text-[16px] text-black"
-                  : "max-w-[54ch] text-[13px] text-dim"
+                  : "text-[13px] text-dim"
               }`}
             >
               {hint}

@@ -10,11 +10,11 @@ import {
   formatLocation,
   formatOutreachStatus,
   type PipelineStatus,
-} from "../../lib/organisation-format.ts";
-import { deriveIncomeBand } from "../settings/outreach-preferences/constants.ts";
-import { nonEmptyTrimmed, safeValidate } from "../../lib/validation.ts";
-import { normalisePlaceName } from "../../lib/place-name.ts";
-import { incomeInRange, isIncomeRangeActive, type IncomeRange } from "../../lib/income-range.ts";
+} from "../../../lib/organisation-format.ts";
+import { deriveIncomeBand } from "../../settings/outreach-preferences/constants.ts";
+import { nonEmptyTrimmed, safeValidate } from "../../../lib/validation.ts";
+import { normalisePlaceName } from "../../../lib/place-name.ts";
+import { incomeInRange, isIncomeRangeActive, type IncomeRange } from "../../../lib/income-range.ts";
 
 export { formatLocation, formatOutreachStatus };
 
@@ -57,6 +57,14 @@ export type ClientListRow = {
   total_income?: number | null;
   financial_periods?: FinancialPeriodRow[] | null;
   grants?: GrantRow[] | null;
+  /**
+   * PostgREST's embedded count — `grant_total:grants(count)` — which comes back
+   * as `[{ count: n }]`. The list only ever asks *how many* grants a client has,
+   * so /clients reads this instead of every grant row: grants were the largest
+   * part of the page's payload (one charity has over 200) and none of their
+   * fields reached the screen. See `grantCountOf`.
+   */
+  grant_total?: { count: number }[] | null;
   has_grants?: boolean | null;
   latest_scores?: LatestScoreRow | LatestScoreRow[] | null;
   outreach_status: string;
@@ -139,6 +147,17 @@ export function resolveClientTotalIncome(org: ClientListRow): number | null {
 }
 
 /**
+ * How many grants a client has, from whichever shape the row carries: the
+ * embedded count the list query reads, or grant rows from any caller that still
+ * selects them.
+ */
+export function grantCountOf(org: Pick<ClientListRow, "grant_total" | "grants">): number {
+  const counted = org.grant_total?.[0]?.count;
+  if (typeof counted === "number") return counted;
+  return org.grants?.length ?? 0;
+}
+
+/**
  * The default list view (F051 AC4): actively suppressed charities (F251) never
  * appear here, regardless of import method or manual entry (F051 AC1). A pending
  * suppression request isn't suppressed yet, so it still shows, flagged.
@@ -162,9 +181,7 @@ export function visibleClients(
       tagIds: (organisation.org_tags ?? []).map((row) => row.tag_id),
       income_band: resolveClientIncomeBand(organisation),
       latest_income: resolveClientTotalIncome(organisation),
-      has_grants: Boolean(
-        organisation.has_grants || (organisation.grants && organisation.grants.length > 0),
-      ),
+      has_grants: Boolean(organisation.has_grants || grantCountOf(organisation) > 0),
       ...latestScoreOf(organisation),
     }));
 }
@@ -316,9 +333,7 @@ export function filterByFinancialRecords(
       (client.financial_periods && client.financial_periods.length > 0) ||
         (client.total_income !== null && client.total_income !== undefined),
     );
-    const has360Giving = Boolean(
-      client.has_grants || (client.grants && client.grants.length > 0),
-    );
+    const has360Giving = Boolean(client.has_grants || grantCountOf(client) > 0);
     const hasAny = hasCharityCommission || has360Giving;
 
     return wanted.some((val) => {

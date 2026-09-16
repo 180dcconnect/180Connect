@@ -46,10 +46,33 @@ export type AiSpendBucket = {
 
 export const AI_GENERATION_ACTIVITIES: readonly AiGenerationActivity[] = [
   "initial_email",
+  "email_regeneration",
   "follow_up_email",
   "client_booklet",
   "other",
 ];
+
+/**
+ * `ai_generations.activity` is free text, and rows written before the column
+ * existed carry null. Anything this list does not name lands in Other rather
+ * than being dropped or mislabelled as an initial email.
+ */
+export function toAiGenerationActivity(value: string | null | undefined): AiGenerationActivity {
+  return value && (AI_GENERATION_ACTIVITIES as readonly string[]).includes(value)
+    ? (value as AiGenerationActivity)
+    : "other";
+}
+
+/**
+ * Earliest instant `aiSpendSummary` looks at: the start of the equal-length
+ * stretch before the 1st. Fetch from here, not from the 1st of last month —
+ * after a short month (31 March against February) the stretch reaches back
+ * past it, and the missing days would read as zero spend and inflate the %.
+ */
+export function aiSpendWindowStart(now: Date = new Date()): Date {
+  const monthStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  return new Date(monthStartMs - (now.getTime() - monthStartMs));
+}
 
 export const AI_GENERATION_ACTIVITY_LABELS: Record<AiGenerationActivity, string> = {
   initial_email: "Initial email",
@@ -73,7 +96,7 @@ export type AiSpendSummary = {
   models: string[];
   /** ISO day the current period starts (the 1st of the month). */
   periodFrom: string;
-  spendByWeek: AiSpendBucket[];
+  spendByDay: AiSpendBucket[];
   /** Cost-bearing and unpriced generations grouped by activity. */
   activityTotals: Record<AiGenerationActivity, { costUsd: number; generations: number; unpriced: number; totalTokens: number }>;
 };
@@ -92,8 +115,8 @@ function parseCost(value: number | string | null): number | null {
 /**
  * Month-to-date spend, with the equal-length prior stretch for comparison.
  *
- * Equal-length rather than "all of last month", for the same reason as
- * ./conversions-over-time.ts: 15 days of spend against 31 would read as a
+ * Equal-length rather than "all of last month", because
+ * 15 days of spend against 31 would read as a
  * halving every month.
  */
 export function aiSpendSummary(
@@ -102,8 +125,7 @@ export function aiSpendSummary(
 ): AiSpendSummary {
   const monthStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
   const nowMs = now.getTime();
-  const span = nowMs - monthStartMs;
-  const priorFromMs = monthStartMs - span;
+  const priorFromMs = aiSpendWindowStart(now).getTime();
 
   let costUsd = 0;
   let priorCostUsd = 0;
@@ -111,7 +133,7 @@ export function aiSpendSummary(
   let unpriced = 0;
   let totalTokens = 0;
   const models = new Set<string>();
-  const spendByWeek = new Map<string, AiSpendBucket>();
+  const spendByDay = new Map<string, AiSpendBucket>();
   const activityTotals: AiSpendSummary["activityTotals"] = {
     initial_email: { costUsd: 0, generations: 0, unpriced: 0, totalTokens: 0 },
     follow_up_email: { costUsd: 0, generations: 0, unpriced: 0, totalTokens: 0 },
@@ -145,7 +167,7 @@ export function aiSpendSummary(
         activityTotal.costUsd += cost;
         const date = new Date(at);
         const key = date.toISOString().slice(0, 10);
-        const bucket = spendByWeek.get(key) ?? {
+        const bucket = spendByDay.get(key) ?? {
           key,
           label: date.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }),
           totalCostUsd: 0,
@@ -153,7 +175,7 @@ export function aiSpendSummary(
         };
         bucket.totalCostUsd += cost;
         bucket.byActivity[activity] += cost;
-        spendByWeek.set(key, bucket);
+        spendByDay.set(key, bucket);
       }
       if (row.total_tokens && row.total_tokens > 0) {
         totalTokens += row.total_tokens;
@@ -176,7 +198,7 @@ export function aiSpendSummary(
     totalTokens,
     models: Array.from(models).sort((a, b) => a.localeCompare(b)),
     periodFrom: new Date(monthStartMs).toISOString().slice(0, 10),
-    spendByWeek: Array.from(spendByWeek.values()).sort((a, b) => a.key.localeCompare(b.key)),
+    spendByDay: Array.from(spendByDay.values()).sort((a, b) => a.key.localeCompare(b.key)),
     activityTotals,
   };
 }

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
@@ -7,13 +7,13 @@ import { outcomeReadiness } from "@/lib/ml-readiness";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { HorizontalStickGauge } from "@/components/ui/horizontal-stick-gauge";
-import { Pill, SectionCard } from "@/app/clients/[id]/section-card";
+import { Pill, SectionCard } from "@/app/(app)/clients/[id]/section-card";
 import { AiHeader } from "../ai-header";
 
 /**
  * F099 — Minimum Outcome Threshold Tracking (#98).
  * One tab of the Artificial Intelligence group — see
- * `src/app/admin/ai-group.ts`.
+ * `src/app/(app)/admin/ai-group.ts`.
  *
  * An admin sees how many labelled outcomes exist in F098's training view and
  * how close that is to the agreed minimum that makes ML training realistic.
@@ -24,7 +24,7 @@ import { AiHeader } from "../ai-header";
  * renders the `main` this is slotted into.
  */
 export default async function MlReadinessPage() {
-  const authorization = await getCurrentActor("platform-settings:manage", {
+  const authorization = await getViewingActor("platform-settings:manage", {
     route: "/admin/ml-readiness",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));

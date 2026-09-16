@@ -1,7 +1,7 @@
 "use server";
 
 import { reportError } from "@/lib/error-logging";
-import { getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
+import { getViewingActor, getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { runIngestion } from "@/lib/ingestion/runner";
 import {
@@ -167,7 +167,7 @@ export async function previewCompanyForImport(
 ): Promise<CompanyPreviewState> {
   void previous;
 
-  const authorization = await getCurrentActor("client:edit");
+  const authorization = await getViewingActor("client:edit");
   if (!authorization.ok) {
     return { kind: "error", message: actorFailureMessage(authorization.reason) };
   }

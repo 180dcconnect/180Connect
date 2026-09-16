@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
 import { averageRating, RATING_LABELS } from "@/lib/feedback";
@@ -39,11 +39,12 @@ function relativeTime(dateStr: string, now: Date): string {
  * cards, display heading + eyebrow summary, staged blur-up entrance.
  */
 export default async function FeedbackPage() {
-  const authorization = await getCurrentActor("user:manage", {
+  const authorization = await getViewingActor("user:manage", {
     route: "/admin/feedback",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
+  const canRequestFeedback = authorization.actor.role === "admin";
   const supabase = await createClient();
 
   const [{ data: rows, error }, { data: userOptions }] = await Promise.all([
@@ -93,7 +94,7 @@ export default async function FeedbackPage() {
                  Ratings are collected periodically via the in-app prompt. 
               </p>
             </div>
-            <RequestFeedbackButton />
+            {canRequestFeedback && <RequestFeedbackButton />}
           </Rise>
 
           {/* Summary strip */}

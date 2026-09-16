@@ -112,7 +112,7 @@ describe("buildFinancialPeriods", () => {
 
     assert.equal(rows.length, 1, "the same year must not be written twice");
     assert.equal(rows[0].periodStart, "2024-04-01");
-    assert.equal(rows[0].incomeBand, "over_1m");
+    assert.equal(rows[0].incomeBand, "over_100m");
   });
 
   it("fills a figure the details endpoint is missing from the history row", () => {
@@ -306,7 +306,7 @@ describe("buildFinancialPeriodsFromBulk", () => {
     const row = buildFinancialPeriodsFromBulk([partAandB])[0];
     assert.equal(row.totalIncome, 251_000);
     assert.equal(row.totalExpenditure, 241_000);
-    assert.equal(row.incomeBand, "100k_1m");
+    assert.equal(row.incomeBand, "100k_500k");
   });
 
   it("falls back to Part A's totals for a charity that files no Part B", () => {

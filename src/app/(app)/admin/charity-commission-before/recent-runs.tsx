@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { StatusBadge } from "../import-status/status-badge";
+import { runDisplayStatus } from "../import-status/status-helpers.ts";
 import {
   PIPELINE_LABEL,
   summariseRun,
@@ -22,7 +23,7 @@ import {
  * few and links across for the rest.
  */
 
-export function RecentRuns({ runs }: { runs: CharityCommissionRun[] }) {
+export function RecentRuns({ runs, now }: { runs: CharityCommissionRun[]; now: Date }) {
   return (
     <section className="rounded-2xl border border-black/[0.07] bg-white p-5 shadow-xs sm:p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -58,12 +59,12 @@ export function RecentRuns({ runs }: { runs: CharityCommissionRun[] }) {
                   </span>
                 </div>
                 <p className="mt-1 text-sm leading-[1.6] text-foreground/65">
-                  {summariseRun(run)}
+                  {summariseRun(run, now)}
                 </p>
               </div>
               {/* The same pill the Import Status page uses, not a second
                   vocabulary for the same four states. */}
-              <StatusBadge status={run.job_status} />
+              <StatusBadge status={runDisplayStatus(run.job_status, run.started_at, now)} />
             </li>
           ))}
         </ul>

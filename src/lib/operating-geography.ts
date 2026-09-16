@@ -15,6 +15,15 @@ export type SourceItem = {
 
 export type OperatingGeography = {
   registeredCity: string | null;
+  /**
+   * The first line of the registered address — the office's name or street.
+   *
+   * Carried because `city` is empty on a large share of the register: 998 of
+   * 2,758 staging records hold a postcode and an address line with no town, so
+   * a card that reads only `city` tells a CAM the office is "not on file"
+   * while the General information card above it shows the address in full.
+   */
+  registeredAddressLine: string | null;
   registeredPostcode: string | null;
   registeredCountry: string;
   geographicReach: string | null;
@@ -43,6 +52,7 @@ export function loadOperatingGeography(
   sources: readonly SourceItem[] = [],
 ): OperatingGeography {
   const registeredCity = organisation.city?.trim() || null;
+  const registeredAddressLine = organisation.address_line_1?.trim() || null;
   const registeredPostcode = organisation.postcode?.trim() || null;
   const registeredCountry = organisation.country_code || "GB";
   const geographicReach = organisation.geographic_reach ?? null;
@@ -88,6 +98,7 @@ export function loadOperatingGeography(
 
       return {
         registeredCity,
+        registeredAddressLine,
         registeredPostcode,
         registeredCountry,
         geographicReach,
@@ -110,6 +121,7 @@ export function loadOperatingGeography(
   if (isCompaniesHouse) {
     return {
       registeredCity,
+      registeredAddressLine,
       registeredPostcode,
       registeredCountry,
       geographicReach,
@@ -129,6 +141,7 @@ export function loadOperatingGeography(
   if (isManual) {
     return {
       registeredCity,
+      registeredAddressLine,
       registeredPostcode,
       registeredCountry,
       geographicReach,
@@ -146,6 +159,7 @@ export function loadOperatingGeography(
   // 4. Default fallback
   return {
     registeredCity,
+    registeredAddressLine,
     registeredPostcode,
     registeredCountry,
     geographicReach,

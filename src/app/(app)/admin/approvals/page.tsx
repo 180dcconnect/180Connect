@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
+import { hasPermission } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
@@ -19,14 +20,22 @@ import { ApprovalsPanel } from "./approvals-panel";
  * `decide_edit_suggestion` RPC with stale-snapshot checks. Approving applies
  * the verified value to the live client record; rejecting logs the reason and
  * leaves the record intact.
+ *
+ * Leadership (viewer) reads the same queue and decides nothing in it: the two
+ * buttons and the rejection box are withheld, `hasPermission` deciding that
+ * rather than a role literal, because it is the same question the RPC answers.
  */
 export default async function AdminApprovalsPage() {
-  const authorization = await getCurrentActor("approval:manage", {
+  const authorization = await getViewingActor("approval:manage", {
     route: "/admin/approvals",
   });
   if (!authorization.ok) {
     redirect(adminRouteDestination(authorization.reason));
   }
+
+  // The exact question the write asks. A viewer is refused here, an admin is
+  // not, and a CAM cannot reach the page at all (the gate above).
+  const canDecide = hasPermission(authorization.actor.role, "approval:manage");
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -64,7 +73,7 @@ export default async function AdminApprovalsPage() {
           </div>
         )}
 
-        <ApprovalsPanel initialSuggestions={data ?? []} />
+        <ApprovalsPanel initialSuggestions={data ?? []} canDecide={canDecide} />
       </section>
     </main>
   );

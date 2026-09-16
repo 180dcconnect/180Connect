@@ -4,7 +4,7 @@
  * database.
  *
  * A view is the /clients filter combination under a name. Every filter on that page
- * is already a URL search param (see src/app/clients/page.tsx), so capturing a view
+ * is already a URL search param (see src/app/(app)/clients/page.tsx), so capturing a view
  * is "take the params we recognise" and re-applying one is "put them back in a query
  * string". Nothing in between interprets them, which is what makes AC2 — the same
  * combination comes back exactly — true by construction rather than by care.

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   anyWeightCounts,
+  autoBalanceWeights,
   SCOUT_WEIGHT_PARAMETERS,
   weightShares,
   readWeightsForm,
@@ -141,6 +142,34 @@ describe("scout weight inputs — shares and the all-zero guard", () => {
       anyWeightCounts({ sector: 0, geography: 5, size: 0, partnershipHistory: 0, previousContact: 0 }),
       true,
     );
+  });
+});
+
+describe("scout weight inputs — autoBalanceWeights", () => {
+  it("keeps already balanced weights unchanged", () => {
+    const equal = { sector: 20, geography: 20, size: 20, partnershipHistory: 20, previousContact: 20 };
+    const balanced = autoBalanceWeights(equal);
+    assert.deepEqual(balanced, equal);
+  });
+
+  it("scales arbitrary positive weights to sum to exactly 100", () => {
+    const input = { sector: 40, geography: 20, size: 10, partnershipHistory: 10, previousContact: 10 };
+    const balanced = autoBalanceWeights(input);
+    const sum = Object.values(balanced).reduce((a, b) => a + b, 0);
+    assert.equal(sum, 100);
+    assert.equal(balanced.sector, 45);
+    assert.equal(balanced.geography, 22);
+    assert.equal(balanced.size, 11);
+    assert.equal(balanced.partnershipHistory, 11);
+    assert.equal(balanced.previousContact, 11);
+  });
+
+  it("falls back to equal 20% weights when all inputs are 0", () => {
+    const zero = { sector: 0, geography: 0, size: 0, partnershipHistory: 0, previousContact: 0 };
+    const balanced = autoBalanceWeights(zero);
+    const sum = Object.values(balanced).reduce((a, b) => a + b, 0);
+    assert.equal(sum, 100);
+    assert.deepEqual(balanced, { sector: 20, geography: 20, size: 20, partnershipHistory: 20, previousContact: 20 });
   });
 });
 

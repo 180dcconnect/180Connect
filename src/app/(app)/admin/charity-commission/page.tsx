@@ -31,20 +31,23 @@
 
 import { redirect } from "next/navigation";
 
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { reportError } from "@/lib/error-logging";
+import { hasPermission } from "@/lib/auth/permissions";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { parseFilters } from "@/lib/charity-register/filters";
 import { findBackfillTargets } from "@/lib/charity-register/annual-return-backfill";
 import { findProfileTargets } from "@/lib/charity-register/profile-backfill";
+import { findReachTargets } from "@/lib/charity-register/reach-backfill";
 import { labelValues, registerMeta } from "@/lib/charity-register/sqlite";
 import { LABEL_KIND } from "@/lib/charity-register/sqlite-query";
 import { DataImportsHeader } from "../data-imports-header";
 import { AnnualReturnCard } from "./annual-return-card";
 import { RegisterProfileCard } from "./profile-card";
+import { GeographicReachCard } from "./reach-card";
 import { CharityLookupDialog } from "./lookup-dialog";
 import { FilterBuilder, type PresetSummary } from "./filter-builder";
 import { ImportConsole, NewImportButton } from "./import-console";
@@ -53,6 +56,7 @@ import { RecentRuns } from "./recent-runs";
 import { RegisterRail } from "./register-rail";
 import { MAX_BACKFILL } from "@/lib/charity-register/annual-return-backfill";
 import { MAX_BACKFILL as MAX_PROFILE_BACKFILL } from "@/lib/charity-register/profile-backfill";
+import { MAX_BACKFILL as MAX_REACH_BACKFILL } from "@/lib/charity-register/reach-backfill";
 import type { CharityCommissionRun } from "./bulk-funnel";
 
 // The import runs inside a Server Action, not this page — but promotion of a
@@ -66,11 +70,21 @@ const RUN_WINDOW = 8;
 export default async function CharityCommissionPage() {
   // `client:edit`, not `user:manage`: the team decided everyone who works the
   // client list can shape and run imports. Viewers still cannot.
-  const authorization = await getCurrentActor("client:edit");
+  const authorization = await getViewingActor("client:edit");
   if (!authorization.ok) {
     if (authorization.reason === "unauthenticated") redirect("/login");
     redirect("/dashboard?error=admin-access-required");
   }
+
+  // Leadership reads this screen and runs nothing on it. `client:edit` is the
+  // exact permission every write behind the run history asks for — the import,
+  // the single-charity lookup, the Part B backfill and the register profile
+  // backfill — and `platform-settings:manage` is what the register refresh asks
+  // for. Asking the same questions here keeps a button a viewer cannot use off
+  // the page, rather than letting them press it and be refused.
+  const canImport = hasPermission(authorization.actor.role, "client:edit");
+  const canRefreshRegister =
+    canImport && hasPermission(authorization.actor.role, "platform-settings:manage");
 
   const supabase = await createClient();
   const admin = createAdminClient();
@@ -105,10 +119,12 @@ export default async function CharityCommissionPage() {
   // read — one failing must not deny the other its card.
   let coverage = null;
   let profileCoverage = null;
+  let reachCoverage = null;
   if (admin) {
-    const [backfill, profile] = await Promise.allSettled([
+    const [backfill, profile, reach] = await Promise.allSettled([
       findBackfillTargets(admin),
       findProfileTargets(admin),
+      findReachTargets(admin),
     ]);
 
     if (backfill.status === "fulfilled") {
@@ -127,6 +143,16 @@ export default async function CharityCommissionPage() {
     } else {
       await reportError(profile.reason, {
         operation: "admin.charity_commission.register_profile_coverage",
+      });
+    }
+
+    // And the same again for reach, which the register can only answer for a
+    // charity that declared its areas of operation.
+    if (reach.status === "fulfilled") {
+      reachCoverage = reach.value.coverage;
+    } else {
+      await reportError(reach.reason, {
+        operation: "admin.charity_commission.reach_coverage",
       });
     }
   }
@@ -180,7 +206,9 @@ export default async function CharityCommissionPage() {
               snapshotDate={snapshotDate}
               registerSize={registerSize}
               staleDays={staleDays}
-              canRefresh={Boolean(process.env.GITHUB_REGISTER_TOKEN?.trim())}
+              canRefresh={
+                canRefreshRegister && Boolean(process.env.GITHUB_REGISTER_TOKEN?.trim())
+              }
             />
           </DataImportsHeader>
         </Rise>
@@ -209,22 +237,33 @@ export default async function CharityCommissionPage() {
                         variant="page"
                         message="Import history could not be loaded. This has been recorded — refresh and try again."
                       />
-                      <div className="px-1">
-                        <CharityLookupDialog configured={lookupConfigured} />
-                      </div>
+                      {canImport && (
+                        <div className="px-1">
+                          <CharityLookupDialog configured={lookupConfigured} />
+                        </div>
+                      )}
                     </>
                   ) : (
                     <RecentRuns
                       runs={runs}
-                      action={staged ? <NewImportButton /> : undefined}
-                      secondaryAction={<CharityLookupDialog configured={lookupConfigured} />}
+                      nowIso={now.toISOString()}
+                      action={staged && canImport ? <NewImportButton /> : undefined}
+                      secondaryAction={
+                        canImport ? (
+                          <CharityLookupDialog configured={lookupConfigured} />
+                        ) : undefined
+                      }
                     />
                   )}
 
                   {!staged && (
                     <InlineAlert
                       variant="page"
-                      message="The register has not been loaded yet, so there is nothing to import from. Refresh it from the link above the history."
+                      message={
+                        canImport
+                          ? "The register has not been loaded yet, so there is nothing to import from. Refresh it from the link above the history."
+                          : "The register has not been loaded yet, so there is nothing to import from."
+                      }
                     />
                   )}
 
@@ -235,6 +274,7 @@ export default async function CharityCommissionPage() {
                       pending={coverage.pending}
                       pendingPeriods={coverage.pendingPeriods}
                       maxBatchSize={MAX_BACKFILL}
+                      readOnly={!canImport}
                     />
                   )}
 
@@ -245,6 +285,17 @@ export default async function CharityCommissionPage() {
                       pending={profileCoverage.pending}
                       pendingFields={profileCoverage.pendingFields}
                       maxBatchSize={MAX_PROFILE_BACKFILL}
+                      readOnly={!canImport}
+                    />
+                  )}
+
+                  {reachCoverage && reachCoverage.charities > 0 && (
+                    <GeographicReachCard
+                      charities={reachCoverage.charities}
+                      covered={reachCoverage.covered}
+                      pending={reachCoverage.pending}
+                      maxBatchSize={MAX_REACH_BACKFILL}
+                      readOnly={!canImport}
                     />
                   )}
 

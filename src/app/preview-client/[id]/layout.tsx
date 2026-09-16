@@ -8,13 +8,13 @@ import {
   loadRecordStats,
   loadSuppression,
   requireActor,
-} from "@/app/clients/[id]/load-record";
+} from "@/app/(app)/clients/[id]/load-record";
 import { RecordHeader } from "./record-header";
-import { RecordTabs } from "@/app/clients/[id]/record-tabs";
-import { TimelineRealtimeRefresher } from "@/app/clients/[id]/timeline-realtime";
+import { RecordTabs } from "@/app/(app)/clients/[id]/record-tabs";
+import { TimelineRealtimeRefresher } from "@/app/(app)/clients/[id]/timeline-realtime";
 
-// 1:1 duplicate of src/app/clients/[id]/layout.tsx — edit freely, real file untouched.
-// Copy final JSX back to src/app/clients/[id]/layout.tsx when happy.
+// 1:1 duplicate of src/app/(app)/clients/[id]/layout.tsx — edit freely, real file untouched.
+// Copy final JSX back to src/app/(app)/clients/[id]/layout.tsx when happy.
 
 export async function generateMetadata({
   params,

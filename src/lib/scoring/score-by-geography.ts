@@ -18,7 +18,7 @@
 // This is deliberately NOT the geographic_reach path. Reach-based scoring
 // (local/regional/national/international, with the South Yorkshire pilot
 // expansion) already lives in getGeographicPriorityScore in
-// src/app/clients/visible-clients.ts for personal queue ordering; that stays
+// src/app/(app)/clients/visible-clients.ts for personal queue ordering; that stays
 // separate. When this function is wired into calculatePriorityScore's
 // `geography` factor it should be fed city data, and reach handling either
 // composed alongside or kept queue-only — not duplicated here.

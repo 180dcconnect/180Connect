@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { reportError } from "@/lib/error-logging";
-import { getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
+import { getViewingActor, getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { safeValidate } from "@/lib/validation";
 import {
@@ -158,7 +158,7 @@ export async function getBackfillAttemptStatus(
     return { ok: false, message: "That status could not be requested." };
   }
 
-  const authorization = await getCurrentActor("user:manage");
+  const authorization = await getViewingActor("user:manage");
   if (!authorization.ok) {
     return { ok: false, message: actorFailureMessage(authorization.reason) };
   }

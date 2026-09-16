@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
+import { getViewingActor, getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
 import { reportError } from "@/lib/error-logging";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -102,7 +102,7 @@ export type PreviewState =
 export async function previewCompaniesSelection(
   filters: CompanyRegisterFilters,
 ): Promise<PreviewState> {
-  const authorization = await getCurrentActor(IMPORT_PERMISSION);
+  const authorization = await getViewingActor(IMPORT_PERMISSION);
   if (!authorization.ok) {
     return { kind: "error", message: actorFailureMessage(authorization.reason) };
   }
@@ -143,7 +143,7 @@ export async function previewCompaniesSelection(
 export async function countCompaniesSelection(
   filters: CompanyRegisterFilters,
 ): Promise<{ count: number } | { error: string }> {
-  const authorization = await getCurrentActor(IMPORT_PERMISSION);
+  const authorization = await getViewingActor(IMPORT_PERMISSION);
   if (!authorization.ok) return { error: actorFailureMessage(authorization.reason) };
 
   const unavailable = companiesRegisterUnavailableReason();

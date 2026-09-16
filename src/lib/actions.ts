@@ -85,6 +85,73 @@ export function formatDueDate(dueDate: string): string {
   return `${Number(day)} ${monthLabel}`;
 }
 
+const MONTH_NAMES_FULL = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
+
+export function getOrdinalSuffix(day: number): string {
+  const mod100 = day % 100;
+  if (mod100 >= 11 && mod100 <= 13) return "th";
+  switch (day % 10) {
+    case 1:
+      return "st";
+    case 2:
+      return "nd";
+    case 3:
+      return "rd";
+    default:
+      return "th";
+  }
+}
+
+/**
+ * Detailed due date with year, ordinal suffix, and relative timing:
+ * e.g. "19th September 2026 (in 3 days)", "16th September 2026 (today)",
+ * "17th September 2026 (tomorrow)", "15th September 2026 (yesterday)".
+ */
+export function formatDueDateWithRelative(dueDate: string, now: Date = new Date()): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dueDate);
+  if (!match) return dueDate;
+  const [, yearStr, monthStr, dayStr] = match;
+  const targetYear = Number(yearStr);
+  const targetMonth = Number(monthStr) - 1;
+  const targetDay = Number(dayStr);
+
+  const monthLabel = MONTH_NAMES_FULL[targetMonth] ?? monthStr;
+  const ordinal = getOrdinalSuffix(targetDay);
+
+  const targetUtcMs = Date.UTC(targetYear, targetMonth, targetDay);
+  const todayUtcMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const diffDays = Math.round((targetUtcMs - todayUtcMs) / 86_400_000);
+
+  let relative: string;
+  if (diffDays === 0) {
+    relative = "today";
+  } else if (diffDays === 1) {
+    relative = "tomorrow";
+  } else if (diffDays === -1) {
+    relative = "yesterday";
+  } else if (diffDays > 1) {
+    relative = `in ${diffDays} days`;
+  } else {
+    relative = `${Math.abs(diffDays)} days ago`;
+  }
+
+  return `${targetDay}${ordinal} ${monthLabel} ${targetYear} (${relative})`;
+}
+
+
 /**
  * `due_date` is a Postgres `date` column — a plain "YYYY-MM-DD" string, never
  * a time. Comparing it against `now`'s own calendar-day key (not a timestamp
@@ -335,6 +402,43 @@ export function validateAssignAction(input: {
   };
 }
 
+/**
+ * F169. The line that appears under the assignee picker when the person being
+ * handed the work does not own the client it is about.
+ *
+ * Delegation is not ownership, and this is a note, never a refusal: an admin
+ * handing a specialist task to someone who doesn't own the client is a
+ * legitimate move, shared read means the assignee can see the client anyway,
+ * and the action landing on their own tab is the whole point. What was missing
+ * was only the fact itself — nothing else on the screen said the two differ,
+ * so an admin who assumed otherwise found out after the work had landed on the
+ * wrong tab.
+ *
+ * Blank when the assignee does own it, and blank while either choice is still
+ * unmade (the callers decide that part by not calling). An unowned client gets
+ * its own sentence rather than "doesn't own this client": nobody owns it, so
+ * saying a particular person doesn't would be misleading.
+ */
+export function assigneeOwnerNote({
+  assigneeUserId,
+  assigneeName,
+  clientOwnerId,
+  clientOwnerName,
+}: {
+  /** The member the work is being handed to. */
+  assigneeUserId: string;
+  /** Their display name, as the picker prints it. */
+  assigneeName: string;
+  /** `organisations.owner_id` — null when the client has no owner yet. */
+  clientOwnerId: string | null;
+  /** The owner's name, if the read carried one. */
+  clientOwnerName: string | null;
+}): string {
+  if (clientOwnerId === assigneeUserId) return "";
+  if (clientOwnerId === null) return "No one owns this client yet.";
+  const owner = clientOwnerName?.trim() || "another team member";
+  return `${assigneeName} doesn't own this client — it's owned by ${owner}.`;
+}
 
 const ASSIGN_GENERIC_FAILURE = "The action could not be saved. Refresh and try again.";
 

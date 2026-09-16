@@ -54,6 +54,7 @@ const COLUMNS = [
   "geographic_reach",
   "outreach_status",
   "data_completeness_score",
+  "charity_activities",
   "is_seed",
 ] as const satisfies readonly (keyof SeedOrganisation)[];
 
@@ -138,8 +139,26 @@ async function main(): Promise<void> {
     );
     if (seededOrgs.length > 0) {
       // One demo income per band, cycled deterministically across the rows.
-      const DEMO_INCOMES = [8_000, 45_000, 500_000, 2_000_000];
-      const DEMO_BANDS = ["under_10k", "10k_100k", "100k_1m", "over_1m"] as const;
+      const DEMO_INCOMES = [
+        8_000,
+        45_000,
+        250_000,
+        750_000,
+        3_000_000,
+        25_000_000,
+        75_000_000,
+        200_000_000,
+      ];
+      const DEMO_BANDS = [
+        "under_10k",
+        "10k_100k",
+        "100k_500k",
+        "500k_1m",
+        "1m_10m",
+        "10m_50m",
+        "50m_100m",
+        "over_100m",
+      ] as const;
       const fpValues: unknown[] = [];
       const fpPlaceholders = seededOrgs.map((row, index) => {
         const slot = index % DEMO_INCOMES.length;
@@ -187,18 +206,21 @@ async function main(): Promise<void> {
       );
       const scoreValues: unknown[] = [];
       const scorePlaceholders = scoredOrgs.map((row) => {
-        const { score, band } = computePriorityScore({
+        const { score, band, factors, weights } = computePriorityScore({
           city: row.city,
           outreach_status: row.outreach_status,
           total_income: row.total_income === null ? null : Number(row.total_income),
         });
-        scoreValues.push(row.id, score, band);
-        return `($${scoreValues.length - 2}, $${scoreValues.length - 1}, $${scoreValues.length}, 'rule_engine', now())`;
+        // The breakdown rides along exactly as production ingestion stores it,
+        // so seeded dashboards explain scores with real per-factor reasons
+        // instead of the generic fallback lines.
+        scoreValues.push(row.id, score, band, JSON.stringify({ factors, weights }));
+        return `($${scoreValues.length - 3}, $${scoreValues.length - 2}, $${scoreValues.length - 1}, 'rule_engine', now(), $${scoreValues.length})`;
       });
       await client.query(
         `
         insert into public.latest_scores
-          (organisation_id, priority_score, priority_band, score_source, scored_at)
+          (organisation_id, priority_score, priority_band, score_source, scored_at, score_factors)
         values ${scorePlaceholders.join(",\n       ")}
         on conflict (organisation_id) do nothing
         `,

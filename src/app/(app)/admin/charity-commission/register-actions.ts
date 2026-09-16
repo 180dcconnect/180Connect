@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
+import { getViewingActor, getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
 import { reportError } from "@/lib/error-logging";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -29,6 +29,11 @@ import {
   MAX_BACKFILL as MAX_PROFILE_BACKFILL,
   DEFAULT_BACKFILL as DEFAULT_PROFILE_BACKFILL,
 } from "@/lib/charity-register/profile-backfill";
+import {
+  runReachBackfill,
+  MAX_BACKFILL as MAX_REACH_BACKFILL,
+  DEFAULT_BACKFILL as DEFAULT_REACH_BACKFILL,
+} from "@/lib/charity-register/reach-backfill";
 import { promotePendingCharityCommissionBulkRecords } from "@/lib/standardize/write-organisations";
 
 /**
@@ -110,7 +115,7 @@ export type PreviewState =
 export async function previewRegisterSelection(
   filters: CharityRegisterFilters,
 ): Promise<PreviewState> {
-  const authorization = await getCurrentActor(IMPORT_PERMISSION);
+  const authorization = await getViewingActor(IMPORT_PERMISSION);
   if (!authorization.ok) {
     return { kind: "error", message: actorFailureMessage(authorization.reason) };
   }
@@ -150,7 +155,7 @@ export async function previewRegisterSelection(
 export async function countRegisterSelection(
   filters: CharityRegisterFilters,
 ): Promise<{ count: number } | { error: string }> {
-  const authorization = await getCurrentActor(IMPORT_PERMISSION);
+  const authorization = await getViewingActor(IMPORT_PERMISSION);
   if (!authorization.ok) return { error: actorFailureMessage(authorization.reason) };
 
   const unavailable = registerUnavailableReason();
@@ -678,6 +683,128 @@ export async function runProfileBackfillNow(
         .eq("id", runId);
     }
     await reportError(error, { operation: "admin.charity_register_profile_backfill" });
+    return {
+      kind: "error",
+      message: "The backfill could not be run. The error has been reported.",
+    };
+  }
+}
+
+/**
+ * ── Geographic reach backfill ──
+ *
+ * The reach catch-up. See `lib/charity-register/reach-backfill.ts` for why it
+ * exists — in short, the import derives reach only on the insert path, so a
+ * charity already on the client list can never receive it. This is the door
+ * onto it, gated and recorded exactly as the two backfills above.
+ */
+
+export type ReachBackfillState =
+  | { kind: "idle"; message: string }
+  | { kind: "error"; message: string }
+  | { kind: "done"; message: string; organisations: number; remaining: number };
+
+export async function runReachBackfillNow(
+  _previous: ReachBackfillState,
+  formData: FormData,
+): Promise<ReachBackfillState> {
+  const authorization = await getCurrentActor(IMPORT_PERMISSION);
+  if (!authorization.ok) {
+    return { kind: "error", message: actorFailureMessage(authorization.reason) };
+  }
+
+  if (registerUnavailableReason()) {
+    return { kind: "error", message: REGISTER_MISSING };
+  }
+
+  const requested = Number(formData.get("batchSize"));
+  const limit =
+    Number.isInteger(requested) && requested > 0
+      ? Math.min(requested, MAX_REACH_BACKFILL)
+      : DEFAULT_REACH_BACKFILL;
+
+  let runId: string | null = null;
+  try {
+    const supabase = requireAdminClient();
+
+    const { data: run, error: runError } = await supabase
+      .from("ingestion_runs")
+      .insert({
+        api_source: "charity_commission_bulk",
+        triggered_by: "manual",
+        triggered_by_user_id: authorization.actor.id,
+        job_status: "running",
+      })
+      .select("id")
+      .single();
+    if (runError) throw runError;
+    runId = run.id as string;
+
+    const outcome = await runReachBackfill(supabase, limit);
+
+    await supabase
+      .from("ingestion_runs")
+      .update({
+        job_status: outcome.remaining > 0 ? "partial" : "completed",
+        completed_at: new Date().toISOString(),
+        records_fetched: outcome.organisations,
+        // Updates in place, never an insert — the same accounting the profile
+        // backfill explains above: counting these as "inserted" would put
+        // organisations on Import Status that were never created.
+        records_inserted: 0,
+        records_skipped: 0,
+        records_failed: 0,
+        run_stats: {
+          job: "reach_backfill",
+          organisations: outcome.organisations,
+          remaining: outcome.remaining,
+        },
+      })
+      .eq("id", runId);
+
+    await supabase.from("audit_log").insert({
+      actor_user_id: authorization.actor.id,
+      action: "charity_register_reach_backfilled",
+      target_table: "ingestion_runs",
+      target_id: runId,
+      detail: {
+        organisations: outcome.organisations,
+        remaining: outcome.remaining,
+        limit,
+      },
+    });
+
+    revalidatePath("/admin/charity-commission");
+
+    if (outcome.organisations === 0) {
+      return {
+        kind: "done",
+        message: "Nothing to fill in — every charity already has how far it works on file.",
+        ...outcome,
+      };
+    }
+
+    return {
+      kind: "done",
+      message:
+        `Filled in how far ${outcome.organisations.toLocaleString()} ` +
+        `${outcome.organisations === 1 ? "charity works" : "charities work"}` +
+        (outcome.remaining > 0 ? `. ${outcome.remaining.toLocaleString()} still queued.` : "."),
+      ...outcome,
+    };
+  } catch (error) {
+    if (runId) {
+      const supabase = createAdminClient();
+      await supabase
+        ?.from("ingestion_runs")
+        .update({
+          job_status: "failed",
+          completed_at: new Date().toISOString(),
+          error_message: error instanceof Error ? error.message : String(error),
+        })
+        .eq("id", runId);
+    }
+    await reportError(error, { operation: "admin.charity_register_reach_backfill" });
     return {
       kind: "error",
       message: "The backfill could not be run. The error has been reported.",

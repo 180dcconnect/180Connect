@@ -21,19 +21,28 @@ type PipelineRun = {
 export function PerformanceDial({
   totalClients,
   convertedCount,
+  respondedClients,
+  winRate,
   inProgressCount,
   discoveryCount,
   closedCount,
 }: {
   totalClients: number;
   convertedCount: number;
+  /** Clients who replied or converted — the win rate's denominator. */
+  respondedClients: number;
+  /** Converted ÷ responded clients. Null until somebody responds. */
+  winRate: number | null;
   inProgressCount: number;
   discoveryCount: number;
   closedCount: number;
 }) {
   const [hovered, setHovered] = useState<string | null>(null);
 
-  const conversionRate = totalClients > 0 ? (convertedCount / totalClients) * 100 : 0;
+  // The ring shows the portfolio's shape (all owned clients, won or not); the
+  // number in the middle is the win rate, which is about the clients who
+  // responded. The two were one figure before — converted ÷ every client owned
+  // — so this dial reported a rate no other screen did.
 
   const runs: PipelineRun[] = useMemo(() => {
     if (totalClients === 0) return [];
@@ -99,7 +108,9 @@ export function PerformanceDial({
         aria-label={
           totalClients === 0
             ? "No clients assigned yet"
-            : `Conversion rate: ${conversionRate.toFixed(1)}%, with ${convertedCount} won of ${totalClients} clients.`
+            : winRate === null
+              ? `${totalClients} clients assigned; nobody has replied yet, so there is no win rate.`
+              : `Win rate: ${(winRate * 100).toFixed(1)}%, with ${convertedCount} won of ${respondedClients} clients who responded, out of ${totalClients} owned.`
         }
       >
         <svg viewBox="0 0 200 200" className="size-full select-none">
@@ -146,7 +157,7 @@ export function PerformanceDial({
           ) : (
             <>
               <span className="font-mono text-[22cqw] leading-none font-medium tracking-[-0.03em] text-ink tabular-nums">
-                {conversionRate.toFixed(1)}%
+                {winRate === null ? "—" : `${(winRate * 100).toFixed(1)}%`}
               </span>
               <span className="mt-[3cqw] text-[6.5cqw] font-semibold tracking-[-0.01em] text-go">
                 Win Rate
@@ -182,7 +193,8 @@ export function PerformanceDial({
 
       {totalClients > 0 && (
         <p className="text-[11.5px] leading-[1.4] font-medium text-dim">
-          <strong className="text-ink font-semibold">{convertedCount} won</strong> of {totalClients} portfolio clients
+          <strong className="text-ink font-semibold">{convertedCount} won</strong> of{" "}
+          {respondedClients} who replied
         </p>
       )}
     </div>

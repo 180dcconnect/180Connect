@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
@@ -40,7 +40,7 @@ export default async function OutreachPreferencesPage() {
   // `client:edit` (a viewer has no outreach to target), so the page enforces the
   // same permission rather than letting a direct URL reach a form the rail says
   // they should not have. Same gate as the save action below us.
-  const authorization = await getCurrentActor("client:edit", {
+  const authorization = await getViewingActor("client:edit", {
     route: "/settings/outreach-preferences",
   });
   if (!authorization.ok) {

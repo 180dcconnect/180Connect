@@ -1,5 +1,7 @@
 /**
- * F180 — Admin Dashboard. Pure aggregates for /admin/dashboard.
+ * F180 — pipeline aggregates. The separate /admin/dashboard page is gone; its
+ * pipeline stages, ownership and sector readings now live under Team analytics
+ * (/admin/analytics), and everything else it showed is on /dashboard.
  *
  * Built directly on top of the team-pipeline data layer (src/lib/admin/team-pipeline.ts)
  * and the CAM dashboard's v1 metric definitions (src/lib/dashboard-metrics.ts).
@@ -37,15 +39,24 @@ export type DashboardClient = {
   updated_at: string;
   priority_score: number | null;
   priority_band: "high" | "medium" | "low" | null;
+  /** Register-filed purpose texts, read only by the Priority Opportunities card. */
+  charity_activities?: string | null;
+  cic_community_statement?: string | null;
 };
 
 export type FunnelMetrics = DashboardMetrics & {
-  /** converted / contacted, 0 when contacted is 0. */
-  conversionRate: number;
-  /** no_response / contacted */
+  /** Clients sitting in no_response ÷ contacted clients. 0 when none contacted. */
   noResponseRate: number;
 };
 
+/**
+ * The funnel readings are the dashboard's own (`computeDashboardMetrics`),
+ * including its reply and win rates — this used to add a third "conversion
+ * rate", converted ÷ contacted, so the admin funnel and the CAM dashboard drew
+ * the same stage with two different percentages under it. `noResponseRate` is
+ * not a rate anyone else reports; it is the funnel's own dead end, and it is
+ * named for what it counts.
+ */
 export function buildFunnelMetrics(rows: DashboardClient[]): FunnelMetrics {
   const base = computeDashboardMetrics(
     rows as unknown as Parameters<typeof computeDashboardMetrics>[0],
@@ -54,7 +65,6 @@ export function buildFunnelMetrics(rows: DashboardClient[]): FunnelMetrics {
   const noResponse = rows.filter((r) => r.outreach_status === "no_response").length;
   return {
     ...base,
-    conversionRate: contacted === 0 ? 0 : base.converted / contacted,
     noResponseRate: contacted === 0 ? 0 : noResponse / contacted,
   };
 }

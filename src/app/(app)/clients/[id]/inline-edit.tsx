@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { Check, Globe, MapPin, Undo2, X } from "lucide-react";
+import { Check, Globe, Loader2, MapPin, TriangleAlert, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+
+import { PRIMARY_BUTTON, QUIET_BUTTON } from "@/app/settings/styles";
 
 import { GooeyTextInput } from "@/components/ui/gooey-text-input";
 import {
@@ -636,6 +638,15 @@ export function InlineEnumInput({
 /**
  * The submit bar. Appears only once something has actually been changed, so the
  * card is exactly as quiet as it was before while you are only reading it.
+ *
+ * Dressed as the accessibility save bar — same white action bar, same status
+ * line on the left with the buttons on the right, same `PRIMARY_BUTTON` and
+ * `QUIET_BUTTON` (imported, not copied, so the two cannot drift apart). The
+ * only things the reference bar has no equivalent for are the CAM's reason
+ * field, which sits full-width above the buttons, and the change count, which
+ * is folded into the status line. The "record stays as it is" note is not
+ * repeated here: the card's own hint already tells CAMs corrections go to an
+ * admin for review.
  */
 export function EditDraftBar({
   count,
@@ -660,25 +671,38 @@ export function EditDraftBar({
   const overLength = reason.trim().length > REASON_MAX_LENGTH;
 
   return (
-    <div className="rounded-panel border border-lead/20 bg-paper/95 p-4 shadow-sm backdrop-blur-xs">
-      <div className="flex items-center gap-2">
-        <span className="inline-flex items-center gap-1 rounded-full bg-lead/10 px-2.5 py-0.5 text-[12px] font-semibold text-lead">
-          <motion.span
-            key={count}
-            initial={{ opacity: 0, y: -3 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.25 }}
-          >
-            {count === 1 ? "1 change" : `${count} changes`}
-          </motion.span>
-        </span>
-        <span className="text-[13px] font-normal text-dim">
-          {isCam ? "ready to propose" : "ready to save"}
-        </span>
-      </div>
+    <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-panel border border-rule bg-white px-4 py-3 shadow-xl shadow-black/10">
+      <p aria-live="polite" className="mr-auto flex items-center gap-2 text-[13px]">
+        {state.kind === "error" ? (
+          <span className="font-semibold text-stop">{state.message}</span>
+        ) : state.kind === "partial" ? (
+          <span className="flex items-center gap-1.5 font-semibold text-hold">
+            <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0" strokeWidth={2.2} />
+            {state.message}
+          </span>
+        ) : state.kind === "success" && state.message ? (
+          <span className="flex items-center gap-1.5 font-semibold text-go">
+            <Check aria-hidden="true" className="size-3.5 shrink-0" strokeWidth={2.5} />
+            {state.message}
+          </span>
+        ) : (
+          <span className="flex items-center gap-2 text-ink">
+            <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-hold" />
+            <motion.span
+              key={count}
+              initial={{ opacity: 0, y: -3 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25 }}
+            >
+              {count === 1 ? "1 change" : `${count} changes`}
+              {isCam ? " — not proposed yet" : " — not saved yet"}
+            </motion.span>
+          </span>
+        )}
+      </p>
 
       {isCam && (
-        <div className="mt-3">
+        <div className="basis-full">
           <label
             className="text-[12px] font-medium text-dim"
             htmlFor={reasonId}
@@ -708,57 +732,34 @@ export function EditDraftBar({
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={onSubmit}
-          disabled={pending || overLength}
-          className="inline-flex items-center gap-1.5 rounded-inset bg-lead px-3 py-1.5 text-[13px] font-semibold text-white transition-colors hover:bg-lead/90 focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none disabled:opacity-60 cursor-pointer"
-        >
-          <Check aria-hidden="true" className="size-3.5" />
-          {pending
-            ? isCam
-              ? "Sending…"
-              : "Saving…"
-            : isCam
-              ? count === 1
-                ? "Propose correction"
-                : `Propose ${count} corrections`
-              : count === 1
-                ? "Save change"
-                : `Save ${count} changes`}
-        </button>
-        <button
-          type="button"
-          onClick={onDiscard}
-          disabled={pending}
-          className="inline-flex items-center gap-1.5 rounded-inset border border-rule bg-white px-3 py-1.5 text-[13px] font-semibold text-dim transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none disabled:opacity-60 cursor-pointer"
-        >
-          <Undo2 aria-hidden="true" className="size-3.5" />
-          Discard
-        </button>
-        {isCam && (
-          <p className="text-[12px] text-faint">
-            The record stays as it is until an admin approves.
-          </p>
-        )}
-      </div>
-
-      {state.kind !== "idle" && state.message && (
-        <p
-          aria-live="polite"
-          role={state.kind === "error" ? "alert" : undefined}
-          className={`mt-2.5 text-[12.5px] font-semibold ${
-            state.kind === "success"
-              ? "text-go"
-              : state.kind === "partial"
-                ? "text-hold"
-                : "text-stop"
-          }`}
-        >
-          {state.message}
-        </p>
-      )}
+      <button
+        type="button"
+        onClick={onDiscard}
+        disabled={pending}
+        className={QUIET_BUTTON}
+      >
+        Discard
+      </button>
+      <button
+        type="button"
+        onClick={onSubmit}
+        disabled={pending || overLength}
+        aria-busy={pending || undefined}
+        className={PRIMARY_BUTTON}
+      >
+        {pending && <Loader2 className="size-3.5 animate-spin" strokeWidth={2.2} />}
+        {pending
+          ? isCam
+            ? "Sending…"
+            : "Saving…"
+          : isCam
+            ? count === 1
+              ? "Propose correction"
+              : `Propose ${count} corrections`
+            : count === 1
+              ? "Save change"
+              : `Save ${count} changes`}
+      </button>
     </div>
   );
 }

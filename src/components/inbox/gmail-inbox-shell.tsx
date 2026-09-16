@@ -10,7 +10,8 @@ import {
   useTransition,
 } from "react";
 import { useRouter } from "next/navigation";
-import type { AppRole } from "@/lib/auth/permissions";
+import { isViewOnly, type AppRole } from "@/lib/auth/permissions";
+import { triggerViewOnlyNotice } from "@/lib/auth/view-only";
 import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
 import {
   Inbox,
@@ -53,13 +54,13 @@ import {
 import {
   applyInboxThreadFlags,
   type InboxThreadFlagUpdate,
-} from "@/app/inbox/actions";
+} from "@/app/(app)/inbox/actions";
 import { GmailSidebar, SECTORS, type GmailFolder, type SidebarLabel } from "./gmail-sidebar";
 import type { OutreachEngineHealth } from "@/lib/gmail/engine-status.ts";
 import { GmailActionBar, type SelectionState } from "./gmail-action-bar";
 import { GmailThreadRow } from "./gmail-thread-row";
 import { GmailReadingPane } from "./gmail-reading-pane";
-import { cancelScheduledEmail, discardEmailDraft, rescheduleEmail, scheduleReviewedEmail, sendReviewedEmail } from "@/app/clients/[id]/outreach-actions";
+import { cancelScheduledEmail, discardEmailDraft, rescheduleEmail, scheduleReviewedEmail, sendReviewedEmail } from "@/app/(app)/clients/[id]/outreach-actions";
 import { GmailComposeModal } from "./gmail-compose-modal";
 import type {
   ComposerSnapshot,
@@ -72,7 +73,7 @@ import { InfoTooltip } from "@/components/ui/info-tooltip";
 import {
   PRIORITY_SCORE_FILTERS,
   SECTOR_FILTER_OPTIONS,
-} from "@/app/clients/visible-clients";
+} from "@/app/(app)/clients/visible-clients";
 import {
   ORGANISATION_TYPES,
   formatOrganisationType,
@@ -369,11 +370,13 @@ export function GmailInboxShell({
    * Live outreach-engine health from the page's server checks (Gmail
    * transport, reply-sync and scheduled-send pg_cron jobs). Passed straight
    * through to the sidebar's status card; fails closed to `unconfigured`
-   * (X, not tick) on every row when the page omits it.
+   * (X, not tick) on every row when the page omits it. The page passes the
+   * checks still in flight, and the card streams them in.
    */
-  engineHealth?: OutreachEngineHealth;
+  engineHealth?: OutreachEngineHealth | Promise<OutreachEngineHealth>;
   className?: string;
 }) {
+  const isViewer = viewerRole !== null && viewerRole !== undefined && isViewOnly(viewerRole);
   const reduceMotion = useReducedMotionConfig();
   // The list exactly as the server built it. Everything downstream reads
   // `threads` below, which is this with the viewer's own flags laid over it.
@@ -596,6 +599,10 @@ export function GmailInboxShell({
    * asked for this draft, so it appears; something else gets out of the way.
    */
   const openComposer = useCallback((spec: Omit<ComposeWindow, "key" | "minimised">) => {
+    if (viewerRole && isViewOnly(viewerRole)) {
+      triggerViewOnlyNotice();
+      return;
+    }
     setComposers((open) => {
       if (spec.draftId) {
         const existing = open.find((w) => w.draftId === spec.draftId);
@@ -610,11 +617,43 @@ export function GmailInboxShell({
       }
       return next;
     });
-  }, []);
+  }, [viewerRole]);
 
   const closeComposer = useCallback((key: string) => {
     setComposers((open) => open.filter((w) => w.key !== key));
   }, []);
+
+  /**
+   * Compose's full recipient directory, fetched when composing starts.
+   *
+   * The page hands over only the mailbox's own organisations (plus a ?compose=
+   * target) — enough to open a deep-linked composer addressed. Every other
+   * client a CAM might write to arrives from /api/inbox/directory the moment a
+   * compose window opens, rather than being read on every page load and every
+   * realtime refresh. It is re-read each time composing starts again, so a
+   * client added in between is findable. Until it lands, or if it fails, the
+   * windows search the page's own list.
+   */
+  const [fullDirectory, setFullDirectory] = useState<AddressableClient[] | null>(null);
+  const composing = composers.length > 0;
+  useEffect(() => {
+    if (!composing) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/inbox/directory");
+        if (!response.ok || cancelled) return;
+        const payload = (await response.json()) as { clients?: AddressableClient[] };
+        if (!cancelled && Array.isArray(payload.clients)) setFullDirectory(payload.clients);
+      } catch {
+        // Stays on the page's own list; the next compose session tries again.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [composing]);
+  const composeDirectory = fullDirectory ?? addressableClients;
 
   const setComposerMinimised = useCallback((key: string, minimised: boolean) => {
     setComposers((open) => {
@@ -972,10 +1011,14 @@ export function GmailInboxShell({
   // id, so this matches on address; the set_outreach_status RPC re-checks
   // server-side, so a stale address fails closed on save, never on read.
   const viewerEmailLower = viewerEmail?.trim().toLowerCase() ?? "";
-  const canSetStatusForThread = (thread: InboxThreadView): boolean =>
-    viewerIsAdmin ||
-    (viewerEmailLower !== "" &&
-      thread.camOwner.email.trim().toLowerCase() === viewerEmailLower);
+  const canSetStatusForThread = (thread: InboxThreadView): boolean => {
+    if (isViewer) return false;
+    return (
+      viewerIsAdmin ||
+      (viewerEmailLower !== "" &&
+        thread.camOwner.email.trim().toLowerCase() === viewerEmailLower)
+    );
+  };
 
   // Keep `?thread=` in step with what is open, so the URL is always a link to
   // the current view — copyable, and what a new tab reads on load. `replace`,
@@ -1214,6 +1257,7 @@ export function GmailInboxShell({
   }
 
   function handleToggleStar(id: string) {
+    if (isViewer) return;
     const thread = threads.find((t) => t.id === id);
     const wasStarred = !!thread?.isStarred;
     setStarred([id], !wasStarred);
@@ -1236,11 +1280,13 @@ export function GmailInboxShell({
   }
 
   function handleToggleRead(id: string) {
+    if (isViewer) return;
     const thread = threads.find((t) => t.id === id);
     setRead([id], !thread?.isRead);
   }
 
   function handleDeleteThread(id: string) {
+    if (isViewer) return;
     setTrashed([id]);
     if (activeThreadId === id) setActiveThreadId(null);
   }
@@ -1257,6 +1303,7 @@ export function GmailInboxShell({
     thread: InboxThreadView,
     messageId: string,
   ): Promise<string | null> {
+    if (isViewer) return "You have view-only access.";
     const result = await cancelScheduledEmail({ organisationId: thread.id, messageId });
     if (!result.ok) return result.message;
     setActiveThreadId(null);
@@ -1269,6 +1316,7 @@ export function GmailInboxShell({
     messageId: string,
     when: Date,
   ): Promise<string | null> {
+    if (isViewer) return "You have view-only access.";
     const result = await rescheduleEmail({
       organisationId: thread.id,
       messageId,
@@ -1282,11 +1330,13 @@ export function GmailInboxShell({
 
   // Bulk Handlers
   function handleMarkAsRead() {
+    if (isViewer) return;
     setRead([...selectedIds], true);
     setSelectedIds(new Set());
   }
 
   function handleMarkAsUnread() {
+    if (isViewer) return;
     setRead([...selectedIds], false);
     setSelectedIds(new Set());
   }
@@ -1294,6 +1344,7 @@ export function GmailInboxShell({
   /** Gmail's own rule for a mixed selection: if anything is unstarred, star
       everything; only an all-starred selection unstars. */
   function handleToggleStarSelected() {
+    if (isViewer) return;
     const selected = threads.filter((t) => selectedIds.has(t.id));
     const starring = selected.some((t) => !t.isStarred);
     setStarred(selected.map((t) => t.id), starring);
@@ -1301,6 +1352,7 @@ export function GmailInboxShell({
   }
 
   function handleDeleteSelected() {
+    if (isViewer) return;
     setTrashed([...selectedIds]);
     setSelectedIds(new Set());
     if (activeThreadId && selectedIds.has(activeThreadId)) {
@@ -1529,7 +1581,13 @@ export function GmailInboxShell({
         <div className="w-64 shrink-0 pr-3">
           <div className="px-1">
             <button
-              onClick={() => openComposer({ draftId: null })}
+              onClick={() => {
+                if (isViewer) {
+                  triggerViewOnlyNotice();
+                  return;
+                }
+                openComposer({ draftId: null });
+              }}
               type="button"
               className="flex items-center gap-3 rounded-2xl bg-[#c2e7ff] hover:bg-[#b3dcf8] active:scale-[0.98] transition-all px-5 py-3.5 shadow-sm text-slate-800 font-semibold text-sm hover:shadow-md cursor-pointer"
             >
@@ -1720,6 +1778,7 @@ export function GmailInboxShell({
                 onMarkAsUnread={handleMarkAsUnread}
                 onToggleStarSelected={handleToggleStarSelected}
                 onDeleteSelected={handleDeleteSelected}
+                isViewer={isViewer}
                 pageIndex={pageIndex}
                 pageSize={PAGE_SIZE}
                 onPrevPage={() => {
@@ -1935,6 +1994,7 @@ export function GmailInboxShell({
                             onToggleSector={handleToggleLabel}
                             isSectorActive={selectedLabels.has(thread.sector)}
                             sectorBg={labelColorMap.get(thread.sector)}
+                            isViewer={isViewer}
                           />
                         </motion.div>
                       ))}
@@ -1999,7 +2059,7 @@ export function GmailInboxShell({
           isMinimised={composer.minimised}
           onMinimisedChange={(minimised) => setComposerMinimised(composer.key, minimised)}
           onClose={() => closeComposer(composer.key)}
-          directory={addressableClients}
+          directory={composeDirectory}
           tags={tags}
           assignedTagsByClientId={tagsByClientId}
           onSend={handleSendRequest}

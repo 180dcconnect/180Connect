@@ -45,11 +45,12 @@ test("AC1: emails group by register, and a replied email lifts exactly that row"
   const professional = summary.register.find((r) => r.value === "professional");
   assert.ok(warm && formal && professional);
   assert.equal(warm.sent, 2);
-  assert.equal(warm.responses, 1);
-  assert.equal(warm.responseRate, 0.5);
+  assert.equal(warm.contactedClients, 2);
+  assert.equal(warm.repliedClients, 1);
+  assert.equal(warm.replyRate, 0.5);
   assert.equal(formal.sent, 1);
-  assert.equal(formal.responses, 0);
-  assert.equal(formal.responseRate, 0);
+  assert.equal(formal.repliedClients, 0);
+  assert.equal(formal.replyRate, 0);
   assert.equal(professional.sent, 1);
   // Every known enum value appears even with zero sends — a tone nobody has
   // used is a row, not an omission.
@@ -77,11 +78,14 @@ test("AC1: conversion attribution — a converted client counts on every tone-re
   const direct = summary.register.find((r) => r.value === "direct");
   assert.ok(warm && direct);
   // o1 converted: both of its warm emails attribute the conversion, but the
-  // client is counted once per row.
-  assert.equal(warm.conversions, 1);
-  assert.equal(warm.conversionRate, 1 / 2);
-  assert.equal(direct.conversions, 1);
-  assert.equal(direct.conversionRate, 1 / 2);
+  // client is counted once — and a client won is a client who responded, so
+  // the win rate is 1 of 1, not 1 of 2 sent emails.
+  assert.equal(warm.convertedClients, 1);
+  assert.equal(warm.winRate, 1);
+  // direct reached two clients, one of whom converted without replying — a
+  // converted client counts as having responded, so 1 of 1 rather than 1 of 2.
+  assert.equal(direct.convertedClients, 1);
+  assert.equal(direct.winRate, 1);
 });
 
 test("AC3: rows with no recorded tone are excluded from every bucket and counted separately", () => {
@@ -97,7 +101,7 @@ test("AC3: rows with no recorded tone are excluded from every bucket and counted
   const warm = summary.register.find((r) => r.value === "warm");
   assert.ok(warm);
   // The reply to the untracked email must not leak into any tone bucket.
-  assert.equal(warm.responses, 0);
+  assert.equal(warm.repliedClients, 0);
   assert.equal(warm.sent, 1);
   assert.equal(summary.untrackedRegister, 2);
   assert.equal(summary.untrackedLength, 0);
@@ -147,8 +151,8 @@ test("a tone never used says so instead of showing 0%", () => {
   const direct = summary.register.find((r) => r.value === "direct");
   assert.ok(direct);
   assert.equal(direct.sent, 0);
-  assert.equal(direct.responseRate, null);
-  assert.equal(direct.conversionRate, null);
+  assert.equal(direct.replyRate, null);
+  assert.equal(direct.winRate, null);
   assert.equal(describeToneRow(direct), "Never used yet.");
 });
 
@@ -159,8 +163,8 @@ test("multiple replies to one email count once as a response", () => {
   const summary = tonePerformanceSummary(rows, [], replies, []);
   const warm = summary.register.find((r) => r.value === "warm");
   assert.ok(warm);
-  assert.equal(warm.responses, 1);
-  assert.equal(warm.responseRate, 0.5);
+  assert.equal(warm.repliedClients, 1);
+  assert.equal(warm.replyRate, 0.5);
 });
 
 test("replies to unknown or unlinked messages never inflate a bucket", () => {
@@ -170,7 +174,7 @@ test("replies to unknown or unlinked messages never inflate a bucket", () => {
   const summary = tonePerformanceSummary(rows, [], replies, []);
   const warm = summary.register.find((r) => r.value === "warm");
   assert.ok(warm);
-  assert.equal(warm.responses, 1);
+  assert.equal(warm.repliedClients, 1);
 });
 
 test("length groups independently of register", () => {
@@ -187,9 +191,9 @@ test("length groups independently of register", () => {
   const detailed = summary.length.find((r) => r.value === "detailed");
   assert.ok(short && detailed);
   assert.equal(short.sent, 2);
-  assert.equal(short.responses, 0);
+  assert.equal(short.repliedClients, 0);
   assert.equal(detailed.sent, 1);
-  assert.equal(detailed.responses, 1);
+  assert.equal(detailed.repliedClients, 1);
   // The register view is untouched by the length split.
   assert.equal(summary.register.find((r) => r.value === "warm")?.sent, 3);
 });
@@ -205,8 +209,10 @@ test("non-converted statuses never count as conversions", () => {
   const summary = tonePerformanceSummary(rows, [], [], statuses);
   const warm = summary.register.find((r) => r.value === "warm");
   assert.ok(warm);
-  assert.equal(warm.conversions, 0);
-  assert.equal(warm.conversionRate, 0);
+  assert.equal(warm.convertedClients, 0);
+  // Nothing responded, so there is no win rate at all — not a 0% that reads as
+  // "we replied to everyone and won none".
+  assert.equal(warm.winRate, null);
 });
 
 test("an unknown stored value still appears rather than vanishing", () => {
@@ -233,18 +239,18 @@ test("an unknown stored value keeps its responses and conversions", () => {
   const whimsical = summary.register.find((r) => r.value === "whimsical");
   assert.ok(whimsical);
   assert.equal(whimsical.sent, 2);
-  assert.equal(whimsical.responses, 1);
-  assert.equal(whimsical.responseRate, 0.5);
-  assert.equal(whimsical.conversions, 1);
-  assert.equal(whimsical.conversionRate, 0.5);
+  assert.equal(whimsical.repliedClients, 1);
+  assert.equal(whimsical.replyRate, 0.5);
+  assert.equal(whimsical.convertedClients, 1);
+  assert.equal(whimsical.winRate, 1);
 });
 
 test("empty inputs produce every row with zeros and no rates", () => {
   const summary = tonePerformanceSummary([], [], [], []);
   assert.equal(summary.register.length, 4);
   assert.equal(summary.length.length, 3);
-  assert.ok(summary.register.every((r) => r.sent === 0 && r.responseRate === null));
-  assert.ok(summary.length.every((r) => r.sent === 0 && r.conversionRate === null));
+  assert.ok(summary.register.every((r) => r.sent === 0 && r.replyRate === null));
+  assert.ok(summary.length.every((r) => r.sent === 0 && r.winRate === null));
   assert.equal(summary.untrackedRegister, 0);
   assert.equal(summary.untrackedLength, 0);
   assert.equal(describeToneRow(summary.register[0]), "Never used yet.");

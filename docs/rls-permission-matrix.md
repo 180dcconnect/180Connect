@@ -44,7 +44,7 @@ is `tests.suite_rls_initplan` in `supabase/tests/rls_policies.test.sql`.
 |---|---|---|
 | `admin` | `authenticated` + `USERS.role = 'admin'` | Full authorised management access |
 | `cam` | `authenticated` + `USERS.role = 'cam'` | Shared read, ownership-scoped write |
-| `viewer` | `authenticated` + `USERS.role = 'viewer'` | Read-only. `app.is_viewer()`; write denial comes from failing `app.can_write()` (F258) |
+| `viewer` | `authenticated` + `USERS.role = 'viewer'` | Leadership (GLT, branch president/VP). Reads everything an admin reads; writes nothing. `app.is_viewer()`; write denial comes from failing `app.can_write()` (F258). See "Viewer read scope" below |
 | service role | `service_role` | Background jobs. **Bypasses RLS entirely.** Server-side only |
 | anonymous | `anon` | **No access to any table.** Public self-sign-up is prohibited (PRD §4.2) |
 
@@ -55,6 +55,25 @@ send messages, or execute background actions".
 
 Policies are always written `to authenticated`, never `to public`. `to public`
 includes `anon`.
+
+**Viewer read scope (revised 15 Sep 2026, open-questions Q-06).** A viewer reads every
+row an admin reads. Where a table's SELECT row below names only admins (or admins
+plus own-row/CAM rules), an additive `<table>_select_viewer` policy —
+`(select app.is_active_user()) and (select app.is_viewer())` — gives viewers the
+admin's read, from `20261004180000_viewer_reads_admin_screens.sql`: `AUDIT_LOG`,
+`BOOKLET_GENERATIONS`, `DATA_HANDLING_RULE_VERSIONS`, `DATA_HANDLING_RULES`,
+`DATA_QUALITY_EVENTS`, `EDIT_SUGGESTIONS`, `ENTITY_MATCH_CANDIDATES`, `FEEDBACK`,
+`FIELD_DISCREPANCIES`, `INGESTION_RUNS`, `MANUAL_ENTRY_RECORDS`, `MODEL_VERSIONS`,
+`ORGANISATION_STATUS_FLAGS`, `OUTREACH_PREFERENCES`, `OWNERSHIP_REQUESTS`,
+`RAW_SOURCE_RECORDS`, `RESTRICTED_EDIT_FIELDS`. The read-only RPCs
+`data_handling_coverage`, `data_handling_filter_summary`,
+`data_handling_observed_fields`, `list_restrictable_edit_fields` and
+`get_clients_last_activity` accept a viewer as they accept an admin. Deliberately
+**not** widened, because no signed-in screen reads them: `LOGIN_ATTEMPT`,
+`AI_GENERATION_RATE_LIMIT`, `PERSONAL_EMAIL_ROLE_PARTS`, `SCORE_SNAPSHOTS`. No write
+policy, write RPC or grant changed. In the application, pages gate on
+`getViewingActor` and writes on `getCurrentActor`, which refuses a viewer with
+reason `view_only` (`src/lib/auth/`).
 
 ---
 
@@ -361,6 +380,7 @@ nothing (F152 AC2 keeps it outside DNC).
 | `TAGS` | all roles | admin, cam | admin, own | admin |
 | `ORG_TAGS` | all roles | admin, cam | admin, own | admin, own |
 | `CLIENT_BOOKLETS` | all roles | admin, cam (`can_contact_organisation`) | — (immutable, see below) | admin |
+| `OUTREACH_CYCLES` | all roles | admin | admin | admin |
 
 **`CLIENT_BOOKLETS` (F085 #349, versioned by F086 #350)** is the one row here whose
 write predicate isn't plain `can_write()`: it reuses `app.can_contact_organisation()`,
@@ -378,6 +398,15 @@ recent row per organisation (`order by generated_at desc`), same convention as
 `ENRICHMENT_RESULTS`. **Not yet in the Data Model spreadsheet** — flagged in both
 migrations' own headers for Bashir to add to tab 04/02, reflecting this append-only
 shape rather than F085's original single-row one.
+
+**`OUTREACH_CYCLES` (`20261004200000_create_outreach_cycles.sql`)** holds the named
+date ranges Team analytics compares ("Spring 26"). Shared read — a cycle is a name
+and two dates, no personal data, and the analytics pickers serve every active role —
+with all three writes admin-only, matching the `platform-settings:manage` gate on
+`/settings/cycles`. The non-overlap rule lives in the app, not the schema: the
+settings action refuses a colliding save in plain words, so no exclusion constraint
+(and no extension) was needed. **Not yet in the Data Model spreadsheet** — flagged
+in the migration's own header, same standing as `CLIENT_BOOKLETS` above.
 
 ### 3.3 Notes — shared read, author write
 
@@ -427,7 +456,7 @@ drives both the render and the preflight that remains the enforcement.
 | `SEND_EVENTS` | all roles | — (service role, Gmail webhook) | — | — |
 | `REPLY_EVENTS` | all roles | — (service role) | — | — |
 | `OUTCOMES` | all roles | admin. cam: withdrawn — every value is system-managed, written/withdrawn only by `set_outreach_status` / `set_outreach_status_bulk` / `advance_outreach_pipeline_on_send` (F143/F144) | admin | admin |
-| `BOOKLET_GENERATIONS` | admin, cam (`app.can_contact_organisation(organisation_id)`); viewer: none | admin, cam (`app.can_contact_organisation(organisation_id)` **and** `generated_by = auth.uid()`); append-only audit of booklet prompt/output (F082 AC5 / F112, `20260822130000`) | — | — |
+| `BOOKLET_GENERATIONS` | admin, cam (`app.can_contact_organisation(organisation_id)`); viewer: all, read-only (`booklet_generations_select_viewer`, 20261004180000) | admin, cam (`app.can_contact_organisation(organisation_id)` **and** `generated_by = auth.uid()`); append-only audit of booklet prompt/output (F082 AC5 / F112, `20260822130000`) | — | — |
 
 `BOOKLET_GENERATIONS` lives here rather than in a new section because it is the
 booklet-side sibling of `AI_GENERATIONS`: the same "what exactly did the model
@@ -1353,7 +1382,7 @@ can already read is harmless for any active role to keep.
 
 **What RLS does not check here**: the *keys* inside `filters`. Postgres constrains the
 column to a JSON object under 4 KB (`saved_views_filters_is_object`) and nothing more.
-The key whitelist lives in `src/app/clients/saved-view-filters.ts` and is applied on both
+The key whitelist lives in `src/app/(app)/clients/saved-view-filters.ts` and is applied on both
 write and read, so an unexpected key is ignored rather than rendered — a row that somehow
 carries one produces a view missing that filter, never a filter the CAM cannot see. This
 is the §2 pattern ("what RLS cannot do"), not an oversight.
@@ -1474,7 +1503,7 @@ with no migration and no deploy.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `RESTRICTED_EDIT_FIELDS` | admins: all rows · CAMs: active rows only · viewers: none (§4 zero rows) | — (RPC only) | — (RPC only) | — (never; soft-disable via `active = false`) |
+| `RESTRICTED_EDIT_FIELDS` | admins: all rows · CAMs: active rows only · viewers: all rows, read-only (`restricted_edit_fields_select_viewer`, 20261004180000) | — (RPC only) | — (RPC only) | — (never; soft-disable via `active = false`) |
 
 No direct INSERT/UPDATE/DELETE grant to anyone. Both writes are SECURITY
 DEFINER RPCs that self-check `app.is_admin()` and audit in-transaction
@@ -1536,7 +1565,7 @@ can already read is harmless for any active role to keep.
 
 **What RLS does not check here**: the *keys* inside `filters`. Postgres constrains the
 column to a JSON object under 4 KB (`saved_views_filters_is_object`) and nothing more.
-The key whitelist lives in `src/app/clients/saved-view-filters.ts` and is applied on both
+The key whitelist lives in `src/app/(app)/clients/saved-view-filters.ts` and is applied on both
 write and read, so an unexpected key is ignored rather than rendered — a row that somehow
 carries one produces a view missing that filter, never a filter the CAM cannot see. This
 is the §2 pattern ("what RLS cannot do"), not an oversight.

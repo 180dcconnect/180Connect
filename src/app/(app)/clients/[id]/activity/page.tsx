@@ -18,7 +18,7 @@ import { ChangeHistorySection } from "../change-history-section";
 import { SectionCard } from "../section-card";
 import { TimelineSection } from "../timeline-section";
 import { loadFieldHistory, requireActor } from "../load-record";
-import { hasPermission } from "@/lib/auth/permissions";
+import { canView } from "@/lib/auth/permissions";
 import { WhatCameFromWhereCard } from "../what-came-from-where-card";
 
 /** The audit actions the client timeline surfaces. */
@@ -43,7 +43,7 @@ export default async function ClientActivityPage({
 }) {
   const { id } = await params;
   const actor = await requireActor();
-  const isAdmin = hasPermission(actor.role, "user:manage");
+  const isAdmin = canView(actor.role, "user:manage");
   const supabase = await createClient();
 
   /*

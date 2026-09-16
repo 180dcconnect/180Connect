@@ -57,6 +57,7 @@ export function SuggestEditSection({
       (row.status === "approved" || row.status === "rejected"),
   );
 
+  const isViewer = actorRole === "viewer";
   const isAdmin = actorRole === "admin";
 
   async function decide(suggestionId: string, approve: boolean) {
@@ -94,7 +95,7 @@ export function SuggestEditSection({
 
   // Nothing proposed, nothing decided — no card. An empty "no corrections are
   // waiting" panel is a row of furniture that never earns its place.
-  const hasSomethingToShow = isAdmin
+  const hasSomethingToShow = isAdmin || isViewer
     ? openSuggestions.length > 0 || decideMessage !== ""
     : openSuggestions.length > 0 || ownDecided.length > 0;
   if (!hasSomethingToShow) return null;
@@ -104,14 +105,14 @@ export function SuggestEditSection({
       <SectionCard
         headingId="suggest-edit-heading"
         icon={<PencilLine />}
-        title={isAdmin ? "Suggested edits" : "Your suggested edits"}
+        title={isAdmin || isViewer ? "Suggested edits" : "Your suggested edits"}
         hint={
-          isAdmin
+          isAdmin || isViewer
             ? "CAM-proposed corrections to this client's sensitive fields. Approving applies the value; rejecting changes nothing. Either way it is audited."
             : "Corrections you have proposed on this client. The values above stay unchanged until an admin approves."
         }
       >
-        {isAdmin && (
+        {(isAdmin || isViewer) && (
           <div className="mt-4 space-y-4">
             {openSuggestions.map((row) => (
               <div
@@ -142,45 +143,49 @@ export function SuggestEditSection({
                     {row.reason}
                   </p>
                 )}
-                <label
-                  className="mt-3 block text-[13px] font-semibold"
-                  htmlFor={`inline-reason-${row.id}`}
-                >
-                  Reason (optional, shown to the CAM)
-                </label>
-                <textarea
-                  className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm"
-                  disabled={busyId === row.id}
-                  id={`inline-reason-${row.id}`}
-                  onChange={(event) =>
-                    setReasons((current) => ({
-                      ...current,
-                      [row.id]: event.target.value,
-                    }))
-                  }
-                  rows={2}
-                  value={reasons[row.id] ?? ""}
-                />
-                <div className="mt-3 flex gap-2">
-                  <OriginButton
-                    size="sm"
-                    disabled={busyId === row.id}
-                    loading={busyId === row.id}
-                    onClick={() => decide(row.id, true)}
-                    type="button"
-                  >
-                    Approve and apply
-                  </OriginButton>
-                  <OriginButton
-                    size="sm"
-                    variant="outline"
-                    disabled={busyId === row.id}
-                    onClick={() => decide(row.id, false)}
-                    type="button"
-                  >
-                    Reject
-                  </OriginButton>
-                </div>
+                {!isViewer && (
+                  <>
+                    <label
+                      className="mt-3 block text-[13px] font-semibold"
+                      htmlFor={`inline-reason-${row.id}`}
+                    >
+                      Reason (optional, shown to the CAM)
+                    </label>
+                    <textarea
+                      className="mt-1 w-full rounded-inset border border-rule bg-white px-3 py-2 text-sm"
+                      disabled={busyId === row.id}
+                      id={`inline-reason-${row.id}`}
+                      onChange={(event) =>
+                        setReasons((current) => ({
+                          ...current,
+                          [row.id]: event.target.value,
+                        }))
+                      }
+                      rows={2}
+                      value={reasons[row.id] ?? ""}
+                    />
+                    <div className="mt-3 flex gap-2">
+                      <OriginButton
+                        size="sm"
+                        disabled={busyId === row.id}
+                        loading={busyId === row.id}
+                        onClick={() => decide(row.id, true)}
+                        type="button"
+                      >
+                        Approve and apply
+                      </OriginButton>
+                      <OriginButton
+                        size="sm"
+                        variant="outline"
+                        disabled={busyId === row.id}
+                        onClick={() => decide(row.id, false)}
+                        type="button"
+                      >
+                        Reject
+                      </OriginButton>
+                    </div>
+                  </>
+                )}
               </div>
             ))}
             {decideMessage && (
@@ -195,7 +200,7 @@ export function SuggestEditSection({
           </div>
         )}
 
-        {!isAdmin && (
+        {!isAdmin && !isViewer && (
           <>
             {ownDecided.length > 0 && (
               <ul className="mt-3 space-y-1.5">

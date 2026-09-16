@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
@@ -13,7 +13,7 @@ import {
 } from "./review-panel";
 
 export default async function ReviewQueuePage() {
-  const authorization = await getCurrentActor("user:manage");
+  const authorization = await getViewingActor("user:manage");
   if (!authorization.ok) {
     if (authorization.reason === "unauthenticated") redirect("/login");
     redirect("/dashboard?error=admin-access-required");
@@ -93,6 +93,7 @@ export default async function ReviewQueuePage() {
           </div>
         ) : (
           <ReviewPanel
+            canReview={authorization.actor.role === "admin"}
             initialEvents={events.data ?? []}
             initialFlags={flags.data ?? []}
             initialUnmatchedReplies={openUnmatchedReplies}

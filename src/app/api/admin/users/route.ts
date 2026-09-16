@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor, actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import {
   accountChangeFailureMessage,
   accountChangeFailureStatus,
@@ -56,7 +56,7 @@ async function readJson(request: Request): Promise<{ ok: true; value: unknown } 
 }
 
 export async function GET() {
-  const authorization = await getCurrentActor("user:manage");
+  const authorization = await getViewingActor("user:manage");
   if (!authorization.ok) return denied(authorization.reason);
 
   const supabase = await createClient();

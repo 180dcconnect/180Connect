@@ -58,6 +58,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     register: z.enum(EMAIL_REGISTERS).default("professional"),
     closing: z.enum(STAGE_TWO_CLOSINGS).default("soft_cta"),
     replyEventId: z.uuid().optional(),
+    skipNews: z.boolean().optional(),
   }).safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json({ error: "Choose valid follow-up preferences and try again." }, { status: 400 });
@@ -302,13 +303,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // precedence (it is the fresh evidence AC1 asks for); otherwise the stored
   // enrichment hooks keep the previous behaviour. newsSource/newsHook/newsUrl
   // are additive in the response so the review UI can show a verifiable link.
-  const liveNews = await lookupLiveNewsHook({
-    organisationId,
-    organisationName: organisation.legal_name,
-    tradingName: organisation.trading_name,
-    website: organisation.website,
-  });
-  const storedHooks = enrichment?.news_hooks?.filter(Boolean) ?? [];
+  const liveNews = parsed.data.skipNews
+    ? null
+    : await lookupLiveNewsHook({
+        organisationId,
+        organisationName: organisation.legal_name,
+        tradingName: organisation.trading_name,
+        website: organisation.website,
+        city: organisation.city,
+        countryCode: organisation.country_code,
+        geographicReach: organisation.geographic_reach,
+        sector: organisation.sector,
+      });
+  const storedHooks = parsed.data.skipNews
+    ? []
+    : (enrichment?.news_hooks?.filter(Boolean) ?? []);
   // The Source line persists the verification URL verbatim in
   // ai_generations.prompt_user (F112): outreach_messages has no vessel for it,
   // so without this the URL would exist only in the transient response below

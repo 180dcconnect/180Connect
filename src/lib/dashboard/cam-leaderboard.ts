@@ -13,26 +13,42 @@
  * gracefully — so the flags are derived here from whatever data exists, with no
  * dependency on F208/F210 landing first.
  *
+ * THE TWO RATES are the shared ones (`lib/outreach-rates.ts`): reply rate is
+ * replied clients over contacted clients, win rate is converted clients over
+ * clients who responded (replied ∪ converted). This row used to divide both
+ * events and clients by *emails sent* — a CAM who sent three follow-ups to one
+ * silent charity read as more responsive than one who sent a single email and
+ * got an answer — so the table, the sector table and the funnel now multiply
+ * out to the same story. Beside them, every count is in clients too, except
+ * `emailsSent`: a table headed by a rate of clients, with event counts in the
+ * columns under it, invites an admin to divide the wrong two numbers.
+ *
  * THE FLAGGING RULES, and why each has a guard:
- * - `inactive`: sent nothing in the period. Not a performance judgement — it is
- *   the case a rate can't describe at all, and the one most worth an admin's
- *   attention (someone is blocked, on leave, or never onboarded).
- * - `needsSupport`: sent at least MIN_SAMPLE emails and replied-to at a rate
- *   below SUPPORT_RATIO of the team's median. Median, not mean, so one
- *   exceptional or one disastrous CAM doesn't drag the bar. The sample floor
- *   exists because 0 replies out of 3 emails is noise, and flagging it would
- *   train admins to ignore the flag.
- * - `lowConfidence`: under the sample floor, so the rates are shown greyed and
- *   marked rather than presented with the same authority as a well-sampled row.
+ * - `inactive`: contacted nobody in the period. Not a performance judgement —
+ *   it is the case a rate can't describe at all, and the one most worth an
+ *   admin's attention (someone is blocked, on leave, or never onboarded).
+ * - `needsSupport`: contacted at least MIN_SAMPLE_CONTACTS clients and earned
+ *   replies at a rate below SUPPORT_RATIO of the team's median. Median, not
+ *   mean, so one exceptional or one disastrous CAM doesn't drag the bar. The
+ *   floor exists because 0 replies out of 3 clients is noise, and flagging it
+ *   would train admins to ignore the flag.
+ * - `lowConfidence`: under the floor, so the rates are shown greyed and marked
+ *   rather than presented with the same authority as a well-sampled row.
  */
 import type { PerformanceSummary, TeamUserRow, WeeklyCount } from "../performance-metrics.ts";
 
 /**
- * Emails a CAM must have sent in the period before their rates are treated as
+ * Distinct clients a CAM must have contacted before their rates are treated as
  * meaningful. 10 is the smallest number where a single reply moves the rate by
  * less than a tenth — below that the rate is describing luck.
+ *
+ * Deliberately on contacted *clients*, not sent emails: the rates above are
+ * ratios of clients, so the sample has to be measured in the denominator's
+ * unit. This is the stricter bar of the two (a CAM clears 10 emails before
+ * they clear 10 clients) and that is intended — 10 emails to one charity is
+ * one client's worth of evidence.
  */
-export const MIN_SAMPLE_EMAILS = 10;
+export const MIN_SAMPLE_CONTACTS = 10;
 
 /**
  * How far below the team median reply rate counts as "might need support".
@@ -44,16 +60,20 @@ export const SUPPORT_RATIO = 0.6;
 export type LeaderboardRow = {
   userId: string;
   name: string;
+  /** Emails, an event count: three emails to one charity are three of these. */
   emailsSent: number;
-  replies: number;
-  conversions: number;
-  /** replies / emailsSent, or null when nothing was sent. */
+  /** Clients, not events — the unit both rates are built from. */
+  contactedClients: number;
+  repliedClients: number;
+  respondedClients: number;
+  convertedClients: number;
+  /** replied clients / contacted clients, or null when nobody was contacted. */
   replyRate: number | null;
-  /** conversions / emailsSent, or null when nothing was sent. */
-  conversionRate: number | null;
-  /** Sent nothing at all in the period. */
+  /** converted clients / responded clients, or null when nobody responded. */
+  winRate: number | null;
+  /** Contacted nobody at all in the period. */
   inactive: boolean;
-  /** Sent something, but under MIN_SAMPLE_EMAILS — rates are indicative only. */
+  /** Contacted someone, but under MIN_SAMPLE_CONTACTS — rates are indicative only. */
   lowConfidence: boolean;
   /** Enough sample, and reply rate well below the team median. */
   needsSupport: boolean;
@@ -63,6 +83,8 @@ export type Leaderboard = {
   rows: LeaderboardRow[];
   /** Team reply rate over the period — the row the table compares against. */
   teamReplyRate: number | null;
+  /** Team win rate over the period. */
+  teamWinRate: number | null;
   /** Median reply rate across sufficiently-sampled CAMs; null when none are. */
   medianReplyRate: number | null;
   /** How many rows carry the support flag, for the section's caption. */
@@ -86,10 +108,13 @@ function median(values: readonly number[]): number | null {
  * One row per team member in `cams` — including members with no activity, who are absent
  * from `summary.people` and are precisely the rows an admin needs to see.
  *
- * Sorted by conversions, then replies, then emails sent, then name. Flags are
- * rendered as marks on the row rather than used as the sort key: an admin
- * scanning the table is looking for standing first, and re-ordering the table
- * by who is struggling would turn a performance view into a naughty step.
+ * Sorted by clients won, then responding clients, then contacted clients, then
+ * name. Flags are rendered as marks on the row rather than used as the sort
+ * key: an admin scanning the table is looking for standing first, and
+ * re-ordering the table by who is struggling would turn a performance view into
+ * a naughty step. Sorted in clients rather than events for the same reason the
+ * rates are — a hundred follow-ups into silence is not a hundred units of
+ * standing.
  */
 export function camLeaderboard(
   summary: PerformanceSummary,
@@ -97,31 +122,30 @@ export function camLeaderboard(
 ): Leaderboard {
   const base = cams.map((cam) => {
     const person = summary.people.get(cam.id);
-    const emailsSent = current(person?.emailsSent);
-    const replies = current(person?.replies);
-    const conversions = current(person?.conversions);
     return {
       userId: cam.id,
       name: cam.full_name?.trim() || (cam.role === "admin" ? "Unnamed Admin" : "Unnamed CAM"),
-      emailsSent,
-      replies,
-      conversions,
-      replyRate: emailsSent > 0 ? replies / emailsSent : null,
-      conversionRate: emailsSent > 0 ? conversions / emailsSent : null,
+      emailsSent: current(person?.emailsSent),
+      contactedClients: person?.contactedClients ?? 0,
+      repliedClients: person?.repliedClients ?? 0,
+      respondedClients: person?.respondedClients ?? 0,
+      convertedClients: person?.convertedClients ?? 0,
+      replyRate: person?.replyRate ?? null,
+      winRate: person?.winRate ?? null,
     };
   });
 
-  const sampled = base.filter((row) => row.emailsSent >= MIN_SAMPLE_EMAILS);
+  const sampled = base.filter((row) => row.contactedClients >= MIN_SAMPLE_CONTACTS);
   const medianReplyRate = median(
     sampled.map((row) => row.replyRate ?? 0),
   );
 
-  const teamSent = current(summary.team.emailsSent);
-  const teamReplyRate = teamSent > 0 ? current(summary.team.replies) / teamSent : null;
+  const teamReplyRate = summary.team.replyRate;
+  const teamWinRate = summary.team.winRate;
 
   const rows: LeaderboardRow[] = base.map((row) => {
-    const inactive = row.emailsSent === 0;
-    const lowConfidence = !inactive && row.emailsSent < MIN_SAMPLE_EMAILS;
+    const inactive = row.contactedClients === 0;
+    const lowConfidence = !inactive && row.contactedClients < MIN_SAMPLE_CONTACTS;
     const needsSupport =
       !inactive &&
       !lowConfidence &&
@@ -133,15 +157,16 @@ export function camLeaderboard(
   });
 
   rows.sort((a, b) => {
-    if (a.conversions !== b.conversions) return b.conversions - a.conversions;
-    if (a.replies !== b.replies) return b.replies - a.replies;
-    if (a.emailsSent !== b.emailsSent) return b.emailsSent - a.emailsSent;
+    if (a.convertedClients !== b.convertedClients) return b.convertedClients - a.convertedClients;
+    if (a.respondedClients !== b.respondedClients) return b.respondedClients - a.respondedClients;
+    if (a.contactedClients !== b.contactedClients) return b.contactedClients - a.contactedClients;
     return a.name.localeCompare(b.name);
   });
 
   return {
     rows,
     teamReplyRate,
+    teamWinRate,
     medianReplyRate,
     needsSupportCount: rows.filter((row) => row.needsSupport).length,
     inactiveCount: rows.filter((row) => row.inactive).length,

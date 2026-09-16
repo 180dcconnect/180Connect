@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor, actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { assignActionFailure, validateAssignAction } from "@/lib/actions";
 import { reportError } from "@/lib/error-logging";
 import { logSecurityEvent } from "@/lib/log-security-event";
@@ -38,7 +38,7 @@ function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
 }
 
 export async function GET() {
-  const authorization = await getCurrentActor("user:manage", { route: "/admin/actions" });
+  const authorization = await getViewingActor("user:manage", { route: "/admin/actions" });
   if (!authorization.ok) return denied(authorization.reason);
 
   const supabase = await createClient();

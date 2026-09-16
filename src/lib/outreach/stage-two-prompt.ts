@@ -32,8 +32,10 @@ import {
  * Mirrors public.reply_sentiment / public.reply_intent
  * (20260804200000_create_outreach_events.sql).
  */
-export type ReplySentiment = "positive" | "neutral" | "negative";
-export type ReplyIntent = "interested" | "not_interested" | "more_info" | "referral";
+export const REPLY_SENTIMENTS = ["positive", "neutral", "negative"] as const;
+export type ReplySentiment = (typeof REPLY_SENTIMENTS)[number];
+export const REPLY_INTENTS = ["interested", "not_interested", "more_info", "referral"] as const;
+export type ReplyIntent = (typeof REPLY_INTENTS)[number];
 
 export const REPLY_SENTIMENT_LABELS: Record<ReplySentiment, string> = {
   positive: "positive",

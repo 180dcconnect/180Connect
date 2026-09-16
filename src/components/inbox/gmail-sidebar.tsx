@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Suspense, use, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
@@ -12,6 +12,7 @@ import {
   StickyNote,
   Trash2,
   Plus,
+  CircleDashed,
   CircleX,
   TriangleAlert,
   Info,
@@ -200,6 +201,115 @@ function EngineCheckRow({
   );
 }
 
+function EngineStatusFrame({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      role="status"
+      className="rounded-xl border border-slate-200/90 bg-white/70 p-3 shadow-xs space-y-2"
+    >
+      <p className="text-[10px] font-semibold tracking-wide text-slate-400 uppercase">
+        Outreach Engine
+      </p>
+      {children}
+    </div>
+  );
+}
+
+/** The three checks, resolved. */
+function EngineStatusRows({ health }: { health: OutreachEngineHealth }) {
+  /** The Gmail row's title + detail for the current transport state. */
+  const transportStatus = health.transport.status;
+  const transportLabel =
+    transportStatus === "active"
+      ? "Gmail Connected"
+      : transportStatus === "reauth-required"
+        ? "Gmail Needs Re-authorisation"
+        : transportStatus === "degraded"
+          ? "Gmail Degraded"
+          : "Gmail Not Configured";
+  const transportDetail =
+    transportStatus === "active"
+      ? `${health.transport.sender ? `${health.transport.sender} connected via Gmail API.` : "Mailbox connected via Gmail API."}`
+      : transportStatus === "reauth-required"
+        ? "Google rejected the mailbox credentials. Sending and reply sync are paused until it is reconnected."
+        : transportStatus === "degraded"
+          ? "Gmail is temporarily unreachable."
+          : "No branch mailbox is wired up, so nothing can send or sync yet.";
+
+  const replySyncLabel =
+    health.replySync.status === "active"
+      ? "Reply Sync Active"
+      : health.replySync.status === "degraded"
+        ? "Reply Sync Degraded"
+        : "Reply Sync Not Configured";
+  const scheduledSendLabel =
+    health.scheduledSend.status === "active"
+      ? "Scheduled Send Active"
+      : health.scheduledSend.status === "degraded"
+        ? "Scheduled Send Degraded"
+        : "Scheduled Send Not Configured";
+
+  return (
+    <EngineStatusFrame>
+      <EngineCheckRow label={transportLabel} status={transportStatus} detail={transportDetail} />
+      <EngineCheckRow
+        label={replySyncLabel}
+        status={health.replySync.status}
+        detail={health.replySync.detail}
+      />
+      <EngineCheckRow
+        label={scheduledSendLabel}
+        status={health.scheduledSend.status}
+        detail={health.scheduledSend.detail}
+      />
+    </EngineStatusFrame>
+  );
+}
+
+/** Reads the checks the page started but did not wait for. */
+function StreamedEngineStatusRows({ health }: { health: Promise<OutreachEngineHealth> }) {
+  return <EngineStatusRows health={use(health)} />;
+}
+
+function isPending<T>(value: T | Promise<T>): value is Promise<T> {
+  return typeof (value as { then?: unknown } | null)?.then === "function";
+}
+
+/**
+ * The status card.
+ *
+ * /inbox hands over the checks still in flight rather than awaiting them: one of
+ * them is a live Gmail round trip that can take up to ~6s, and waiting for it
+ * held the whole mailbox back. While they run, each row says it is checking —
+ * never a tick, so the card cannot claim Active before anything has been proved.
+ */
+function EngineStatusCard({
+  health,
+}: {
+  health: OutreachEngineHealth | Promise<OutreachEngineHealth>;
+}) {
+  if (!isPending(health)) return <EngineStatusRows health={health} />;
+  return (
+    <Suspense
+      fallback={
+        <EngineStatusFrame>
+          {["Gmail", "Reply Sync", "Scheduled Send"].map((label) => (
+            <div
+              key={label}
+              className="flex items-center gap-2 text-xs font-semibold text-slate-400"
+            >
+              <CircleDashed className="h-3.5 w-3.5 shrink-0" />
+              <span>Checking {label}…</span>
+            </div>
+          ))}
+        </EngineStatusFrame>
+      }
+    >
+      <StreamedEngineStatusRows health={health} />
+    </Suspense>
+  );
+}
+
 export type GmailSidebarProps = {
   activeFolder: GmailFolder;
   onSelectFolder: (folder: GmailFolder) => void;
@@ -234,9 +344,9 @@ export type GmailSidebarProps = {
    * deployment whose Gmail is unconfigured, revoked, or down, or whose
    * schedulers have stopped running. Defaults to `unconfigured` on every
    * row (fail-closed) so a caller that forgets the prop shows Xs rather
-   * than a lie.
+   * than a lie. May be the checks still in flight, which the card streams.
    */
-  engineHealth?: OutreachEngineHealth;
+  engineHealth?: OutreachEngineHealth | Promise<OutreachEngineHealth>;
 };
 
 const DEFAULT_ENGINE_HEALTH: OutreachEngineHealth = {
@@ -296,38 +406,6 @@ export function GmailSidebar({
   const createPanelRef = useRef<HTMLDivElement>(null);
 
   const labels: SidebarLabel[] = [...SECTORS, ...effectiveCustomLabels];
-
-  /** The Gmail row's title + detail for the current transport state. */
-  const transportStatus = engineHealth.transport.status;
-  const transportLabel =
-    transportStatus === "active"
-      ? "Gmail Connected"
-      : transportStatus === "reauth-required"
-        ? "Gmail Needs Re-authorisation"
-        : transportStatus === "degraded"
-          ? "Gmail Degraded"
-          : "Gmail Not Configured";
-  const transportDetail =
-    transportStatus === "active"
-      ? `${engineHealth.transport.sender ? `${engineHealth.transport.sender} connected via Gmail API.` : "Mailbox connected via Gmail API."}`
-      : transportStatus === "reauth-required"
-        ? "Google rejected the mailbox credentials. Sending and reply sync are paused until it is reconnected."
-        : transportStatus === "degraded"
-          ? "Gmail is temporarily unreachable."
-          : "No branch mailbox is wired up, so nothing can send or sync yet.";
-
-  const replySyncLabel =
-    engineHealth.replySync.status === "active"
-      ? "Reply Sync Active"
-      : engineHealth.replySync.status === "degraded"
-        ? "Reply Sync Degraded"
-        : "Reply Sync Not Configured";
-  const scheduledSendLabel =
-    engineHealth.scheduledSend.status === "active"
-      ? "Scheduled Send Active"
-      : engineHealth.scheduledSend.status === "degraded"
-        ? "Scheduled Send Degraded"
-        : "Scheduled Send Not Configured";
 
   const closeCreatePanel = useCallback(() => {
     setIsCreateOpen(false);
@@ -621,25 +699,7 @@ export function GmailSidebar({
           scheduler shows an X/warning instead of hiding behind a healthy
           Gmail transport. The info mark repeats each row's detail on hover. */}
       <div className="mt-auto pt-6 pl-3 pr-0">
-        <div
-          role="status"
-          className="rounded-xl border border-slate-200/90 bg-white/70 p-3 shadow-xs space-y-2"
-        >
-          <p className="text-[10px] font-semibold tracking-wide text-slate-400 uppercase">
-            Outreach Engine
-          </p>
-          <EngineCheckRow label={transportLabel} status={transportStatus} detail={transportDetail} />
-          <EngineCheckRow
-            label={replySyncLabel}
-            status={engineHealth.replySync.status}
-            detail={engineHealth.replySync.detail}
-          />
-          <EngineCheckRow
-            label={scheduledSendLabel}
-            status={engineHealth.scheduledSend.status}
-            detail={engineHealth.scheduledSend.detail}
-          />
-        </div>
+        <EngineStatusCard health={engineHealth} />
       </div>
 
       {/* Create-label popover. Portaled to <body> because the aside scrolls,

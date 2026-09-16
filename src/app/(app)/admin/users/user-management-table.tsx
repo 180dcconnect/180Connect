@@ -130,12 +130,14 @@ export function UserManagementTable({
   hasActiveFilters = false,
   setUsers,
   currentUserId,
+  canManage = true,
 }: {
   users: TeamUser[];
   totalCount?: number;
   hasActiveFilters?: boolean;
   setUsers?: Dispatch<SetStateAction<TeamUser[]>>;
   currentUserId?: string;
+  canManage?: boolean;
 }) {
   const isClient = useSyncExternalStore(
     emptySubscribe,
@@ -428,21 +430,23 @@ export function UserManagementTable({
           <table className="w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-black/[0.08] bg-black/[0.02]">
-                <th className="group/th w-11 px-4 py-3.5">
-                  <div
-                    className={`transition-opacity duration-150 ${
-                      hasSelection ? "opacity-100" : "opacity-0 group-hover/th:opacity-100"
-                    }`}
-                  >
-                    <Checkbox
-                      aria-label="Select all on this page"
-                      checked={
-                        isAllPageSelected ? true : isSomePageSelected ? "indeterminate" : false
-                      }
-                      onCheckedChange={toggleSelectAllPage}
-                    />
-                  </div>
-                </th>
+                {canManage && (
+                  <th className="group/th w-11 px-4 py-3.5">
+                    <div
+                      className={`transition-opacity duration-150 ${
+                        hasSelection ? "opacity-100" : "opacity-0 group-hover/th:opacity-100"
+                      }`}
+                    >
+                      <Checkbox
+                        aria-label="Select all on this page"
+                        checked={
+                          isAllPageSelected ? true : isSomePageSelected ? "indeterminate" : false
+                        }
+                        onCheckedChange={toggleSelectAllPage}
+                      />
+                    </div>
+                  </th>
+                )}
                 <th className="px-4 py-3.5">
                   <button
                     type="button"
@@ -548,21 +552,23 @@ export function UserManagementTable({
                       isSelected ? "bg-brand/[0.04]" : "hover:bg-black/[0.015]"
                     }`}
                   >
-                    <td className="w-11 px-4 py-3.5">
-                      <div
-                        className={`transition-opacity duration-150 ${
-                          hasSelection || isSelected
-                            ? "opacity-100"
-                            : "opacity-0 group-hover/row:opacity-100"
-                        }`}
-                      >
-                        <Checkbox
-                          aria-label={`Select ${displayName(user)}`}
-                          checked={isSelected}
-                          onCheckedChange={() => toggleSelectUser(user.id)}
-                        />
-                      </div>
-                    </td>
+                    {canManage && (
+                      <td className="w-11 px-4 py-3.5">
+                        <div
+                          className={`transition-opacity duration-150 ${
+                            hasSelection || isSelected
+                              ? "opacity-100"
+                              : "opacity-0 group-hover/row:opacity-100"
+                          }`}
+                        >
+                          <Checkbox
+                            aria-label={`Select ${displayName(user)}`}
+                            checked={isSelected}
+                            onCheckedChange={() => toggleSelectUser(user.id)}
+                          />
+                        </div>
+                      </td>
+                    )}
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-3">
                         <div className="relative flex size-9 shrink-0 items-center justify-center rounded-full bg-paper font-mono text-[11px] font-bold text-ink shadow-2xs">
@@ -744,7 +750,8 @@ export function UserManagementTable({
       </div>
 
       {/* Floating Bulk Action Bar */}
-      {isClient &&
+      {canManage &&
+        isClient &&
         createPortal(
           <AnimatePresence>
             {selectedIds.size > 0 && (

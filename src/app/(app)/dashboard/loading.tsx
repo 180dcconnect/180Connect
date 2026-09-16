@@ -4,9 +4,9 @@ import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
  * F021 AC — shown while the dashboard's reads run.
  *
  * Rebuilt against `page.tsx` as it now stands, section for section and in the
- * same order: header, the F206 work strip, the unified Action Center, the
- * pipeline group (growth curve beside the queue dial, then the three stat tiles),
- * Performance, the admin row, and the two feeds.
+ * same order: header, the F206 work strip, Your actions beside Sending
+ * capacity, the pipeline group (growth curve beside the queue dial, then the
+ * three stat tiles), Performance, the admin row, and the Recent updates feed.
  *
  * The previous version was a mirror of a dashboard that no longer exists — it
  * drew a client search field in the header (the header is the h1 and one button
@@ -18,8 +18,8 @@ import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
  * Geometry is taken from the components, not guessed:
  * `MyWorkStrip`'s `px-5 py-4` panel, the lg `ProgressMetricCard`'s
  * `min-h-[320px] sm:min-h-[460px]` with its `text-[88px]` headline,
- * `StatCard`'s `p-5` card with a gauge under the number, `ActionCenterCard`'s
- * `rounded-panel` with `px-5 py-3.5` rows, and `PerformanceSection`'s two
+ * `StatCard`'s `p-5` card with a gauge under the number, `MyActionsCard`'s
+ * `rounded-panel` with `px-5 py-3` rows, and `PerformanceSection`'s two
  * `rounded-[28px] border-border bg-card` cards — 28px, *not* the 16px the tiles
  * above them use, because those two keep `ProgressMetricCard`'s own radius while
  * the ones on this page pass `rounded-2xl`.
@@ -67,27 +67,31 @@ export default function Loading() {
           </div>
         </div>
 
-        {/* Action Center — a heading, then the card of what needs doing */}
-        <div className="space-y-4">
-          <Skeleton className="h-[30px] w-40" />
-          <div className="flex flex-col overflow-hidden rounded-panel border border-rule bg-white">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 pt-5 pb-3">
-              <Skeleton className="h-5 w-32" />
-              <Skeleton className="h-4 w-28" />
+        {/* Your actions beside sending capacity */}
+        <div className="grid grid-cols-1 items-stretch gap-4 xl:grid-cols-3">
+          <div className="flex flex-col overflow-hidden rounded-panel border border-rule bg-white xl:col-span-2">
+            <div className="px-5 pt-4 pb-3">
+              <Skeleton className="h-6 w-32" />
+              <Skeleton className="mt-1.5 h-4 w-72 max-w-full" />
             </div>
             <ul className="divide-y divide-rule-soft border-t border-rule-soft">
               {Array.from({ length: 4 }).map((_, index) => (
-                <li key={index} className="flex items-center gap-3 px-5 py-3.5">
-                  <Skeleton className="h-8 w-[3px] shrink-0 rounded-full" />
+                <li key={index} className="flex items-center gap-3 px-5 py-3">
                   <div className="min-w-0 flex-1">
                     <Skeleton className="h-[18px] w-2/5 max-w-full" />
                     <Skeleton className="mt-1 h-[15px] w-28" />
                   </div>
                   <Skeleton className="h-6 w-24 shrink-0 rounded-full" />
-                  <Skeleton className="size-4 shrink-0" />
                 </li>
               ))}
             </ul>
+          </div>
+          <div className="flex flex-col rounded-panel border border-rule bg-white px-5 py-4">
+            <Skeleton className="h-6 w-48 max-w-full" />
+            <Skeleton className="mt-1.5 h-4 w-full" />
+            <Skeleton className="mt-5 h-10 w-40" />
+            <Skeleton className="mt-4 h-5 w-full rounded-sm" />
+            <Skeleton className="mt-2 h-4 w-44" />
           </div>
         </div>
 
@@ -174,20 +178,27 @@ export default function Loading() {
               </div>
             ))}
           </div>
-          {/* These two keep ProgressMetricCard's own radius — 28px, `border-border`
+          {/* These two keep the chart cards' own radius — 28px, `border-border`
               and `bg-card` — because `PerformanceSection` passes no override. */}
           <div className="mt-4 grid gap-4 xl:grid-cols-2">
-            <div className="relative flex min-h-[300px] w-full flex-col overflow-hidden rounded-[28px] border border-border bg-card shadow-[0_2px_10px_rgba(0,0,0,0.04)]">
-              <div className="flex flex-1 flex-col px-5 pt-6 sm:px-8 sm:pt-7">
-                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                  <Skeleton className="h-5 w-44" />
-                  <Skeleton className="h-5 w-24 rounded-full" />
+            {/* The funnel chart: title and subtitle, three legend figures, plot. */}
+            <div className="flex min-h-[380px] w-full flex-col rounded-[28px] border border-border bg-card p-6 shadow-[0_2px_10px_rgba(0,0,0,0.04)]">
+              <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                <div className="space-y-1.5">
+                  <Skeleton className="h-6 w-56" />
+                  <Skeleton className="h-3.5 w-44" />
                 </div>
-                <Skeleton className="mt-5 h-10 w-40 rounded-lg" />
+                <Skeleton className="h-6 w-28 rounded-full" />
               </div>
-              <div className="border-t border-foreground/[0.06] px-5 py-4 sm:px-8">
-                <Skeleton className="h-4 w-40" />
+              <div className="mt-4 flex gap-6">
+                {[0, 1, 2].map((index) => (
+                  <div key={index} className="space-y-1.5">
+                    <Skeleton className="h-3.5 w-20" />
+                    <Skeleton className="h-6 w-16" />
+                  </div>
+                ))}
               </div>
+              <Skeleton className="mt-6 w-full flex-1 rounded-lg" />
             </div>
             <div className="flex min-h-[300px] flex-col rounded-[28px] border border-border bg-card p-6 shadow-[0_2px_10px_rgba(0,0,0,0.04)]">
               <div className="flex items-baseline justify-between gap-3">
@@ -252,33 +263,28 @@ export default function Loading() {
           </div>
         </div>
 
-        {/* Recent updates, then recent team activity — both paginated at five */}
-        {["w-40", "w-56"].map((width, sectionIndex) => (
-          <div key={sectionIndex} className="space-y-4">
-            <div className="flex flex-wrap items-baseline justify-between gap-4">
-              <Skeleton className={`h-[30px] ${width}`} />
-              <Skeleton className="h-4 w-44" />
-            </div>
-            <div className="flex flex-col overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">
-              <ul className="divide-y divide-black/[0.06]">
-                {Array.from({ length: 5 }).map((_, index) => (
-                  <li key={index} className="flex items-center gap-4 px-5 py-4">
-                    <Skeleton className="size-9 shrink-0 rounded-full" />
-                    <div className="min-w-0 flex-1">
-                      <Skeleton className="h-4 w-2/3 max-w-full" />
-                      <Skeleton className="mt-1.5 h-3 w-28" />
-                    </div>
-                    <Skeleton className="h-5 w-24 shrink-0 rounded-full" />
-                  </li>
-                ))}
-              </ul>
-              <div className="flex items-center justify-between gap-4 border-t border-black/[0.06] px-5 py-3">
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-7 w-32 rounded-full" />
-              </div>
+        {/* Recent updates — one feed, paginated at five */}
+        <div className="space-y-4">
+          <Skeleton className="h-[30px] w-40" />
+          <div className="flex flex-col overflow-hidden rounded-panel border border-rule bg-white">
+            <ul className="divide-y divide-rule-soft">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <li key={index} className="flex h-[84px] items-center gap-4 px-5 py-3">
+                  <Skeleton className="h-3 w-6 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <Skeleton className="h-4 w-2/3 max-w-full" />
+                    <Skeleton className="mt-1.5 h-3 w-28" />
+                  </div>
+                  <Skeleton className="h-6 w-20 shrink-0 rounded-full" />
+                </li>
+              ))}
+            </ul>
+            <div className="flex items-center justify-between gap-4 border-t border-rule-soft px-5 py-3">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-7 w-32 rounded-full" />
             </div>
           </div>
-        ))}
+        </div>
       </div>
     </div>
   );

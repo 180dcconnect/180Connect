@@ -1,6 +1,7 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
 import { fetchPaged } from "@/lib/supabase/fetch-paged";
@@ -18,20 +19,39 @@ import {
 } from "@/lib/dashboard-metrics";
 import { formatResponseTime } from "@/lib/reply-analytics";
 import { formatRate, type CamReplyRow, type SentMessageRow } from "@/lib/cam-analytics";
+import { formatWinRate } from "@/lib/outreach-rates";
 import {
   conversionsOverTime,
+  cycleTeamTotals,
   describeUncountedClients,
   perCamAnalytics,
   sortByNeed,
   teamTotals,
   uncountedClients,
+  type CycleTeamTotals,
   type OutcomeRow,
 } from "@/lib/admin/manager-analytics";
+import {
+  cycleWindow,
+  describeCycleWindow,
+  filterByWindow,
+  orderCyclesByStart,
+  previousCycle,
+  type OutreachCycle,
+} from "@/lib/outreach-cycles";
+import {
+  ownerLoad,
+  pipelineCounts,
+  sectorCounts,
+  type DashboardClient,
+} from "@/lib/admin/dashboard-metrics";
+import { formatOutreachStatus } from "@/lib/organisation-format";
+import { priorityScoreOutOf100 } from "@/lib/priority-opportunities";
 
 /**
  * F210/F212 — the team-wide read of the analytics each CAM sees for themselves
  * on /analytics. One tab of the Analytics group — see
- * `src/app/admin/analytics-group.ts`.
+ * `src/app/(app)/admin/analytics-group.ts`.
  *
  * Every panel is fed by its own independently-caught query, so a source that
  * fails or has no rows yet shows its own empty state instead of blanking the
@@ -41,23 +61,106 @@ import {
 
 type CamRow = { id: string; full_name: string | null; role: string };
 
-export default async function AdminAnalyticsPage() {
-  const authorization = await getCurrentActor("user:manage", {
+/** The organisations read, plus what the pipeline, ownership and sector panels need. */
+type AnalyticsOrgRow = DashboardOrgRow & {
+  sector: string | null;
+  city: string | null;
+  owner: { full_name: string | null } | null;
+};
+
+type ScoreRow = {
+  organisation_id: string;
+  priority_score: number | null;
+  priority_band: "high" | "medium" | "low" | null;
+};
+
+/** How many sectors the sector table lists before summarising the rest. */
+const SECTOR_ROWS = 12;
+
+/** Replies with the arrival timestamp cycle filtering needs. */
+type DatedReplyRow = CamReplyRow & { received_at: string | null };
+
+/**
+ * One cycle's three flow tiles. Rates reuse the all-time tiles' own
+ * formatters, so a cycle's 40% means the same thing as all-time's 40% —
+ * `cycleTeamTotals` guarantees the definitions match.
+ */
+function CycleTiles({
+  name,
+  windowLabel,
+  totals,
+}: {
+  name: string;
+  windowLabel: string;
+  totals: CycleTeamTotals;
+}) {
+  const share = (value: number) =>
+    totals.contactedClients === 0 ? 0 : Math.min(value / totals.contactedClients, 1);
+  return (
+    <div>
+      <p className="font-body text-sm font-bold text-ink">
+        {name} <span className="font-normal tabular-nums text-dim">· {windowLabel}</span>
+      </p>
+      <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <Rise>
+          <StatCard
+            label="Emails sent"
+            value={totals.emailsSent}
+            share={share(totals.emailsSent)}
+            caption={`${totals.contactedClients.toLocaleString()} clients contacted`}
+          />
+        </Rise>
+        <Rise>
+          <StatCard
+            label="Replies received"
+            value={totals.respondingClients}
+            share={share(totals.respondingClients)}
+            caption={formatRate(totals.replyRate)}
+          />
+        </Rise>
+        <Rise>
+          <StatCard
+            label="Conversions"
+            value={totals.conversions}
+            share={share(totals.conversions)}
+            caption={formatWinRate(totals.winRate)}
+            emphasis
+          />
+        </Rise>
+      </div>
+    </div>
+  );
+}
+
+export default async function AdminAnalyticsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ cycleA?: string | string[]; cycleB?: string | string[] }>;
+}) {
+  const authorization = await getViewingActor("user:manage", {
     route: "/admin/analytics",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
+  const query = await searchParams;
+  const firstParam = (value: string | string[] | undefined) =>
+    Array.isArray(value) ? value[0] : value;
+
   const supabase = await createClient();
 
-  const [organisations, openSuppressions, messages, replies, outcomes, cams] = await Promise.all([
-    fetchPaged<DashboardOrgRow>((from, to) =>
-      supabase
-        .from("organisations")
-        .select("id, legal_name, outreach_status, owner_id, updated_at, created_at")
-        .order("created_at", { ascending: true })
-        .order("id", { ascending: true })
-        .range(from, to)
-        .overrideTypes<DashboardOrgRow[], { merge: false }>(),
+  const [organisations, openSuppressions, messages, replies, outcomes, cams, scores, cyclesResult] = await Promise.all([
+    fetchPaged<AnalyticsOrgRow>(
+      (from, to) =>
+        supabase
+          .from("organisations")
+          .select(
+            "id, legal_name, outreach_status, owner_id, updated_at, created_at, sector, city, owner:users!organisations_owner_id_fkey(full_name)",
+          )
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to)
+          .overrideTypes<AnalyticsOrgRow[], { merge: false }>(),
+      { pagesPerRound: 4 },
     ),
     fetchPaged<OpenSuppression>((from, to) =>
       supabase
@@ -81,11 +184,11 @@ export default async function AdminAnalyticsPage() {
     fetchPaged<CamReplyRow>((from, to) =>
       supabase
         .from("reply_events")
-        .select("id, organisation_id, response_time_seconds")
+        .select("id, organisation_id, response_time_seconds, received_at")
         .order("received_at", { ascending: true })
         .order("id", { ascending: true })
         .range(from, to)
-        .overrideTypes<CamReplyRow[], { merge: false }>(),
+        .overrideTypes<DatedReplyRow[], { merge: false }>(),
     ),
     fetchPaged<OutcomeRow>((from, to) =>
       supabase
@@ -112,6 +215,24 @@ export default async function AdminAnalyticsPage() {
         .range(from, to)
         .overrideTypes<CamRow[], { merge: false }>(),
     ),
+    // For the sector table's average priority score.
+    fetchPaged<ScoreRow>(
+      (from, to) =>
+        supabase
+          .from("latest_scores")
+          .select("organisation_id, priority_score, priority_band")
+          .order("organisation_id", { ascending: true })
+          .range(from, to)
+          .overrideTypes<ScoreRow[], { merge: false }>(),
+      { pagesPerRound: 4 },
+    ),
+    // Outreach cycle definitions for the compare picker — a handful of rows,
+    // so a plain select rather than fetchPaged. A failed read degrades to no
+    // picker (the all-time view), never to a failed page.
+    supabase
+      .from("outreach_cycles")
+      .select("id, name, starts_on, ends_on")
+      .order("starts_on", { ascending: true }),
   ]);
 
   const sources = {
@@ -121,6 +242,7 @@ export default async function AdminAnalyticsPage() {
     "admin.analytics.reply_events": replies,
     "admin.analytics.outcomes": outcomes,
     "admin.analytics.users": cams,
+    "admin.analytics.scores": scores,
   };
   let loadFailed = false;
   for (const [operation, source] of Object.entries(sources)) {
@@ -131,6 +253,59 @@ export default async function AdminAnalyticsPage() {
       });
     }
   }
+  if (cyclesResult.error) {
+    await reportError(cyclesResult.error, { operation: "admin.analytics.cycles" });
+  }
+
+  // ── Cycle comparison ──
+  //
+  // ?cycleA=<id>&cycleB=<id> scopes the flow tiles and the conversions chart
+  // to those windows. Membership is derived from event dates at read time, so
+  // defining a cycle tomorrow sorts all of history with no backfill. An
+  // unknown id degrades to unset with a note, never to a failed page.
+  const cycleList: OutreachCycle[] = orderCyclesByStart(
+    (cyclesResult.data ?? []).map((row) => ({
+      id: row.id as string,
+      name: row.name as string,
+      starts_on: row.starts_on as string,
+      ends_on: row.ends_on as string,
+    })),
+  );
+  const cycleA = cycleList.find((cycle) => cycle.id === firstParam(query.cycleA)) ?? null;
+  const cycleBParam = firstParam(query.cycleB);
+  const cycleB =
+    cycleBParam !== undefined
+      ? (cycleList.find((cycle) => cycle.id === cycleBParam) ?? null)
+      : cycleA
+        ? previousCycle(cycleList, cycleA)
+        : null;
+  const unknownCycle =
+    (firstParam(query.cycleA) !== undefined && !cycleA) ||
+    (cycleBParam !== undefined && cycleBParam !== "" && !cycleB);
+
+  const scopedTotals = (cycle: OutreachCycle | null) => {
+    if (!cycle) return null;
+    const window = cycleWindow(cycle);
+    const windowMessages = filterByWindow(messages.data ?? [], (row) => row.sent_at, window);
+    const windowReplies = filterByWindow(
+      (replies.data ?? []) as DatedReplyRow[],
+      (row) => row.received_at,
+      window,
+    );
+    const windowOutcomes = filterByWindow(outcomes.data ?? [], (row) => row.created_at, window);
+    return {
+      cycle,
+      window,
+      totals: cycleTeamTotals({
+        messages: windowMessages,
+        replies: windowReplies,
+        conversions: windowOutcomes,
+      }),
+      outcomes: windowOutcomes,
+    };
+  };
+  const compareA = scopedTotals(cycleA);
+  const compareB = scopedTotals(cycleB);
 
   const rows = filterActiveSuppressed(organisations.data ?? [], openSuppressions.data ?? []);
   const camList = (cams.data ?? []).map((cam) => ({
@@ -147,7 +322,47 @@ export default async function AdminAnalyticsPage() {
   // rows, so without this they left every figure with nothing to show they had
   // ever existed.
   const uncountedMessage = describeUncountedClients(uncountedClients(rows, camList));
-  const conversionSeries = conversionsOverTime(outcomes.data ?? [], 90);
+  // In compare mode the chart covers the A cycle's own span, anchored at its
+  // last day — the same function, just pointed at the cycle instead of the
+  // trailing window. Ownership, pipeline and sectors below stay as-of-today:
+  // they describe the list now, not the cycle, and the tiles say so.
+  const chartCycleDays = compareA
+    ? Math.max(
+        1,
+        Math.round((compareA.window.endMs - compareA.window.startMs) / (24 * 60 * 60 * 1000)),
+      )
+    : 90;
+  const conversionSeries = compareA
+    ? conversionsOverTime(
+        compareA.outcomes,
+        chartCycleDays,
+        new Date(`${compareA.cycle.ends_on}T12:00:00Z`),
+      )
+    : conversionsOverTime(outcomes.data ?? [], 90);
+
+  // Pipeline stages, ownership and sectors — moved here from the retired admin
+  // dashboard. Same visible set as the team figures above: actively suppressed
+  // clients are out of every count.
+  const visibleIds = new Set(rows.map((row) => row.id));
+  const scoreByOrg = new Map((scores.data ?? []).map((row) => [row.organisation_id, row]));
+  const clients: DashboardClient[] = (organisations.data ?? [])
+    .filter((row) => visibleIds.has(row.id))
+    .map((row) => ({
+      id: row.id,
+      legal_name: row.legal_name,
+      outreach_status: row.outreach_status,
+      owner_id: row.owner_id,
+      owner_name: row.owner?.full_name ?? null,
+      sector: row.sector,
+      city: row.city,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      priority_score: scoreByOrg.get(row.id)?.priority_score ?? null,
+      priority_band: scoreByOrg.get(row.id)?.priority_band ?? null,
+    }));
+  const stages = pipelineCounts(clients);
+  const loads = ownerLoad(clients);
+  const sectors = sectorCounts(clients);
 
   const share = (value: number) =>
     totals.contacted === 0 ? 0 : Math.min(value / totals.contacted, 1);
@@ -175,13 +390,144 @@ export default async function AdminAnalyticsPage() {
 
         <Group className="space-y-4">
           <Rise>
-            <h2 className="font-body text-xl font-semibold tracking-[-0.02em]">Across the team</h2>
+            <h2 className="font-body text-xl font-semibold tracking-[-0.02em]">
+              {compareA
+                ? compareB
+                  ? `${compareA.cycle.name} vs ${compareB.cycle.name}`
+                  : compareA.cycle.name
+                : "Across the team"}
+            </h2>
+            {compareA && (
+              <p className="mt-1 font-body text-[13px] leading-[1.55] text-dim">
+                Emails count in the cycle they left in; replies and conversions
+                in the cycle they arrived in.                 Clients, pipeline and sectors
+                below describe the list as it stands today.
+              </p>
+            )}
           </Rise>
           {uncountedMessage && (
             <Rise>
               <InlineAlert variant="page" tone="warning" message={uncountedMessage} />
             </Rise>
           )}
+          <Rise>
+            {cycleList.length === 0 ? (
+              <p className="text-sm leading-[1.7] text-dim">
+                No cycles defined yet —{" "}
+                <Link href="/settings/cycles" className="font-bold text-lead hover:underline">
+                  define them in Settings
+                </Link>{" "}
+                to compare them here.
+              </p>
+            ) : (
+              <form
+                method="get"
+                action="/admin/analytics"
+                className="flex flex-wrap items-end gap-x-3 gap-y-3"
+              >
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    className="text-xs font-semibold text-foreground/60"
+                    htmlFor="cycle-a"
+                  >
+                    Cycle
+                  </label>
+                  <select
+                    id="cycle-a"
+                    name="cycleA"
+                    defaultValue={compareA?.cycle.id ?? ""}
+                    className="rounded-lg border border-black/15 bg-white px-3 py-1.5 text-sm"
+                  >
+                    <option value="">All time</option>
+                    {cycleList.map((cycle) => (
+                      <option key={cycle.id} value={cycle.id}>
+                        {cycle.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <span aria-hidden="true" className="pb-2 text-sm font-bold text-foreground/40">
+                  vs
+                </span>
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    className="text-xs font-semibold text-foreground/60"
+                    htmlFor="cycle-b"
+                  >
+                    Compare with
+                  </label>
+                  <select
+                    id="cycle-b"
+                    name="cycleB"
+                    defaultValue={compareB?.cycle.id ?? ""}
+                    className="rounded-lg border border-black/15 bg-white px-3 py-1.5 text-sm"
+                  >
+                    <option value="">None</option>
+                    {cycleList
+                      .filter((cycle) => cycle.id !== compareA?.cycle.id)
+                      .map((cycle) => (
+                        <option key={cycle.id} value={cycle.id}>
+                          {cycle.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-[#102a4e] px-4 py-1.5 text-xs font-bold text-white transition-opacity hover:opacity-90"
+                >
+                  Compare
+                </button>
+                {(firstParam(query.cycleA) !== undefined ||
+                  firstParam(query.cycleB) !== undefined) && (
+                  <Link
+                    href="/admin/analytics"
+                    className="pb-1.5 text-xs font-bold text-foreground/55 hover:text-foreground"
+                  >
+                    Clear
+                  </Link>
+                )}
+              </form>
+            )}
+          </Rise>
+          {unknownCycle && (
+            <Rise>
+              <InlineAlert
+                variant="page"
+                tone="warning"
+                message="A chosen cycle no longer exists — showing what remains."
+              />
+            </Rise>
+          )}
+          {compareA ? (
+            <>
+              <CycleTiles
+                name={compareA.cycle.name}
+                windowLabel={describeCycleWindow(compareA.cycle)}
+                totals={compareA.totals}
+              />
+              {compareB ? (
+                <CycleTiles
+                  name={compareB.cycle.name}
+                  windowLabel={describeCycleWindow(compareB.cycle)}
+                  totals={compareB.totals}
+                />
+              ) : (
+                <Rise>
+                  <p className="text-sm leading-[1.7] text-dim">
+                    No earlier cycle to compare against —{" "}
+                    <Link
+                      href="/settings/cycles"
+                      className="font-bold text-lead hover:underline"
+                    >
+                      define one in Settings
+                    </Link>{" "}
+                    and pick it above.
+                  </p>
+                </Rise>
+              )}
+            </>
+          ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Rise>
               <StatCard
@@ -204,7 +550,7 @@ export default async function AdminAnalyticsPage() {
                 label="Replies received"
                 value={totals.respondingClients}
                 share={share(totals.respondingClients)}
-                caption={`${formatRate(totals.contacted === 0 ? null : totals.respondingClients / totals.contacted)}`}
+                caption={formatRate(totals.replyRate)}
               />
             </Rise>
             <Rise>
@@ -212,13 +558,12 @@ export default async function AdminAnalyticsPage() {
                 label="Conversions"
                 value={totals.conversions}
                 share={share(totals.conversions)}
-                caption={formatRate(
-                  totals.contacted === 0 ? null : totals.conversions / totals.contacted,
-                )}
+                caption={formatWinRate(totals.winRate)}
                 emphasis
               />
             </Rise>
           </div>
+          )}
         </Group>
 
         <Group className="space-y-4">
@@ -245,13 +590,17 @@ export default async function AdminAnalyticsPage() {
                   unit="conversions"
                   accent="brand"
                   data={conversionSeries}
-                  period="Past 30 days"
-                  periodOptions={[
-                    { label: "Past 7 days", points: 7 },
-                    { label: "Past 30 days", points: 30 },
-                    { label: "Past quarter", points: 90 },
-                  ]}
-                  allowCustomRange
+                  period={compareA ? compareA.cycle.name : "Past 30 days"}
+                  periodOptions={
+                    compareA
+                      ? [{ label: compareA.cycle.name, points: chartCycleDays }]
+                      : [
+                          { label: "Past 7 days", points: 7 },
+                          { label: "Past 30 days", points: 30 },
+                          { label: "Past quarter", points: 90 },
+                        ]
+                  }
+                  allowCustomRange={!compareA}
                   showFooter={false}
                   className="rounded-2xl border-black/[0.06] shadow-sm"
                 />
@@ -259,26 +608,41 @@ export default async function AdminAnalyticsPage() {
                   Dated by when the conversion was recorded. Clients that had already
                   converted when tracking was switched on all carry that day&rsquo;s date, so a
                   single tall bar early in the series is the backfill rather than a real
-                  surge. All-time conversions: {totals.conversions.toLocaleString()}.
+                  surge.{" "}
+                  {compareA
+                    ? `${compareA.cycle.name} conversions: ${compareA.totals.conversions.toLocaleString()}.`
+                    : `All-time conversions: ${totals.conversions.toLocaleString()}.`}
                 </p>
               </>
             ) : (
-              <EmptyState message="No conversions recorded in the last quarter. This chart fills in as clients convert." />
+              <EmptyState
+                message={
+                  compareA
+                    ? `No conversions recorded in ${compareA.cycle.name}. This chart fills in as clients convert.`
+                    : "No conversions recorded in the last quarter. This chart fills in as clients convert."
+                }
+              />
             )}
           </Rise>
         </Group>
 
         <Group className="space-y-4">
-          <Rise>
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="font-body text-xl font-semibold tracking-[-0.02em]">By team member</h2>
-              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-                {totals.camsNeedingSupport > 0
-                  ? `${totals.camsNeedingSupport} may need support`
-                  : "Nobody flagged"}
-              </p>
-            </div>
-          </Rise>
+            <Rise>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="font-body text-xl font-semibold tracking-[-0.02em]">By team member</h2>
+                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+                  {totals.camsNeedingSupport > 0
+                    ? `${totals.camsNeedingSupport} may need support`
+                    : "Nobody flagged"}
+                </p>
+              </div>
+              {compareA && (
+                <p className="mt-1 font-body text-[13px] leading-[1.55] text-dim">
+                  All-time figures per person — the cycle comparison applies to the
+                  tiles and chart above.
+                </p>
+              )}
+            </Rise>
           <Rise>
             {perCam.length === 0 ? (
               <EmptyState message="No active team members yet. Invite one from the team page and their numbers appear here." />
@@ -290,8 +654,8 @@ export default async function AdminAnalyticsPage() {
                       <th scope="col" className="px-5 py-3 font-bold">Team member</th>
                       <th scope="col" className="px-5 py-3 font-bold">Clients</th>
                       <th scope="col" className="px-5 py-3 font-bold">Contacted</th>
-                      <th scope="col" className="px-5 py-3 font-bold">Replies</th>
-                      <th scope="col" className="px-5 py-3 font-bold">Conversions</th>
+                      <th scope="col" className="px-5 py-3 font-bold">Replies / rate</th>
+                      <th scope="col" className="px-5 py-3 font-bold">Won / win rate</th>
                       <th scope="col" className="px-5 py-3 font-bold">Response time</th>
                     </tr>
                   </thead>
@@ -322,9 +686,9 @@ export default async function AdminAnalyticsPage() {
                         <td className="px-5 py-4 tabular-nums">
                           {row.totals.conversions}
                           <span className="ml-2 text-[11px] text-foreground/40">
-                            {row.totals.conversionRate === null
-                              ? "—"
-                              : `${Math.round(row.totals.conversionRate * 100)}%`}
+                          {row.totals.winRate === null
+                            ? "—"
+                            : `${Math.round(row.totals.winRate * 100)}%`}
                           </span>
                         </td>
                         <td className="px-5 py-4 tabular-nums">
@@ -340,6 +704,120 @@ export default async function AdminAnalyticsPage() {
             )}
           </Rise>
         </Group>
+
+        <Group className="space-y-4">
+          <Rise>
+            <h2 className="font-body text-xl font-semibold tracking-[-0.02em]">Pipeline stages</h2>
+            <p className="mt-1 font-body text-[13px] leading-[1.55] text-dim">
+              How many clients sit at each stage right now. Choose a stage to see those clients.
+            </p>
+          </Rise>
+          <Rise>
+            {stages.length === 0 ? (
+              <EmptyState message="No clients yet. Stages fill in as clients join the pipeline." />
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {stages.map(({ status, count }) => (
+                  <Link
+                    key={status}
+                    href={`/clients?status=${encodeURIComponent(status)}`}
+                    className="whitespace-nowrap rounded-full border border-rule bg-white px-3 py-1.5 font-body text-[13px] font-semibold tabular-nums text-ink transition-colors hover:border-lead-mid hover:text-lead focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
+                  >
+                    {formatOutreachStatus(status)} · {count.toLocaleString()}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </Rise>
+        </Group>
+
+        <div className="grid items-start gap-6 lg:grid-cols-2">
+          <Group className="space-y-4">
+            <Rise className="flex flex-wrap items-baseline justify-between gap-2">
+              <div>
+                <h2 className="font-body text-xl font-semibold tracking-[-0.02em]">Ownership</h2>
+                <p className="mt-1 font-body text-[13px] leading-[1.55] text-dim">
+                  How many clients each person owns. Choose a row to see their clients.
+                </p>
+              </div>
+              <Link
+                href="/admin/users"
+                className="font-body text-[13px] font-semibold text-lead transition-colors hover:text-lead-mid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
+              >
+                Manage team →
+              </Link>
+            </Rise>
+            <Rise>
+              {loads.length === 0 ? (
+                <EmptyState message="No clients yet." />
+              ) : (
+                <ul className="divide-y divide-rule-soft rounded-panel border border-rule bg-white">
+                  {loads.map((row) => (
+                    <li key={row.ownerId ?? "unassigned"}>
+                      <Link
+                        href={`/clients?owner=${encodeURIComponent(row.ownerId ?? "unassigned")}`}
+                        className="flex items-center justify-between gap-4 px-5 py-3 font-body text-sm transition-colors hover:bg-paper focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-lead"
+                      >
+                        <span className="font-medium text-ink">{row.ownerName}</span>
+                        <span className="font-semibold tabular-nums text-dim">
+                          {row.count.toLocaleString()}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Rise>
+          </Group>
+
+          <Group className="space-y-4">
+            <Rise>
+              <h2 className="font-body text-xl font-semibold tracking-[-0.02em]">Sectors</h2>
+              <p className="mt-1 font-body text-[13px] leading-[1.55] text-dim">
+                Where the pipeline is concentrated, and how highly those clients score on
+                average (out of 100).
+              </p>
+            </Rise>
+            <Rise>
+              {sectors.length === 0 ? (
+                <EmptyState message="No clients yet." />
+              ) : (
+                <div className="overflow-x-auto rounded-panel border border-rule bg-white">
+                  <table className="w-full border-collapse text-left font-body text-sm">
+                    <thead>
+                      <tr className="border-b border-rule-soft text-[13px] text-dim">
+                        <th scope="col" className="px-5 py-3 font-semibold">Sector</th>
+                        <th scope="col" className="px-5 py-3 text-right font-semibold">Clients</th>
+                        <th scope="col" className="px-5 py-3 text-right font-semibold">Average score</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-rule-soft">
+                      {sectors.slice(0, SECTOR_ROWS).map((row) => (
+                        <tr key={row.sector}>
+                          <th scope="row" className="px-5 py-3 text-left font-medium text-ink">
+                            {row.sector}
+                          </th>
+                          <td className="px-5 py-3 text-right tabular-nums text-dim">
+                            {row.count.toLocaleString()}
+                          </td>
+                          <td className="px-5 py-3 text-right tabular-nums text-dim">
+                            {row.avgScore === null ? "Not scored" : priorityScoreOutOf100(row.avgScore)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {sectors.length > SECTOR_ROWS && (
+                    <p className="border-t border-rule-soft px-5 py-2.5 font-body text-[12.5px] text-faint">
+                      {(sectors.length - SECTOR_ROWS).toLocaleString()} smaller{" "}
+                      {sectors.length - SECTOR_ROWS === 1 ? "sector" : "sectors"} not shown.
+                    </p>
+                  )}
+                </div>
+              )}
+            </Rise>
+          </Group>
+        </div>
       </Stage>
     </div>
   );

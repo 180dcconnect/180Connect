@@ -115,6 +115,7 @@ export async function DataImportsHeader({
               alt=""
               width={mark.width}
               height={mark.height}
+              sizes="(max-width: 640px) 80px, 112px"
               className={mark.className}
             />
           </a>

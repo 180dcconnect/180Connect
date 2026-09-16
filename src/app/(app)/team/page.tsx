@@ -12,7 +12,8 @@ export default async function TeamDirectoryPage() {
     redirect("/login");
   }
 
-  if (authorization.actor.role === "admin") {
+  // Viewers (leadership) see Team management read-only, the same page admins get.
+  if (authorization.actor.role === "admin" || authorization.actor.role === "viewer") {
     redirect("/admin/users");
   }
 

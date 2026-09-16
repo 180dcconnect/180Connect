@@ -22,6 +22,12 @@ import {
   MorphingDialogTrigger,
 } from "@/components/core/morphing-dialog";
 import type { ScoreFactorsRecord } from "@/lib/scoring/persist-latest-score.ts";
+import {
+  SCOUT_CHECKS,
+  scoutContributions,
+  scoutReadingFor,
+  scoutVerdictFor,
+} from "@/lib/scoring/scout-checks.ts";
 
 import { SectionCard } from "./section-card";
 
@@ -70,182 +76,37 @@ import { SectionCard } from "./section-card";
  * gets its number, not just its direction.
  */
 
+/**
+ * Whether a check's stored value is a stand-in for "nothing to go on" rather
+ * than a real, computed reading. Older rows (scored before `readings` was
+ * persisted) fall back to the old value === 0.5 heuristic — the only signal
+ * available for them; partnershipHistory always does, since its own neutral
+ * deliberately covers "never checked" and "checked, confirmed zero" alike
+ * (see score-client.ts's FactorReadings).
+ */
+function isNoReading(
+  factors: ScoreFactorsRecord,
+  key: keyof ScoreFactorsRecord["factors"],
+): boolean {
+  const readings = factors.readings;
+  if (readings && key in readings) {
+    return !readings[key as keyof typeof readings];
+  }
+  return factors.factors[key] === 0.5;
+}
+
 export type LatestScoreDetailRow = {
   priority_score: number | null;
   priority_band: string | null;
   score_factors: ScoreFactorsRecord | null;
 };
 
-type FactorKey = keyof ScoreFactorsRecord["factors"];
-
 /**
- * The five checks, once.
- *
- * This was two arrays — the card called them "Sector / Geography / Size /
- * Partnership history / Previous contact" and the dialog explaining the card
- * called the same five "What they do / Where they are / How big they are / Who
- * has funded them / Where we got to before". A panel whose entire job is
- * explaining the card behind it was making the reader build the mapping
- * themselves, and `priority-dial.tsx` in the header was a third vocabulary
- * (it agrees with the card, so the card's names won).
- *
- * `reads` is where the plain-English phrasing survives: a short sentence under
- * the name, which is a better home for it than a label that also has to fit a
- * narrow card row and a dial legend.
+ * The five checks, their verdicts and their shares live in
+ * `src/lib/scoring/scout-checks.ts`, shared with the header dial and the
+ * dashboard opportunity cards. This file renders them; it does not define
+ * them.
  */
-const CHECKS: {
-  key: FactorKey;
-  /** The one name for this check, used here, on the card, and in the dial. */
-  label: string;
-  /** Concise hint explaining what the criterion evaluates and its scoring relevance. */
-  hint: string;
-  /** What the check looks at, in one sentence. */
-  reads: string;
-  /** What pushes this check up. */
-  raises: string;
-  /** What pushes it down. */
-  lowers: string;
-  /** What we can say when the check found nothing at all. */
-  blank: string;
-  /** Names the input this parameter reads, for the "we do have something" case. */
-  subject: string;
-}[] = [
-  {
-    key: "sector",
-    label: "Sector",
-    hint: "Alignment with branch focus areas and cause priorities",
-    reads: "The sector the organisation works in.",
-    raises: "Working in a sector ranked near the top in score settings.",
-    lowers: "Working in a sector ranked near the bottom in score settings.",
-    blank: "No sector recorded, so this check found nothing to go on.",
-    subject: "Sector fit against the branch's priorities",
-  },
-  {
-    key: "geography",
-    label: "Geography",
-    hint: "Proximity to branch target operating regions",
-    reads:
-      "Whether the organisation sits in one of the branch's priority areas.",
-    raises: "Being inside a priority area.",
-    lowers: "Being outside every priority area.",
-    blank:
-      "No priority towns are set in score settings, so this check is neutral for every client. It is not something wrong with this record.",
-    subject: "Location against the branch's priority regions",
-  },
-  {
-    key: "size",
-    label: "Size",
-    hint: "Operating income scale from latest filed accounts",
-    reads: "The income on their most recent set of published accounts.",
-    raises: "An income band scored highly in score settings.",
-    lowers: "An income band scored low in score settings.",
-    blank:
-      "No accounts with an income figure have been filed against this record.",
-    subject: "Income size",
-  },
-  {
-    key: "partnershipHistory",
-    label: "Partnership history",
-    hint: "Track record of matched grant funding in 360Giving",
-    reads: "How many grants we can match to them in the public 360Giving data.",
-    raises: "Five or more matched grants rates highest.",
-    lowers:
-      "Nothing here counts against a client: it either helps or stays neutral.",
-    blank: "No grants matched to this organisation.",
-    subject: "Previous grant history",
-  },
-  {
-    key: "previousContact",
-    label: "Previous contact",
-    hint: "Stage reached in prior outreach and relationship history",
-    reads:
-      "The stage they reached with us last time, and how long ago that was.",
-    raises:
-      "Already converted rates highest, then flagged as future potential, then replied to us. A client nobody has approached yet also rates well — the opportunity is untouched.",
-    lowers:
-      "A hard no floors it. Soft no and gone quiet sit low, and anything we are still waiting on slides down the longer the silence runs, over about a month.",
-    blank: "No outreach recorded against this client yet.",
-    subject: "Outreach history",
-  },
-];
-
-/**
- * The engine normalises by the weight sum, so each factor's share of the final
- * score is (factor × weight) / Σ(factor × weight) — these sum to the stored
- * score exactly, which is what AC3 asks the card to prove visually.
- */
-function contributions(
-  row: NonNullable<LatestScoreDetailRow["score_factors"]>,
-) {
-  const parts = CHECKS.map(({ key }) => ({
-    key,
-    weighted:
-      Math.max(0, Math.min(1, row.factors[key])) *
-      Math.max(0, row.weights[key]),
-  }));
-  const total = parts.reduce((sum, part) => sum + part.weighted, 0);
-  return parts.map((part) => ({
-    key: part.key,
-    percent: total === 0 ? 0 : (part.weighted / total) * 100,
-  }));
-}
-
-/**
- * One check's verdict — the same four states wherever they are drawn.
- *
- * They used to be four labels in three colours, and the collision was in the
- * worst possible place: "Neither way" and "Holding it back" were both
- * `text-dim` with a `bg-faint` dot, pixel for pixel, so the two states a CAM
- * most needs to tell apart could only be told apart by reading. "Nothing on
- * record" was a filled dot one shade lighter again, which drew absence as a
- * pale reading rather than as no reading.
- *
- * Now: `--lead` for a check that is helping (the record's structural accent,
- * already how this card draws signal), `--hold` for one that is holding the
- * score back — amber is the palette's "worth knowing, not an error", which is
- * exactly what a weak input is — plain grey for genuinely middling, and an
- * *outline* dot for nothing on record, because an empty ring is the one shape
- * that reads as absence at 6px rather than as a dimmer value.
- */
-function verdictFor(value: number): {
-  label: string;
-  textClass: string;
-  dotClass: string;
-  barClass: string;
-} {
-  // 0.5 survives the jsonb round trip exactly (binary-representable), so
-  // equality against the engine's no-data constant is safe.
-  if (value === 0.5) {
-    return {
-      label: "Nothing on record",
-      textClass: "text-faint",
-      dotClass: "border border-faint/70 bg-transparent",
-      barClass: "bg-rule",
-    };
-  }
-  if (value > 0.55) {
-    return {
-      label: "Helping the score",
-      textClass: "text-lead",
-      dotClass: "bg-lead",
-      barClass: "bg-lead",
-    };
-  }
-  if (value >= 0.45) {
-    return {
-      label: "Neither way",
-      textClass: "text-dim",
-      dotClass: "bg-faint",
-      barClass: "bg-faint/60",
-    };
-  }
-  return {
-    label: "Holding it back",
-    textClass: "text-hold",
-    dotClass: "bg-hold",
-    barClass: "bg-hold/70",
-  };
-}
 
 export function ScoreBreakdownCard({
   score,
@@ -291,27 +152,27 @@ export function ScoreBreakdownCard({
 }
 
 function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
-  const shares = new Map(contributions(factors).map((c) => [c.key, c.percent]));
-  const covered = CHECKS.filter(
-    ({ key }) => factors.factors[key] !== 0.5,
+  const shares = new Map(scoutContributions(factors).map((c) => [c.key, c.percent]));
+  const covered = SCOUT_CHECKS.filter(
+    ({ key }) => !isNoReading(factors, key),
   ).length;
 
   return (
     <>
       <p className="mt-2.5 text-[12.5px] leading-[1.5] text-dim">
         <span className="font-semibold text-ink">
-          {covered} of {CHECKS.length} checks found something.
+          {covered} of {SCOUT_CHECKS.length} checks found something.
         </span>{" "}
-        {covered === CHECKS.length
+        {covered === SCOUT_CHECKS.length
           ? "Every check is a real reading."
           : `The rest count as half a mark each, which is what keeps a thin record near the middle of the range rather than at either end.`}
       </p>
       <ul className="mt-2.5 space-y-2">
-        {CHECKS.map(({ key, label, hint, blank, subject }) => {
+        {SCOUT_CHECKS.map(({ key, label, hint, blank, subject }) => {
           const value = factors.factors[key];
           const percent = shares.get(key) ?? 0;
-          const isNeutral = value === 0.5;
-          const verdict = verdictFor(value);
+          const isNeutral = isNoReading(factors, key);
+          const verdict = scoutVerdictFor(value);
 
           return (
             <li key={key}>
@@ -356,7 +217,7 @@ function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
                   <span className="block font-semibold">
                     {isNeutral
                       ? "No reading on this parameter"
-                      : readingFor(subject, value)}
+                      : scoutReadingFor(subject, value)}
                   </span>
                   <span className="mt-0.5 block text-white/70">
                     {isNeutral
@@ -371,19 +232,6 @@ function BreakdownTable({ factors }: { factors: ScoreFactorsRecord }) {
       </ul>
     </>
   );
-}
-
-/**
- * The factor is a 0–1 reading, so the headline says how strong it is rather
- * than only which way it leans — "weak" and "barely below neutral" are not the
- * same news, and the old two-way split reported them identically.
- */
-function readingFor(subject: string, value: number): string {
-  if (value >= 0.75) return `${subject}: strong.`;
-  if (value > 0.55) return `${subject}: above average.`;
-  if (value >= 0.45) return `${subject}: middling.`;
-  if (value >= 0.25) return `${subject}: weak.`;
-  return `${subject}: very weak.`;
 }
 
 /** score-client.ts's PRIORITY_BAND_THRESHOLDS, in the same order. */
@@ -420,15 +268,15 @@ const BAND_ROWS: {
  * rather than a column of decimals.
  */
 function weightingSentence(weights: ScoreFactorsRecord["weights"]): string {
-  const values = CHECKS.map(({ key }) => weights[key]);
+  const values = SCOUT_CHECKS.map(({ key }) => weights[key]);
   const first = values[0];
   if (values.every((value) => Math.abs(value - first) < 0.0001)) {
     return "All five checks currently count equally.";
   }
-  const heaviest = CHECKS.reduce((top, row) =>
+  const heaviest = SCOUT_CHECKS.reduce((top, row) =>
     weights[row.key] > weights[top.key] ? row : top,
   );
-  const lightest = CHECKS.reduce((low, row) =>
+  const lightest = SCOUT_CHECKS.reduce((low, row) =>
     weights[row.key] < weights[low.key] ? row : low,
   );
   return `The checks are not balanced equally right now — “${heaviest.label}” counts for the most and “${lightest.label}” for the least. This can be edited by an admin.`;
@@ -478,7 +326,7 @@ function ScoreMethodDialog({
   factors: LatestScoreDetailRow["score_factors"];
 }) {
   const shares = factors
-    ? new Map(contributions(factors).map((c) => [c.key, c.percent]))
+    ? new Map(scoutContributions(factors).map((c) => [c.key, c.percent]))
     : null;
 
   return (
@@ -598,10 +446,10 @@ function ScoreMethodDialog({
               </p>
 
               <ul className="mt-3 space-y-2">
-                {CHECKS.map((row) => {
+                {SCOUT_CHECKS.map((row) => {
                   const value = factors ? factors.factors[row.key] : null;
-                  const verdict = value === null ? null : verdictFor(value);
-                  const isBlank = value === 0.5;
+                  const verdict = value === null ? null : scoutVerdictFor(value);
+                  const isBlank = factors ? isNoReading(factors, row.key) : false;
                   const percent = shares?.get(row.key);
 
                   return (

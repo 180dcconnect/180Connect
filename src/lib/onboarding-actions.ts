@@ -70,7 +70,10 @@ export async function recordOnboardingStepAction(
     return { ok: false };
   }
 
-  revalidatePath("/dashboard");
+  // The checklist lives in the sidebar, which every signed-in page shares through
+  // one layout that no longer re-renders on navigation — so the layout is
+  // revalidated, not just the dashboard the guide also appears on.
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 
@@ -103,6 +106,9 @@ async function endGuideAction(
     return { ok: false };
   }
 
-  revalidatePath("/dashboard");
+  // The checklist lives in the sidebar, which every signed-in page shares through
+  // one layout that no longer re-renders on navigation — so the layout is
+  // revalidated, not just the dashboard the guide also appears on.
+  revalidatePath("/", "layout");
   return { ok: true };
 }

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AlertCircle, Building2, ChevronRight, ExternalLink, Search } from "lucide-react";
 
 import { formatLocation, formatOutreachStatus } from "@/lib/organisation-format";
-import { Pill, SectionCard } from "@/app/clients/[id]/section-card";
+import { Pill, SectionCard } from "@/app/(app)/clients/[id]/section-card";
 
 export type AssignedClientItem = {
   id: string;

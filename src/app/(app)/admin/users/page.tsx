@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
@@ -30,7 +30,7 @@ export default async function AdminUsersPage({
 }: {
   searchParams?: SearchParams;
 }) {
-  const authorization = await getCurrentActor("user:manage", {
+  const authorization = await getViewingActor("user:manage", {
     route: "/admin/users",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
@@ -155,6 +155,8 @@ export default async function AdminUsersPage({
     listed_client_count: listedCounts.get(user.id) ?? 0,
   })) as TeamUser[];
 
+  const canManage = authorization.actor.role === "admin";
+
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <SearchRail
@@ -170,17 +172,19 @@ export default async function AdminUsersPage({
             <div className="shrink-0 pt-1">
               {/* Resolved here, not in the sheet: the allowlist lives in
                   AUTH_ALLOWED_EMAIL_DOMAIN, and process.env is not readable
-                  from a Client Component. */}
-              <DarkInviteSheet
-                allowedDomains={allowedEmailDomains()}
-                pendingEmails={(pendingInvites ?? []).map((p) => p.email)}
-                existingUserEmails={(users ?? [])
-                  .filter((u) => u.is_active !== false)
-                  .map((u) => u.email)}
-                suspendedEmails={(users ?? [])
-                  .filter((u) => u.is_active === false)
-                  .map((u) => u.email)}
-              />
+                  from a Client Component. Only admins can invite new members. */}
+              {canManage && (
+                <DarkInviteSheet
+                  allowedDomains={allowedEmailDomains()}
+                  pendingEmails={(pendingInvites ?? []).map((p) => p.email)}
+                  existingUserEmails={(users ?? [])
+                    .filter((u) => u.is_active !== false)
+                    .map((u) => u.email)}
+                  suspendedEmails={(users ?? [])
+                    .filter((u) => u.is_active === false)
+                    .map((u) => u.email)}
+                />
+              )}
             </div>
           </div>
         }
@@ -206,6 +210,7 @@ export default async function AdminUsersPage({
 
         {!error && (
           <TeamPanel
+            canManage={canManage}
             currentUserId={authorization.actor.id}
             filterCriteria={filterCriteria}
             initialPendingInvites={(pendingInvites as PendingInvite[] | null) ?? []}

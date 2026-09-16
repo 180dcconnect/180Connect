@@ -1,10 +1,29 @@
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
+import { isViewOnly } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import { createClient } from "@/lib/supabase/server";
+import { fetchPaged } from "@/lib/supabase/fetch-paged";
 import { type TeamActionRow } from "@/lib/actions";
+import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import { InlineAlert } from "@/components/ui/inline-alert";
+import { ActionsHeader } from "../../actions/actions-header";
 import { AssignActionPanel } from "./assign-action-panel";
+
+/**
+ * What the client picker needs: a name to list and search, and the owner so the
+ * form can say when the person being assigned isn't the one who owns the
+ * client. Override types explicitly — supabase-js infers an embedded owner as
+ * an array, which is neither what PostgREST returns nor what the picker reads
+ * (same `.overrideTypes` as the admin analytics page's org read).
+ */
+type ClientPickerRow = {
+  id: string;
+  legal_name: string;
+  owner_id: string | null;
+  owner: { full_name: string | null } | null;
+};
 
 const ACTION_SELECT =
   "id, title, description, due_date, status, organisation_id, created_by_user_id, assignee_user_id, created_at, " +
@@ -30,10 +49,18 @@ const ACTION_SELECT =
  * `team` prop on the client profile page.
  */
 export default async function AdminActionsPage() {
-  const authorization = await getCurrentActor("user:manage", { route: "/admin/actions" });
+  const authorization = await getViewingActor("user:manage", { route: "/admin/actions" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
   const supabase = await createClient();
+
+  // Leadership (viewer) watches the team's work and hands none of it out: they
+  // get the outstanding and completed lists, not the assign form. The two
+  // picker reads exist only to fill that form, so for them they are skipped
+  // rather than fetched and discarded.
+  const canAssign = !isViewOnly(authorization.actor.role);
+  const empty = <T,>(): Promise<{ data: T[]; error: null }> =>
+    Promise.resolve({ data: [], error: null });
 
   const [actionsResult, teamResult, clientsResult] = await Promise.all([
     supabase
@@ -41,17 +68,31 @@ export default async function AdminActionsPage() {
       .select(ACTION_SELECT)
       .order("created_at", { ascending: false })
       .overrideTypes<TeamActionRow[], { merge: false }>(),
-    supabase
-      .from("users")
-      .select("id, full_name, role")
-      .in("role", ["cam", "admin"])
-      .eq("is_active", true)
-      .order("full_name"),
-    // Ordered by name, not paginated — same scale assumption as the other
-    // admin pickers on this branch (e.g. AssignOwnerForm's team list); a
-    // client-count high enough to need search/pagination here is a later
-    // problem, not one this ticket's AC asks to solve.
-    supabase.from("organisations").select("id, legal_name").order("legal_name").limit(1000),
+    canAssign
+      ? supabase
+          .from("users")
+          .select("id, full_name, role, email")
+          .in("role", ["cam", "admin"])
+          .eq("is_active", true)
+          .order("full_name")
+      : empty<{ id: string; full_name: string | null; role: string | null; email: string | null }>(),
+    // Every client, not the first thousand alphabetically: the picker's search
+    // must cover the whole list or it silently hides clients. A handful of
+    // narrow columns ordered by name, walked past PostgREST's row cap with
+    // fetchPaged (the admin analytics page's pattern) — small payload, one
+    // extra read. The owner join backs the picker's "doesn't own this client"
+    // note, and nothing else here reads it.
+    canAssign
+      ? fetchPaged<ClientPickerRow>((from, to) =>
+          supabase
+            .from("organisations")
+            .select("id, legal_name, owner_id, owner:users!organisations_owner_id_fkey(full_name)")
+            .order("legal_name")
+            .order("id")
+            .range(from, to)
+            .overrideTypes<ClientPickerRow[], { merge: false }>(),
+        )
+      : empty<ClientPickerRow>(),
   ]);
 
   if (actionsResult.error) {
@@ -64,31 +105,40 @@ export default async function AdminActionsPage() {
     await reportError(clientsResult.error, { operation: "admin.actions.page_clients" });
   }
 
+  // The root element is a `div`, not a `main`: the admin layout's AppShell
+  // already renders the `main` this is slotted into.
   return (
-    <main className="min-h-screen bg-[#f1f2f4] p-6">
-      <section className="mx-auto w-full max-w-4xl rounded-2xl bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-bold">Team actions</h1>
-        <p className="mt-3 text-sm text-foreground/65">
-          Create a client-linked action and assign it to a team member. It appears on their own
-          Actions tab immediately — nothing for them to accept first. This page shows
-          every action assigned this way across the team, outstanding and completed.
-        </p>
+    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+      <Stage className="mx-auto w-full max-w-4xl space-y-8">
+        <Rise>
+          <ActionsHeader current="/admin/actions">
+            <p className="mt-3 max-w-xl text-sm leading-[1.7] text-foreground/65">
+              {canAssign
+                ? "Give a team member a piece of client work. It appears on their Actions tab straight away — nothing for them to accept first."
+                : "Every piece of client work the team has been given, outstanding and completed."}
+            </p>
+          </ActionsHeader>
+        </Rise>
 
-        {(actionsResult.error || teamResult.error || clientsResult.error) && (
-          <p
-            className="mt-5 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-800"
-            role="alert"
-          >
-            Some of this page could not be loaded. Refresh and try again.
-          </p>
-        )}
-
-        <AssignActionPanel
-          team={teamResult.data ?? []}
-          clients={clientsResult.data ?? []}
-          initialActions={actionsResult.data ?? []}
-        />
-      </section>
-    </main>
+        <Group>
+          <Rise>
+            {(actionsResult.error || teamResult.error || clientsResult.error) && (
+              <InlineAlert
+                variant="page"
+                message="Some of this page could not be loaded. This has been recorded — refresh and try again."
+              />
+            )}
+          </Rise>
+          <Rise>
+            <AssignActionPanel
+              team={teamResult.data ?? []}
+              clients={clientsResult.data ?? []}
+              initialActions={actionsResult.data ?? []}
+              canAssign={canAssign}
+            />
+          </Rise>
+        </Group>
+      </Stage>
+    </div>
   );
 }

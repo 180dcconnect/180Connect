@@ -1,11 +1,17 @@
 import { formatOutreachStatus } from "./organisation-format.ts";
 import type { FollowUpRecommendation, FollowUpUrgency } from "./outreach/follow-up-recommendations.ts";
 import type { ReplyTrackingSummary } from "./reply-analytics.ts";
+import { outreachRates } from "./outreach-rates.ts";
 
 /**
  * F021/F022-F025/F027 — contacted and converted remain pipeline readings, while
  * F138 supplies Responses Received from linked reply_events instead of inferring it
  * from a client's current status.
+ *
+ * The reply and win rates here are the shared client-based pair
+ * (`lib/outreach-rates.ts`), so the tile captions and the Performance section
+ * cannot disagree: this used to divide *replies* by contacted clients, which
+ * counted a four-message thread as four responses.
  */
 export type DashboardOrgRow = {
   id: string;
@@ -26,6 +32,13 @@ export type DashboardOrgRow = {
   city?: string | null;
   country_code?: string | null;
   website?: string | null;
+  /**
+   * Register-filed purpose texts, read only by the dashboard's Priority
+   * Opportunities card (mission line). Same reason as the preview columns
+   * above: the dashboard already pages every organisation row.
+   */
+  charity_activities?: string | null;
+  cic_community_statement?: string | null;
 };
 
 export type OpenSuppression = { organisation_id: string; status: "pending" | "active" };
@@ -48,10 +61,14 @@ export type DashboardMetrics = {
   contacted: number;
   responsesReceived: number;
   respondingClients: number;
+  /** Replied ∪ converted — win rate's denominator, as a count. */
+  respondedClients: number;
   converted: number;
   contactRate: number;
-  replyRate: number;
-  conversionRate: number;
+  /** replied clients ÷ contacted clients; null when nobody was contacted. */
+  replyRate: number | null;
+  /** converted ÷ responded clients; null when nobody responded. */
+  winRate: number | null;
 };
 
 const RESPONSE_STATUSES = new Set([
@@ -66,7 +83,7 @@ const RESPONSE_STATUSES = new Set([
 
 /**
  * The three pipeline readings above, as predicates over a single status. Exported
- * so the client list's funnel (src/app/clients/client-insights.ts) draws the same
+ * so the client list's funnel (src/app/(app)/clients/client-insights.ts) draws the same
  * stages this dashboard counts rather than re-deciding what "contacted" means.
  */
 export const isContacted = (status: string) => status !== "not_contacted";
@@ -76,31 +93,44 @@ export const isConverted = (status: string) => status === "converted";
 /** F022-F025 — platform-wide totals, shown to every role regardless of ownership. */
 export function computeDashboardMetrics(
   rows: DashboardOrgRow[],
-  replies?: Pick<ReplyTrackingSummary, "totalReplies" | "respondingClients">,
+  replies?: Pick<ReplyTrackingSummary, "totalReplies" | "respondingClients" | "byClient">,
 ): DashboardMetrics {
-  let contacted = 0;
-  let converted = 0;
+  // Client ids, not counts: the two rates are ratios of clients and win rate's
+  // denominator is a union (see lib/outreach-rates.ts). `contacted` and
+  // `converted` are read off the pipeline status the rest of the dashboard
+  // counts, and replies come from reply_events — the same two sources as before.
+  const contactedClients = new Set<string>();
+  const convertedClients = new Set<string>();
 
   for (const row of rows) {
-    if (isContacted(row.outreach_status)) contacted += 1;
-    if (isConverted(row.outreach_status)) converted += 1;
+    if (isContacted(row.outreach_status)) contactedClients.add(row.id);
+    if (isConverted(row.outreach_status)) convertedClients.add(row.id);
   }
 
   const totalCharities = rows.length;
-  // Counted from reply_events, not inferred from the pipeline status: a client
-  // can be moved to "responded" by hand, and two replies from one client are
-  // two replies. The rates below therefore divide by observed replies too.
-  const responsesReceived = replies?.totalReplies ?? 0;
+  // Replies are counted from reply_events, not inferred from the pipeline
+  // status: a client can be moved to "responded" by hand, and two replies from
+  // one client are two replies. Folded back to the rows in hand, so a reply for
+  // a record this caller did not load cannot enter a rate built from them.
+  const repliedClients = new Set(
+    Array.from(replies?.byClient.keys() ?? []).filter((id) => contactedClients.has(id)),
+  );
+  const rates = outreachRates({
+    contacted: contactedClients,
+    replied: repliedClients,
+    converted: convertedClients,
+  });
 
   return {
     totalCharities,
-    contacted,
-    responsesReceived,
-    respondingClients: replies?.respondingClients ?? 0,
-    converted,
-    contactRate: totalCharities > 0 ? contacted / totalCharities : 0,
-    replyRate: contacted > 0 ? responsesReceived / contacted : 0,
-    conversionRate: responsesReceived > 0 ? converted / responsesReceived : 0,
+    contacted: rates.contactedClients,
+    responsesReceived: replies?.totalReplies ?? 0,
+    respondingClients: rates.repliedClients,
+    respondedClients: rates.respondedClients,
+    converted: rates.convertedClients,
+    contactRate: totalCharities > 0 ? rates.contactedClients / totalCharities : 0,
+    replyRate: rates.replyRate,
+    winRate: rates.winRate,
   };
 }
 

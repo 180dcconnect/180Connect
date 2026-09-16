@@ -1,17 +1,22 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
+import { hasPermission } from "@/lib/auth/permissions";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { FIELD_DISCREPANCY_SELECT, type FieldDiscrepancyRow } from "@/lib/discrepancies";
 import { DiscrepanciesPanel } from "./discrepancies-panel";
 
 export default async function DiscrepanciesPage() {
-  const authorization = await getCurrentActor("approval:manage", {
+  const authorization = await getViewingActor("approval:manage", {
     route: "/admin/discrepancies",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
+
+  // Leadership reads which sources disagree and answers none of it, so the panel
+  // is given the same permission its PATCH route asks for.
+  const canDecide = hasPermission(authorization.actor.role, "approval:manage");
 
   const supabase = await createClient();
 
@@ -34,7 +39,10 @@ export default async function DiscrepanciesPage() {
           When confirming that an incoming record and an existing charity are the same
           organisation, the pipeline compares their fields. Anywhere a source disagrees
           with what is already stored is flagged here instead of one value silently
-          overwriting the other. Pick which value to keep for each flagged field.
+          overwriting the other.{" "}
+          {canDecide
+            ? "Pick which value to keep for each flagged field."
+            : "Each one shows what was kept and who decided it."}
         </p>
 
         {error && (
@@ -43,7 +51,7 @@ export default async function DiscrepanciesPage() {
           </div>
         )}
 
-        <DiscrepanciesPanel initialDiscrepancies={data ?? []} />
+        <DiscrepanciesPanel initialDiscrepancies={data ?? []} canDecide={canDecide} />
       </section>
     </main>
   );

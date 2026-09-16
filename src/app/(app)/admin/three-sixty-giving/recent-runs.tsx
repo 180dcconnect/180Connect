@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Loader2 } from "lucide-react";
 
 import { StatusBadge } from "../import-status/status-badge";
+import { isStalledRun, runDisplayStatus } from "../import-status/status-helpers.ts";
 import { summariseRun, type IngestionRunRow } from "../import-status/run-format";
 
 /**
@@ -41,8 +42,9 @@ function headline(run: IngestionRunRow): { value: number; label: string } | null
   return null;
 }
 
-export function ThreeSixtyRecentRuns({ runs }: { runs: IngestionRunRow[] }) {
+export function ThreeSixtyRecentRuns({ runs, now }: { runs: IngestionRunRow[]; now: Date }) {
   const [latest, ...older] = runs;
+  const latestStalled = latest.job_status === "running" && isStalledRun(latest.started_at, now);
 
   return (
     <section className="overflow-hidden rounded-panel border border-rule bg-white">
@@ -67,7 +69,7 @@ export function ThreeSixtyRecentRuns({ runs }: { runs: IngestionRunRow[] }) {
           <div className="border-t border-rule-soft bg-paper px-5 py-5 sm:px-6">
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
               <p className="text-xs tabular-nums text-faint">{when(latest.started_at, true)}</p>
-              <StatusBadge status={latest.job_status} />
+              <StatusBadge status={runDisplayStatus(latest.job_status, latest.started_at, now)} />
             </div>
 
             {(() => {
@@ -81,15 +83,19 @@ export function ThreeSixtyRecentRuns({ runs }: { runs: IngestionRunRow[] }) {
                 </p>
               ) : (
                 <p className="mt-2.5 flex items-center gap-2 text-lg font-semibold tracking-[-0.02em] text-ink">
-                  {latest.job_status === "running" && (
+                  {latest.job_status === "running" && !latestStalled && (
                     <Loader2 className="h-4 w-4 animate-spin text-faint" strokeWidth={2.2} />
                   )}
-                  {latest.job_status === "running" ? "Import in progress" : "Import failed"}
+                  {latest.job_status === "running"
+                    ? latestStalled
+                      ? "Import stalled"
+                      : "Import in progress"
+                    : "Import failed"}
                 </p>
               );
             })()}
 
-            <p className="mt-1.5 text-sm leading-[1.65] text-dim">{summariseRun(latest)}</p>
+            <p className="mt-1.5 text-sm leading-[1.65] text-dim">{summariseRun(latest, now)}</p>
           </div>
 
           {older.length > 0 && (
@@ -103,9 +109,9 @@ export function ThreeSixtyRecentRuns({ runs }: { runs: IngestionRunRow[] }) {
                     {when(run.started_at)}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm text-dim">
-                    {summariseRun(run)}
+                    {summariseRun(run, now)}
                   </span>
-                  <StatusBadge status={run.job_status} />
+                  <StatusBadge status={runDisplayStatus(run.job_status, run.started_at, now)} />
                 </li>
               ))}
             </ul>

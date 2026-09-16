@@ -13,7 +13,7 @@
  */
 
 // Relative with an explicit extension so `node --test` can import this module.
-import { describeDomains, isOnAllowedDomain } from "../../../lib/auth/email-domain.ts";
+import { describeDomains, isOnAllowedDomain } from "../../../../lib/auth/email-domain.ts";
 
 /**
  * RFC 5321 limits: 64 octets for the local part, 254 for the whole address.

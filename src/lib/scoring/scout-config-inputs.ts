@@ -72,8 +72,12 @@ const schema = z.object({
   sizeScores: z.object({
     under_10k: percent,
     "10k_100k": percent,
-    "100k_1m": percent,
-    over_1m: percent,
+    "100k_500k": percent,
+    "500k_1m": percent,
+    "1m_10m": percent,
+    "10m_50m": percent,
+    "50m_100m": percent,
+    over_100m: percent,
   }),
 });
 
@@ -91,6 +95,13 @@ export function validateScoutConfigInput(
     return {
       success: false,
       message: "At least one check has to count towards the score, or every client would score zero.",
+    };
+  }
+  const weightSum = Object.values(parsed.data.weights).reduce((sum, w) => sum + w, 0);
+  if (Math.abs(weightSum - 100) > 0.5) {
+    return {
+      success: false,
+      message: `The five checks must add up to 100% in total (currently ${Math.round(weightSum)}%).`,
     };
   }
   return {

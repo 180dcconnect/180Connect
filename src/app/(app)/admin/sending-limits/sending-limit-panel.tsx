@@ -2,16 +2,19 @@
 
 import { useState } from "react";
 import { OriginButton } from "@/components/ui/origin-button";
+import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import { setOutreachDailySendLimit } from "./actions";
 
 export function SendingLimitPanel({
   currentLimit,
   sentToday,
   updatedAt,
+  readOnly = false,
 }: {
   currentLimit: number;
   sentToday: number;
   updatedAt: string | null;
+  readOnly?: boolean;
 }) {
   const [limit, setLimit] = useState(currentLimit);
   const [input, setInput] = useState(String(currentLimit));
@@ -53,29 +56,33 @@ export function SendingLimitPanel({
         {nearLimit ? " Close to the daily cap." : ""}
       </p>
 
-      <form onSubmit={save} className="mt-5 rounded-xl border border-black/10 bg-black/[0.015] p-4">
-        <label className="flex flex-col gap-1.5 text-sm">
-          <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-            Daily sending limit
-          </span>
-          <input
-            className="mt-1 w-full max-w-[10rem] rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-            inputMode="numeric"
-            min={1}
-            onChange={(event) => setInput(event.target.value)}
-            type="number"
-            value={input}
-          />
-        </label>
-        <p className="mt-2 text-[13px] leading-[1.6] text-foreground/50">
-          {updatedAt
-            ? `Last changed ${new Date(updatedAt).toLocaleString("en-GB")}.`
-            : "Never changed from the default."}
-        </p>
-        <OriginButton className="mt-3" disabled={busy} loading={busy} size="sm" type="submit">
-          Save limit
-        </OriginButton>
-      </form>
+      {readOnly ? (
+        <p className="mt-4 text-sm text-foreground/55">{VIEW_ONLY_CONTROL_NOTE}</p>
+      ) : (
+        <form onSubmit={save} className="mt-5 rounded-xl border border-black/10 bg-black/[0.015] p-4">
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
+              Daily sending limit
+            </span>
+            <input
+              className="mt-1 w-full max-w-[10rem] rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+              inputMode="numeric"
+              min={1}
+              onChange={(event) => setInput(event.target.value)}
+              type="number"
+              value={input}
+            />
+          </label>
+          <p className="mt-2 text-[13px] leading-[1.6] text-foreground/50">
+            {updatedAt
+              ? `Last changed ${new Date(updatedAt).toLocaleString("en-GB")}.`
+              : "Never changed from the default."}
+          </p>
+          <OriginButton className="mt-3" disabled={busy} loading={busy} size="sm" type="submit">
+            Save limit
+          </OriginButton>
+        </form>
+      )}
 
       {message && (
         <p

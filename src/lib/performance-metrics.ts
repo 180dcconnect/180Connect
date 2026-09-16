@@ -1,4 +1,5 @@
 import type { GrowthPoint } from "./dashboard-metrics.ts";
+import { outreachRates } from "./outreach-rates.ts";
 
 /**
  * Performance section (dashboard) — the CAM-facing read of "how are we doing".
@@ -157,26 +158,65 @@ export type WeeklyCount = { thisWeek: number; lastWeek: number };
 export type PersonWeekly = {
   userId: string;
   name: string;
+  /** Events, not clients: three emails to one charity are three of these. */
   emailsSent: WeeklyCount;
   replies: WeeklyCount;
   conversions: WeeklyCount;
+  /**
+   * The current window's client funnel — distinct clients emailed, replied,
+   * converted — and the two rates built from it (`lib/outreach-rates.ts`).
+   *
+   * Current window only, unlike the event counts above: the leaderboard asks
+   * "where does this person stand now", and a prior-window rate that nothing
+   * reads would be one more number to keep true.
+   */
+  contactedClients: number;
+  repliedClients: number;
+  respondedClients: number;
+  convertedClients: number;
+  replyRate: number | null;
+  winRate: number | null;
 };
 
 export type PerformanceSummary = {
-  /** Team totals — every attributed event on the platform. */
-  team: { emailsSent: WeeklyCount; replies: WeeklyCount; conversions: WeeklyCount };
+  /**
+   * Team totals — every attributed event on the platform, plus the same
+   * current-window funnel the per-person rows carry, so the leaderboard's
+   * "Team" footer row is the team's own reply and win rate rather than a
+   * message-based rate that disagrees with the rows above it.
+   */
+  team: {
+    emailsSent: WeeklyCount;
+    replies: WeeklyCount;
+    conversions: WeeklyCount;
+    contactedClients: number;
+    repliedClients: number;
+    respondedClients: number;
+    convertedClients: number;
+    replyRate: number | null;
+    winRate: number | null;
+  };
   /** Per-person rollups, keyed by user id. Users with no activity are absent. */
   people: Map<string, PersonWeekly>;
   /** Team-wide only: scoring runs system-wide, so nobody "owns" a score. */
   orgsScored: WeeklyCount;
 };
 
-export function computePerformance(
+/**
+ * Every rollup both public functions below need, for whichever pair of windows
+ * the caller picked.
+ *
+ * One implementation on purpose. These two functions used to be the same loops
+ * written twice — which is exactly how "conversion rate" came to mean one thing
+ * on the leaderboard and another on the sector table. A change to how an event
+ * is attributed, or to how a rate is built, now cannot land on one screen and
+ * miss the other.
+ */
+function rollUp(
   input: PerformanceInput,
-  now: Date = new Date(),
+  current: DayWindow,
+  prior: DayWindow,
 ): PerformanceSummary {
-  const windows = weekWindows(now);
-
   const senderByMessage = new Map<string, string>();
   for (const message of input.messages) {
     if (message.sent_by_user_id) senderByMessage.set(message.id, message.sent_by_user_id);
@@ -188,8 +228,35 @@ export function computePerformance(
     emailsSent: { thisWeek: 0, lastWeek: 0 },
     replies: { thisWeek: 0, lastWeek: 0 },
     conversions: { thisWeek: 0, lastWeek: 0 },
+    contactedClients: 0,
+    repliedClients: 0,
+    respondedClients: 0,
+    convertedClients: 0,
+    replyRate: null as number | null,
+    winRate: null as number | null,
   };
   const people = new Map<string, PersonWeekly>();
+
+  /**
+   * The current window's client ids per person, kept as sets because the two
+   * rates are ratios of clients and win rate's denominator is a union. Built
+   * beside the event counts rather than derived from them: three emails to one
+   * charity are three events and one contacted client.
+   */
+  const clientSets = new Map<
+    string,
+    { contacted: Set<string>; replied: Set<string>; converted: Set<string> }
+  >();
+  /** The same three sets for the whole team — the leaderboard's footer row. */
+  const teamClients = { contacted: new Set<string>(), replied: new Set<string>(), converted: new Set<string>() };
+  const clientSetsFor = (userId: string) => {
+    let sets = clientSets.get(userId);
+    if (!sets) {
+      sets = { contacted: new Set(), replied: new Set(), converted: new Set() };
+      clientSets.set(userId, sets);
+    }
+    return sets;
+  };
 
   const bump = (
     userId: string,
@@ -205,6 +272,12 @@ export function computePerformance(
         emailsSent: { thisWeek: 0, lastWeek: 0 },
         replies: { thisWeek: 0, lastWeek: 0 },
         conversions: { thisWeek: 0, lastWeek: 0 },
+        contactedClients: 0,
+        repliedClients: 0,
+        respondedClients: 0,
+        convertedClients: 0,
+        replyRate: null,
+        winRate: null,
       };
       people.set(userId, person);
     }
@@ -213,29 +286,71 @@ export function computePerformance(
 
   for (const message of input.messages) {
     if (!message.sent_by_user_id) continue;
-    if (inWindow(message.sent_at, windows.thisWeek)) bump(message.sent_by_user_id, "emailsSent", "thisWeek");
-    else if (inWindow(message.sent_at, windows.lastWeek)) bump(message.sent_by_user_id, "emailsSent", "lastWeek");
+    if (inWindow(message.sent_at, current)) {
+      bump(message.sent_by_user_id, "emailsSent", "thisWeek");
+      clientSetsFor(message.sent_by_user_id).contacted.add(message.organisation_id);
+      teamClients.contacted.add(message.organisation_id);
+    } else if (inWindow(message.sent_at, prior)) {
+      bump(message.sent_by_user_id, "emailsSent", "lastWeek");
+    }
   }
   for (const reply of input.replies) {
     if (!reply.outreach_message_id) continue;
     const sender = senderByMessage.get(reply.outreach_message_id);
     if (!sender) continue;
-    if (inWindow(reply.received_at, windows.thisWeek)) bump(sender, "replies", "thisWeek");
-    else if (inWindow(reply.received_at, windows.lastWeek)) bump(sender, "replies", "lastWeek");
+    if (inWindow(reply.received_at, current)) {
+      bump(sender, "replies", "thisWeek");
+      clientSetsFor(sender).replied.add(reply.organisation_id);
+      teamClients.replied.add(reply.organisation_id);
+    } else if (inWindow(reply.received_at, prior)) {
+      bump(sender, "replies", "lastWeek");
+    }
   }
   for (const conversion of input.conversions) {
     if (!conversion.recorded_by_user_id) continue;
-    if (inWindow(conversion.created_at, windows.thisWeek)) bump(conversion.recorded_by_user_id, "conversions", "thisWeek");
-    else if (inWindow(conversion.created_at, windows.lastWeek)) bump(conversion.recorded_by_user_id, "conversions", "lastWeek");
+    if (inWindow(conversion.created_at, current)) {
+      bump(conversion.recorded_by_user_id, "conversions", "thisWeek");
+      clientSetsFor(conversion.recorded_by_user_id).converted.add(conversion.organisation_id);
+      teamClients.converted.add(conversion.organisation_id);
+    } else if (inWindow(conversion.created_at, prior)) {
+      bump(conversion.recorded_by_user_id, "conversions", "lastWeek");
+    }
+  }
+
+  const teamRates = outreachRates(teamClients);
+  team.contactedClients = teamRates.contactedClients;
+  team.repliedClients = teamRates.repliedClients;
+  team.respondedClients = teamRates.respondedClients;
+  team.convertedClients = teamRates.convertedClients;
+  team.replyRate = teamRates.replyRate;
+  team.winRate = teamRates.winRate;
+
+  for (const [userId, person] of people) {
+    const rates = outreachRates(clientSetsFor(userId));
+    person.contactedClients = rates.contactedClients;
+    person.repliedClients = rates.repliedClients;
+    person.respondedClients = rates.respondedClients;
+    person.convertedClients = rates.convertedClients;
+    person.replyRate = rates.replyRate;
+    person.winRate = rates.winRate;
   }
 
   const orgsScored = { thisWeek: 0, lastWeek: 0 };
   for (const score of input.scores) {
-    if (inWindow(score.scored_at, windows.thisWeek)) orgsScored.thisWeek += 1;
-    else if (inWindow(score.scored_at, windows.lastWeek)) orgsScored.lastWeek += 1;
+    if (inWindow(score.scored_at, current)) orgsScored.thisWeek += 1;
+    else if (inWindow(score.scored_at, prior)) orgsScored.lastWeek += 1;
   }
 
   return { team, people, orgsScored };
+}
+
+/** The fixed ISO week's numbers — see `rollUp` for what is in them. */
+export function computePerformance(
+  input: PerformanceInput,
+  now: Date = new Date(),
+): PerformanceSummary {
+  const windows = weekWindows(now);
+  return rollUp(input, windows.thisWeek, windows.lastWeek);
 }
 
 /**
@@ -251,61 +366,7 @@ export function performanceForPeriod(
   toISO: string,
 ): PerformanceSummary {
   const { thisPeriod, priorPeriod } = periodWindows(fromISO, toISO);
-
-  const senderByMessage = new Map<string, string>();
-  for (const message of input.messages) {
-    if (message.sent_by_user_id) senderByMessage.set(message.id, message.sent_by_user_id);
-  }
-  const nameByUser = new Map(input.users.map((user) => [user.id, user.full_name]));
-  const team = {
-    emailsSent: { thisWeek: 0, lastWeek: 0 },
-    replies: { thisWeek: 0, lastWeek: 0 },
-    conversions: { thisWeek: 0, lastWeek: 0 },
-  };
-  const people = new Map<string, PersonWeekly>();
-  const bump = (
-    userId: string,
-    key: "emailsSent" | "replies" | "conversions",
-    week: "thisWeek" | "lastWeek",
-  ) => {
-    team[key][week] += 1;
-    let person = people.get(userId);
-    if (!person) {
-      person = {
-        userId,
-        name: nameByUser.get(userId) ?? "Unknown",
-        emailsSent: { thisWeek: 0, lastWeek: 0 },
-        replies: { thisWeek: 0, lastWeek: 0 },
-        conversions: { thisWeek: 0, lastWeek: 0 },
-      };
-      people.set(userId, person);
-    }
-    person[key][week] += 1;
-  };
-
-  for (const message of input.messages) {
-    if (!message.sent_by_user_id) continue;
-    if (inWindow(message.sent_at, thisPeriod)) bump(message.sent_by_user_id, "emailsSent", "thisWeek");
-    else if (inWindow(message.sent_at, priorPeriod)) bump(message.sent_by_user_id, "emailsSent", "lastWeek");
-  }
-  for (const reply of input.replies) {
-    if (!reply.outreach_message_id) continue;
-    const sender = senderByMessage.get(reply.outreach_message_id);
-    if (!sender) continue;
-    if (inWindow(reply.received_at, thisPeriod)) bump(sender, "replies", "thisWeek");
-    else if (inWindow(reply.received_at, priorPeriod)) bump(sender, "replies", "lastWeek");
-  }
-  for (const conversion of input.conversions) {
-    if (!conversion.recorded_by_user_id) continue;
-    if (inWindow(conversion.created_at, thisPeriod)) bump(conversion.recorded_by_user_id, "conversions", "thisWeek");
-    else if (inWindow(conversion.created_at, priorPeriod)) bump(conversion.recorded_by_user_id, "conversions", "lastWeek");
-  }
-  const orgsScored = { thisWeek: 0, lastWeek: 0 };
-  for (const score of input.scores) {
-    if (inWindow(score.scored_at, thisPeriod)) orgsScored.thisWeek += 1;
-    else if (inWindow(score.scored_at, priorPeriod)) orgsScored.lastWeek += 1;
-  }
-  return { team, people, orgsScored };
+  return rollUp(input, thisPeriod, priorPeriod);
 }
 
 /**
@@ -450,6 +511,93 @@ export function pipelineTrendSeries(
 }
 
 // ---------------------------------------------------------------------------
+// Funnel trend — daily client counts for the dashboard's three-line chart
+// ---------------------------------------------------------------------------
+
+/** The funnel chart reads a full year so its custom range can reach back past 90 days. */
+export const FUNNEL_TREND_DAYS = 365;
+
+export type FunnelTrendSeries = {
+  /** Distinct organisations emailed per day. */
+  contacted: GrowthPoint[];
+  /** Distinct organisations replying per day — clients, not replies. */
+  replied: GrowthPoint[];
+  /** Distinct organisations converting per day. */
+  converted: GrowthPoint[];
+};
+
+/**
+ * The three lines of the dashboard's funnel chart: per day, how many distinct
+ * organisations were contacted, replied, and converted.
+ *
+ * Daily counts, not cumulative — a cumulative curve only ever climbs, which
+ * hides whether this month is better than last. An organisation emailed twice
+ * in one day counts once; emailed on two days counts on both. Same UTC-day
+ * bucketing as `pipelineTrendSeries`, and team-wide like the conversion-rate
+ * trend it replaces (the scope picker re-derives the tiles, not this chart).
+ *
+ * Takes the narrow rows the dashboard's funnel reads select (organisation and
+ * date only), so a year of events stays a small payload.
+ */
+export function funnelTrendSeries(
+  input: {
+    messages: readonly { organisation_id: string; sent_at: string | null }[];
+    replies: readonly { organisation_id: string; received_at: string }[];
+    conversions: readonly { organisation_id: string; created_at: string }[];
+  },
+  days = FUNNEL_TREND_DAYS,
+  now: Date = new Date(),
+): FunnelTrendSeries {
+  const empty = (): FunnelTrendSeries => ({ contacted: [], replied: [], converted: [] });
+  if (days < 1) return empty();
+
+  const end = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const start = end - (days - 1) * DAY_MS;
+
+  const contactedByDay = new Map<string, Set<string>>();
+  const repliedByDay = new Map<string, Set<string>>();
+  const convertedByDay = new Map<string, Set<string>>();
+
+  const record = (
+    map: Map<string, Set<string>>,
+    iso: string | null,
+    organisationId: string,
+  ) => {
+    if (!iso) return;
+    const t = Date.parse(iso);
+    if (Number.isNaN(t) || t < start || t > end) return;
+    const key = dayKey(new Date(t).toISOString());
+    let set = map.get(key);
+    if (!set) {
+      set = new Set();
+      map.set(key, set);
+    }
+    set.add(organisationId);
+  };
+
+  for (const message of input.messages) {
+    record(contactedByDay, message.sent_at, message.organisation_id);
+  }
+  for (const reply of input.replies) {
+    record(repliedByDay, reply.received_at, reply.organisation_id);
+  }
+  for (const conversion of input.conversions) {
+    record(convertedByDay, conversion.created_at, conversion.organisation_id);
+  }
+
+  const contacted: GrowthPoint[] = [];
+  const replied: GrowthPoint[] = [];
+  const converted: GrowthPoint[] = [];
+  for (let ms = start; ms <= end; ms += DAY_MS) {
+    const key = dayKey(new Date(ms).toISOString());
+    contacted.push({ value: contactedByDay.get(key)?.size ?? 0, date: key });
+    replied.push({ value: repliedByDay.get(key)?.size ?? 0, date: key });
+    converted.push({ value: convertedByDay.get(key)?.size ?? 0, date: key });
+  }
+  return { contacted, replied, converted };
+}
+
+// ---------------------------------------------------------------------------
 // Sector performance — SECTOR_PERFORMANCE's definition over the window
 // ---------------------------------------------------------------------------
 
@@ -458,8 +606,10 @@ export type SectorPerformanceRow = {
   orgsContacted: number;
   emailsSent: number;
   replies: number;
-  replyRate: number;
-  conversionRate: number;
+  /** Replied clients ÷ contacted clients; null when nobody was contacted. */
+  replyRate: number | null;
+  /** Converted clients ÷ responded clients (replied ∪ converted). */
+  winRate: number | null;
   avgPriorityScore: number | null;
 };
 
@@ -467,10 +617,13 @@ const UNKNOWN_SECTOR = "Unknown sector";
 
 /**
  * SECTOR_PERFORMANCE (tab 09) computed per sector over the trailing window:
- * distinct organisations emailed, replies received, reply rate (replies ÷
- * emails sent), conversion rate (distinct converted orgs ÷ distinct contacted
- * orgs), and the mean current priority score across those orgs — the last one
- * is the "does SCOUT predict outcomes" check.
+ * distinct organisations emailed, replies received, the two shared rates
+ * (`lib/outreach-rates.ts`) and the mean current priority score across those
+ * orgs — the last one is the "does SCOUT predict outcomes" check.
+ *
+ * Rates are per client, not per email: this row used to divide replied clients
+ * by emails sent (four follow-ups to one silent charity read as activity) while
+ * every other screen divided by clients.
  *
  * Supports optional `filterUserId` to filter by individual CAM or whole team.
  * `sectorByOrg` comes from the organisations rows the dashboard already loads.
@@ -547,20 +700,27 @@ export function sectorPerformance(
 
   const rows: SectorPerformanceRow[] = [];
   for (const [sector, acc] of bySector) {
+    const rates = outreachRates({
+      contacted: acc.orgs,
+      replied: acc.repliedOrgs,
+      converted: acc.convertedOrgs,
+    });
     rows.push({
       sector,
-      orgsContacted: acc.orgs.size,
+      orgsContacted: rates.contactedClients,
       emailsSent: acc.emails,
-      replies: acc.repliedOrgs.size,
-      replyRate: acc.emails > 0 ? acc.repliedOrgs.size / acc.emails : 0,
-      conversionRate: acc.orgs.size > 0 ? acc.convertedOrgs.size / acc.orgs.size : 0,
+      replies: rates.repliedClients,
+      replyRate: rates.replyRate,
+      winRate: rates.winRate,
       avgPriorityScore: acc.scoreCount > 0 ? acc.scoreSum / acc.scoreCount : null,
     });
   }
-  // Where outreach actually works, first; ties break by volume.
+  // Where outreach actually works, first; ties break by volume. A sector with
+  // no replies yet has no win rate at all — sorted last, never as 0%, which
+  // would rank it with a sector that tried and won nothing.
   rows.sort(
     (a, b) =>
-      b.conversionRate - a.conversionRate ||
+      (b.winRate ?? -1) - (a.winRate ?? -1) ||
       b.orgsContacted - a.orgsContacted ||
       a.sector.localeCompare(b.sector),
   );

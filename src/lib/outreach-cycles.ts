@@ -147,8 +147,15 @@ export function findCycleByName(
 /**
  * The existing cycle a candidate would collide with, if any — skipping
  * `ignoreId` so saving a cycle's own dates back is not a collision with
- * itself. The app refuses the save in plain words; the database carries no
- * exclusion constraint, so this check is the whole enforcement.
+ * itself.
+ *
+ * This is the *early* half of the rule, not the whole of it: it runs before the
+ * write (and in the settings form, before the save is even pressed), so a clash
+ * can be named in plain words — which cycle, which days — rather than arriving
+ * as a refusal the reader has to decode. The enforcement is the database's
+ * (`20261005140000_outreach_cycles_reject_overlap.sql`): a trigger takes an
+ * advisory lock and re-checks inside the writing transaction, because this
+ * function reads a list that a second admin's save can change a moment later.
  */
 export function findCycleOverlap(
   cycles: readonly OutreachCycle[],

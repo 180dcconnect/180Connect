@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { aiSpendChange, formatUsd, AI_GENERATION_ACTIVITIES, AI_GENERATION_ACTIVITY_LABELS, type AiSpendSummary } from "@/lib/dashboard/ai-spend";
-import { AI_ACTIVITY_COLOURS, AiSpendDayGauge } from "@/components/dashboard/ai-spend-day-gauge";
+import { aiSpendChange, formatUsd, type AiSpendSummary } from "@/lib/dashboard/ai-spend";
+import { AiSpendDailyChart } from "@/components/dashboard/ai-spend-daily-chart";
 
 /**
  * F213 — month-to-date AI spend, admin only.
@@ -19,84 +19,57 @@ export function AiSpendCard({ summary }: { summary: AiSpendSummary }) {
   const rising = change !== null && change > 0;
 
   return (
-    <div className="h-full flex flex-col overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm dark:border-white/[0.08] dark:bg-card">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 pb-3 pt-5">
-        <h3 className="text-[16px] font-semibold tracking-tight text-foreground">
-          AI spend
-        </h3>
-        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-          Month to date
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-end gap-x-4 gap-y-2 px-5 pb-4">
-        <span className="text-[2.5rem] font-black leading-none tracking-[-0.03em] tabular-nums text-foreground">
-          {formatUsd(summary.costUsd)}
-        </span>
-        {change !== null && (
-          <span
-            className={`pb-1 text-[13px] font-bold tabular-nums ${
-              rising ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"
-            }`}
-          >
-            {rising ? "+" : "−"}
-            {Math.abs(change).toFixed(0)}%
-            <span className="ml-1.5 font-normal text-foreground/45">vs prior period</span>
-          </span>
-        )}
-      </div>
-
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-black/[0.06] px-5 py-4 text-[13px]">
+    <section className="flex h-full flex-col rounded-panel border border-rule bg-white">
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-rule-soft px-5 py-5 sm:px-6">
         <div>
-          <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-            Generations
-          </dt>
-          <dd className="mt-1 font-bold tabular-nums text-foreground">
+          <h3 className="font-body text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink">AI spend</h3>
+          <p className="mt-1 font-body text-[13px] leading-[1.55] text-dim">This month&apos;s priced AI use</p>
+        </div>
+        <div className="text-right">
+          <p className="font-body text-[clamp(2rem,4vw,2.75rem)] leading-none font-semibold tracking-[-0.03em] tabular-nums text-ink">
+          {formatUsd(summary.costUsd)}
+          </p>
+          {change !== null && (
+            <p
+              className={`mt-1.5 font-body text-[12.5px] font-semibold tabular-nums ${
+              rising ? "text-stop" : "text-go"
+            }`}
+            >
+              {rising ? "+" : "−"}{Math.abs(change).toFixed(0)}% <span className="font-normal text-dim">vs prior period</span>
+            </p>
+          )}
+        </div>
+      </div>
+
+      <dl className="grid grid-cols-2 gap-x-4 border-b border-rule-soft px-5 py-4 sm:px-6">
+        <div>
+          <dt className="font-body text-[12.5px] text-dim">Generations</dt>
+          <dd className="mt-1 font-body text-[20px] leading-none font-semibold tabular-nums text-ink">
             {summary.generations.toLocaleString()}
           </dd>
         </div>
         <div>
-          <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-            Tokens
-          </dt>
-          <dd className="mt-1 font-bold tabular-nums text-foreground">
+          <dt className="font-body text-[12.5px] text-dim">Tokens</dt>
+          <dd className="mt-1 font-body text-[20px] leading-none font-semibold tabular-nums text-ink">
             {summary.totalTokens.toLocaleString()}
           </dd>
         </div>
         {summary.models.length > 0 && (
           <div className="col-span-2">
-            <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-              Models
-            </dt>
-            <dd className="mt-1 truncate font-medium text-foreground/70">
+            <dt className="font-body text-[12.5px] text-dim">Models</dt>
+            <dd className="mt-1 truncate font-body text-[13px] font-medium text-ink">
               {summary.models.join(", ")}
             </dd>
           </div>
         )}
       </dl>
 
-      {summary.spendByDay.length > 0 && (
-        <div className="border-t border-black/[0.06] px-5 py-4">
-          <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">Spend by day</p>
-          <div className="space-y-2.5">
-            {summary.spendByDay.map((bucket) => (
-              <div key={bucket.key} className="flex items-center gap-3">
-                <span className="w-12 shrink-0 text-[11px] text-foreground/45">{bucket.label}</span>
-                <div className="min-w-0 flex-1">
-                  <AiSpendDayGauge bucket={bucket} />
-                </div>
-                <span className="w-14 shrink-0 text-right text-[11px] font-semibold tabular-nums text-foreground/60">{formatUsd(bucket.totalCostUsd)}</span>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-foreground/45">
-            {AI_GENERATION_ACTIVITIES.map((activity) => <span key={activity}><i className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: AI_ACTIVITY_COLOURS[activity] }} />{AI_GENERATION_ACTIVITY_LABELS[activity]}</span>)}
-          </div>
-        </div>
-      )}
+      <div className="px-5 py-5 sm:px-6">
+        <AiSpendDailyChart summary={summary} />
+      </div>
 
       {summary.unpriced > 0 && (
-        <p className="border-t border-black/[0.06] bg-black/[0.02] px-5 py-3 text-[12px] leading-[1.6] text-foreground/55">
+        <p className="mx-5 mb-5 rounded-inset bg-paper px-3 py-2.5 font-body text-[12.5px] leading-[1.55] text-dim sm:mx-6">
           {summary.unpriced.toLocaleString()} generation
           {summary.unpriced === 1 ? "" : "s"} carried no cost — the provider reported no
           usage, or no pricing row covered the model. The figure above is a floor.
@@ -105,11 +78,11 @@ export function AiSpendCard({ summary }: { summary: AiSpendSummary }) {
 
       <Link
         href="/admin/ai-generations"
-        className="mt-auto border-t border-black/[0.06] px-5 py-3 text-[12px] font-bold text-foreground/50 transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand"
+        className="mt-auto border-t border-rule-soft px-5 py-3.5 font-body text-[13px] font-semibold text-lead transition-colors hover:text-lead-mid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-lead sm:px-6"
       >
         Every generation and its cost →
       </Link>
-    </div>
+    </section>
   );
 }
 

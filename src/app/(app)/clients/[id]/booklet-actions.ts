@@ -83,12 +83,12 @@ type LatestBookletRow = {
  * `booklet_generations` audit log is untouched: it records what Gemini
  * produced, and an edit changes what is displayed, never what was generated.
  *
- * `getCurrentActor`, not `getViewingActor`: the generate route deliberately
- * lets viewers through (a generation is a read-only research asset), but an
- * edit writes the client record — and a write gated any other way is one a
- * viewer can attempt with no explanation. The panel only renders the control
- * for `client:contact` holders; this gate is the refusal for anyone who
- * reaches it anyway.
+ * `getCurrentActor`, not `getViewingActor`: an edit writes the client record,
+ * and a write gated any other way is one a viewer can attempt with no
+ * explanation. The generate route asks the same permission, for the same
+ * reason — a run stores a new version and spends the AI allowance. The panel
+ * renders neither control for a viewer; these gates are the refusal for anyone
+ * who reaches them anyway.
  *
  * The write goes through the caller's own RLS session (like the delete above,
  * unlike the generate route's service-role save): the INSERT policy's

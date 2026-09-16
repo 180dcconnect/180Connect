@@ -48,49 +48,53 @@ export function SendingCapacityCard({
         The whole branch shares one daily limit. It resets at midnight UK time.
       </p>
 
-      <p className="mt-5 flex flex-wrap items-baseline gap-x-2">
-        <span className="font-body text-[clamp(1.75rem,4vw,2.5rem)] leading-none font-semibold tracking-[-0.03em] tabular-nums text-ink">
-          {remaining.toLocaleString()}
-        </span>
-        <span className="font-body text-[13px] leading-[1.55] text-dim">
-          {remaining === 1 ? "email" : "emails"} left to send today
-        </span>
-      </p>
-
-      <div className="mt-4">
-        <HorizontalStickGauge
-          checked={Math.min(sentToday, limit)}
-          total={Math.max(limit, 1)}
-          activeColor={tone}
-          checkedLabel="Sent today"
-          remainingLabel="Still available"
-          ariaLabel={`${sentToday} of ${limit} outreach emails sent today`}
-          valueFormatter={(value) => value.toLocaleString()}
-        />
-      </div>
-
-      <p className="mt-2 font-body text-[12.5px] leading-[1.55] text-dim">
-        {sentToday.toLocaleString()} of {limit.toLocaleString()} sent
-        {scheduledToday > 0
-          ? ` · ${scheduledToday.toLocaleString()} more scheduled before midnight`
-          : ""}
-      </p>
-
-      {remaining === 0 && (
-        <p className="mt-2 font-body text-[12.5px] leading-[1.55] font-semibold text-stop">
-          The limit is reached. Emails can be sent again after midnight
-          {canChangeLimit ? ", or raise the limit now." : "."}
+      <div className="items-center mt-8">
+        <p className="mt-5 flex flex-wrap items-baseline gap-x-2">
+          <span className="font-body text-[clamp(1.75rem,4vw,2.5rem)] leading-none font-semibold tracking-[-0.03em] tabular-nums text-ink">
+            {remaining.toLocaleString()}
+          </span>
+          <span className="font-body text-[13px] leading-[1.55] text-dim">
+            {remaining === 1 ? "email" : "emails"} left to send today
+          </span>
         </p>
-      )}
 
-      {canChangeLimit && (
-        <Link
-          href="/settings/sending-limits"
-          className="mt-auto pt-3 font-body text-[13px] font-semibold text-lead transition-colors hover:text-lead-mid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
-        >
-          Change the daily limit →
-        </Link>
-      )}
+        <div className="mt-4">
+          <HorizontalStickGauge
+            checked={Math.min(sentToday, limit)}
+            total={Math.max(limit, 1)}
+            activeColor={tone}
+            checkedLabel="Sent today"
+            remainingLabel="Still available"
+            ariaLabel={`${sentToday} of ${limit} outreach emails sent today`}
+            valueFormatter={(value) => value.toLocaleString()}
+          />
+        </div>
+
+        <p className="mt-2 font-body text-[12.5px] leading-[1.55] text-dim">
+          {sentToday.toLocaleString()} of {limit.toLocaleString()} sent
+          {scheduledToday > 0
+            ? ` · ${scheduledToday.toLocaleString()} more scheduled before midnight`
+            : ""}
+        </p>
+
+        
+      </div>
+      {remaining === 0 && (
+          <p className="mt-2 font-body text-[12.5px] leading-[1.55] font-semibold text-stop">
+            The limit is reached. Emails can be sent again after midnight
+            {canChangeLimit ? ", or raise the limit now." : "."}
+          </p>
+        )}
+
+        {canChangeLimit && (
+          <Link
+            href="/settings/sending-limits"
+            className="mt-auto pt-3 font-body text-[13px]  font-semibold text-lead transition-colors hover:text-lead-mid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
+          >
+            Change the daily limit →
+          </Link>
+        )}
+      
     </section>
   );
 }

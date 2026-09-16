@@ -14,12 +14,36 @@ import { createClient } from "@/lib/supabase/server";
 
 const ROUTE = "/settings/cycles";
 
+/**
+ * Said where the reader is, not where Postgres was: the dates were free when
+ * this screen read them, and somebody else's save landed first.
+ */
+const OVERLAP_RACE_MESSAGE =
+  "Another cycle was saved at the same moment and covers those dates. Refresh the page, then pick dates outside it.";
+
 export type CycleActionState = { ok: true; message: string } | { ok: false; message: string };
 
 /** A second admin saving the same name at the same moment hits the unique index. */
 function isUniqueViolation(error: unknown): boolean {
   return (
     !!error && typeof error === "object" && "code" in error && error.code === "23505"
+  );
+}
+
+/**
+ * The database's own non-overlap check refused the write
+ * (`20261005140000_outreach_cycles_reject_overlap.sql`, errcode 23P01).
+ *
+ * Reachable when two admins save at once: both read the cycle list in
+ * `readCycles` before either wrote, so both passed the check below, and the
+ * trigger — which runs under an advisory lock, in the same transaction as the
+ * write — was the first of the two to see the other one. Rare, and the honest
+ * answer is to say so rather than "The cycle could not be saved": the dates were
+ * free when this screen looked.
+ */
+function isOverlapViolation(error: unknown): boolean {
+  return (
+    !!error && typeof error === "object" && "code" in error && error.code === "23P01"
   );
 }
 
@@ -60,6 +84,13 @@ function revalidateCycles() {
  * run on the caller's RLS session (the booklet delete's pattern), so the
  * admin-only INSERT/UPDATE/DELETE policies decide what actually lands.
  *
+ * The non-overlap rule is checked twice on purpose. Before the write, here, in
+ * plain words — a clash names the cycle it clashes with and the days it covers,
+ * so the fix is obvious and no database error text reaches a person. And in the
+ * database, by the OUTREACH_CYCLES trigger under an advisory lock
+ * (`20261005140000`), which is the only check two concurrent saves cannot both
+ * pass.
+ *
  * No audit_log row: a cycle is configuration, not ownership, status, role or
  * approval state — and `created_by_user_id` already records who defined each
  * one. Deleting a cycle removes the label only; no outreach row references a
@@ -96,6 +127,9 @@ export async function createCycle(input: unknown): Promise<CycleActionState> {
   } catch (error) {
     if (isUniqueViolation(error)) {
       return { ok: false, message: "A cycle with that name already exists." };
+    }
+    if (isOverlapViolation(error)) {
+      return { ok: false, message: OVERLAP_RACE_MESSAGE };
     }
     await reportError(error, { operation: "settings.cycles.create" });
     return { ok: false, message: "The cycle could not be saved. Try again." };
@@ -146,6 +180,9 @@ export async function updateCycle(input: unknown): Promise<CycleActionState> {
   } catch (error) {
     if (isUniqueViolation(error)) {
       return { ok: false, message: "A cycle with that name already exists." };
+    }
+    if (isOverlapViolation(error)) {
+      return { ok: false, message: OVERLAP_RACE_MESSAGE };
     }
     await reportError(error, { operation: "settings.cycles.update" });
     return { ok: false, message: "The cycle could not be saved. Try again." };

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { actorFailureMessage, getCurrentActor, getViewingActor } from "@/lib/auth/actor";
+import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { isUuid } from "@/lib/validation";
@@ -58,9 +58,8 @@ type WebsiteContextResult =
  * (append-only, versioned — see 20260828000000_version_client_booklets.sql)
  * alongside the F082 audit write, using the caller's own RLS-scoped session
  * rather than a service-role bypass: the client_booklets INSERT policy requires
- * app.can_contact_organisation(), the exact predicate this route's own
- * client:contact gate already enforces, so there is nothing a passing request
- * here could do at the DB layer that authorization above didn't already allow.
+ * app.can_contact_organisation(), the per-organisation half of the write gate,
+ * and the service role would write a row that policy exists to refuse.
  * A save failure is reported but does not fail the response — the CAM still gets
  * the booklet they asked for this once, just as "generated" rather than
  * "generated and saved" (see the `saved` field below). A regenerate (F086) is
@@ -74,7 +73,17 @@ type WebsiteContextResult =
 
  *
  * client:contact, not client:view — this calls a paid external API on every click,
- * same reasoning as gating the Outreach section on the client detail page.
+ * same reasoning as gating the Outreach section on the client detail page. It is
+ * a **write gate** (`getCurrentActor`), not a viewing one, and that is the point:
+ * a run stores a new CLIENT_BOOKLETS version and spends the AI allowance, which
+ * is why the table's INSERT policy requires can_contact_organisation and why a
+ * viewer — who changes nothing (Q-06, revised 15 Sep 2026) — is refused here.
+ * Leadership keeps the whole reading: the panel shows them the saved booklet,
+ * its sources and its history, and draws no Generate control at all.
+ *
+ * A viewer reaching this route anyway is refused with reason `view_only`, which
+ * is also what raises the "you have view-only access" notice in their browser
+ * (`src/lib/auth/view-only.ts`).
  *
  * generate-booklet.ts's own upstream timeout is 90s (PRD hard timeout for Client
  * Booklet generation). maxDuration must stay comfortably above that or the hosting
@@ -153,8 +162,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  // Viewers may generate booklets (read-only client research asset).
-  const authorization = await getViewingActor("client:contact", { route: "/clients/[id]" });
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
   if (!authorization.ok) return denied(authorization.reason);
 
   const { id: organisationId } = await params;
@@ -302,6 +310,11 @@ export async function POST(
     }
   }
 
+  // The service role is used for exactly one thing on this route: the AI
+  // allowance counter (`ai_generation_rate_limit` is not a table client code
+  // writes to directly). Every row this route stores about a client — the
+  // booklet version, the generation record — goes through the caller's own
+  // RLS-scoped session below, so the policies decide what may land.
   const admin = createAdminClient();
   if (!admin) {
     return NextResponse.json(
@@ -385,12 +398,18 @@ export async function POST(
   // F046-normalised form, not the raw pasted string — it already passed through
   // validateWebsiteFormat inside fetchImportPage, so this is a formatting pass
   // over known-valid input.
+  //
+  // On the caller's session, never the service role: `client_booklets`' INSERT
+  // policy requires app.can_contact_organisation(), and a CAM who may read this
+  // client but not contact it gets the booklet with `saved: false` — a refusal
+  // the CAM can see, rather than a row written past the policy that exists to
+  // stop it.
   const generatedAt = new Date().toISOString();
   const savedUrl =
     websiteContextResult.status === "used" && websiteUrl
       ? validateWebsiteFormat(websiteUrl).url
       : null;
-  const { data: savedRow, error: saveError } = await (admin ?? supabase)
+  const { data: savedRow, error: saveError } = await supabase
     .from("client_booklets")
     .insert({
       organisation_id: organisationId,

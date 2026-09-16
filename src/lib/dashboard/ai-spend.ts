@@ -96,6 +96,8 @@ export type AiSpendSummary = {
   models: string[];
   /** ISO day the current period starts (the 1st of the month). */
   periodFrom: string;
+  /** ISO day the current period ends (today, at the time the dashboard was read). */
+  periodTo: string;
   spendByDay: AiSpendBucket[];
   /** Cost-bearing and unpriced generations grouped by activity. */
   activityTotals: Record<AiGenerationActivity, { costUsd: number; generations: number; unpriced: number; totalTokens: number }>;
@@ -198,6 +200,7 @@ export function aiSpendSummary(
     totalTokens,
     models: Array.from(models).sort((a, b) => a.localeCompare(b)),
     periodFrom: new Date(monthStartMs).toISOString().slice(0, 10),
+    periodTo: new Date(nowMs).toISOString().slice(0, 10),
     spendByDay: Array.from(spendByDay.values()).sort((a, b) => a.key.localeCompare(b.key)),
     activityTotals,
   };

@@ -1,55 +1,21 @@
--- A charity that is also a company carries two registration numbers, and the
--- register publishes both. The import path files both (write-organisations.ts
--- writes uk_charity + uk_company for a dual-registered charity), but a
--- *hand-entered* charity was filed with one number and nothing else — so the
--- record could not answer "is this also a company", the grant lookup could only
--- ask 360Giving about the charity number, and a Companies House number the
--- register already knew about was simply absent.
+-- Rollback of 20261005120000_manual_entry_company_number.
 --
--- 20261005100000 taught the approval which register a number came from. This one
--- gives it the second number: read from the register file by the server action
--- (src/lib/charity-register/company-identifier.ts, the same read the add-a-client
--- form's check uses), stored on the entry, and filed as a second identifier at
--- approval — which may happen days later, from the review queue, in a request
--- that has no form to read.
+-- Reverses all three parts of that migration:
+--   1. drops the second signature of save_manual_entry (22 arguments) and puts
+--      the 21-argument one back, verbatim as 20261003130000 created it;
+--   2. puts approve_manual_entry back to the version 20261005100000 created —
+--      one identifier, no second number;
+--   3. drops manual_entry_records.company_number (its COMMENT goes with it).
 --
--- Reversibility: paired rollback in
---   ../rollback/20261005120000_manual_entry_company_number.down.sql. It restores
---   both save_manual_entry (the 21-argument signature) and approve_manual_entry,
---   and drops the column; identifiers already filed as uk_company stay on their
---   clients, which that file's header explains.
+-- What reverting costs: any uk_company identifier already filed by an approval
+-- stays on the client it was filed for. Removing it would be removing a correct
+-- registration number from a client record, and nothing marks which rows came
+-- from this migration and which the register import wrote. Only roll back if the
+-- app code goes back with it — the 21-argument function is what that code calls.
 
--- ---------------------------------------------------------------------------
--- 1. The second number, on the entry
--- ---------------------------------------------------------------------------
-
--- The CHECK is the shape rule the rest of the app already uses for a company
--- number — src/lib/registration-number.ts upper-cases it and zero-pads it to
--- eight digits, which is exactly this pattern. A malformed value therefore
--- cannot be stored at all, rather than being caught (or silently ignored) at
--- approval, and no reader has to defend against one.
-alter table public.manual_entry_records
-  add column company_number text
-    check (company_number is null or company_number ~ '^([0-9]{8}|[A-Z]{2}[0-9]{6})$');
-
-comment on column public.manual_entry_records.company_number is
-  'The Companies House number the charity register publishes for this charity, '
-  'when registry_number is an England and Wales charity number and the register '
-  'says the charity is also a company. Written by save_manual_entry from a '
-  'server-side register read; never typed. Filed as a uk_company identifier on '
-  'approval (20261005120000), alongside the uk_charity one.';
-
--- ---------------------------------------------------------------------------
--- 2. save_manual_entry: keeps the second number with the entry
--- ---------------------------------------------------------------------------
-
--- New signature, not a replace, for the reason 20261003130000 states: an extra
--- parameter is a different function to Postgres, and leaving the previous one
--- beside it would make the action's call ambiguous — with the worse failure mode
--- that a call omitting this parameter would quietly go to the old function and
--- never write it.
+-- 1. The second number's writer goes back to the 21-argument signature.
 drop function public.save_manual_entry(
-  uuid,text,text,public.organisation_type,text,text,text,text,text,text,text,text,text,boolean,text,public.geographic_reach,numeric,date,integer,integer,boolean
+  uuid,text,text,public.organisation_type,text,text,text,text,text,text,text,text,text,boolean,text,public.geographic_reach,numeric,date,integer,integer,boolean,text
 );
 
 create function public.save_manual_entry(
@@ -73,8 +39,7 @@ create function public.save_manual_entry(
   p_accounts_year_end date default null,
   p_staff_count integer default null,
   p_volunteer_count integer default null,
-  p_contact_email_role_confirmed boolean default false,
-  p_company_number text default null
+  p_contact_email_role_confirmed boolean default false
 ) returns uuid
 language plpgsql
 security definer
@@ -169,7 +134,6 @@ begin
       contact_email_role_confirmed_at = v_confirmed_at,
       registry_name = nullif(trim(p_registry_name), ''),
       registry_number = nullif(trim(p_registry_number), ''),
-      company_number = nullif(upper(trim(p_company_number)), ''),
       reason_for_manual_entry = nullif(trim(p_reason), ''),
       sector = nullif(trim(p_sector), ''),
       geographic_reach = p_geographic_reach,
@@ -185,7 +149,7 @@ begin
       submitted_by_user_id, legal_name, mission_statement, organisation_type,
       address_line_1, city, postcode, country_code, website, contact_email,
       contact_email_role_confirmed_for, contact_email_role_confirmed_by, contact_email_role_confirmed_at,
-      registry_name, registry_number, company_number, reason_for_manual_entry,
+      registry_name, registry_number, reason_for_manual_entry,
       sector, geographic_reach, latest_income, accounts_year_end, staff_count, volunteer_count,
       review_status
     ) values (
@@ -195,7 +159,6 @@ begin
       nullif(trim(p_website), ''), v_email,
       v_confirmed_for, v_confirmed_by, v_confirmed_at,
       nullif(trim(p_registry_name), ''), nullif(trim(p_registry_number), ''),
-      nullif(upper(trim(p_company_number)), ''),
       nullif(trim(p_reason), ''),
       nullif(trim(p_sector), ''), p_geographic_reach, p_latest_income, p_accounts_year_end,
       p_staff_count, p_volunteer_count,
@@ -233,18 +196,13 @@ end;
 $$;
 
 revoke execute on function public.save_manual_entry(
-  uuid,text,text,public.organisation_type,text,text,text,text,text,text,text,text,text,boolean,text,public.geographic_reach,numeric,date,integer,integer,boolean,text
+  uuid,text,text,public.organisation_type,text,text,text,text,text,text,text,text,text,boolean,text,public.geographic_reach,numeric,date,integer,integer,boolean
 ) from public, anon;
 grant execute on function public.save_manual_entry(
-  uuid,text,text,public.organisation_type,text,text,text,text,text,text,text,text,text,boolean,text,public.geographic_reach,numeric,date,integer,integer,boolean,text
+  uuid,text,text,public.organisation_type,text,text,text,text,text,text,text,text,text,boolean,text,public.geographic_reach,numeric,date,integer,integer,boolean
 ) to authenticated;
 
--- ---------------------------------------------------------------------------
--- 3. approve_manual_entry: files both numbers
--- ---------------------------------------------------------------------------
-
--- Same signature as 20261005100000 (the second number travels on the entry, not
--- through the call), so this is a true replacement of that one function.
+-- 2. The approval files one identifier again.
 create or replace function public.approve_manual_entry(
   p_entry_id                 uuid,
   p_duplicate_decision       text,
@@ -439,25 +397,6 @@ begin
         trim(v_entry.registry_number),
         nullif(trim(v_entry.registry_name), ''), v_entry.country_code, true, false
       );
-
-      -- 20261005120000: the second number, for a charity the register says is
-      -- also a company. Written only when it is genuinely a different number on a
-      -- different register: never when this entry was a Companies House one (that
-      -- number is already uk_company above), and never when it repeats the number
-      -- just filed. `is_primary` stays on the number the submitter identified the
-      -- organisation by — the second one is corroboration, not identity, which is
-      -- also why it is not given to the dedup matcher as the primary key.
-      if v_entry.company_number is not null
-         and app.identifier_type_for_registry(v_entry.registry_name) = 'uk_charity'
-         and v_entry.company_number <> trim(v_entry.registry_number) then
-        insert into public.organisation_identifiers (
-          organisation_id, identifier_type, identifier_value, registry_name,
-          registry_country, is_primary, verified
-        ) values (
-          v_organisation_id, 'uk_company', v_entry.company_number,
-          'Companies House', v_entry.country_code, false, false
-        );
-      end if;
     end if;
 
     -- F044 (20260923114000): a hand-created record's fields are Manual Input,
@@ -550,3 +489,7 @@ revoke execute on function public.approve_manual_entry(uuid,text,boolean,uuid,te
   from public, anon;
 grant execute on function public.approve_manual_entry(uuid,text,boolean,uuid,text)
   to authenticated;
+
+-- 3. The column the second number lived on.
+alter table public.manual_entry_records
+  drop column if exists company_number;

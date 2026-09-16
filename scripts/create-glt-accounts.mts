@@ -9,8 +9,15 @@
  *
  *   GLT_PASSWORD='...' npm run seed:glt-accounts
  *
- * Re-running is safe: an existing account has its password reset and its role
- * re-asserted rather than being duplicated.
+ * Re-running is safe: an existing account has its password reset and its name
+ * refreshed rather than being duplicated.
+ *
+ * A role or a suspension somebody has since changed is **left alone** and
+ * reported on the console. This script cannot tell a leftover from its own last
+ * run from a deliberate promotion or a suspended login, and the audited paths for
+ * both are `set_user_role` and `set_user_active` — which record who made the
+ * change and hold the last-admin guard. Writing `role`/`is_active` here would
+ * silently reverse a person's decision with no audit row at all.
  */
 import { createClient } from "@supabase/supabase-js";
 import pg from "pg";
@@ -91,20 +98,35 @@ async function main(): Promise<void> {
       userId = createData.user.id;
     }
 
+    // The role is written on CREATE (this is a fixture: three shared leadership
+    // logins, all viewers). On an existing row only the identity is refreshed —
+    // see the note at the head of this file for why role and is_active are
+    // deliberately absent from the ON CONFLICT clause.
     await pgClient.query(
       `
       insert into public.users (id, email, full_name, role, is_active, is_seed)
       values ($1, $2, $3, $4, true, false)
       on conflict (id) do update
       set email = $2,
-          full_name = $3,
-          role = $4,
-          is_active = true;
+          full_name = $3;
       `,
       [userId, account.email, account.fullName, account.role],
     );
 
-    console.log(`Verified public.users row for ${account.email} as role=${account.role}`);
+    const { rows } = await pgClient.query<{ role: string; is_active: boolean }>(
+      `select role, is_active from public.users where id = $1`,
+      [userId],
+    );
+    const row = rows[0];
+
+    if (row.role !== account.role || !row.is_active) {
+      console.warn(
+        `  ! ${account.email} is ${row.role}${row.is_active ? "" : " and suspended"} — left as it is.\n` +
+          `    Change it in Admin → Team, which records who changed it and when.`,
+      );
+    } else {
+      console.log(`Verified public.users row for ${account.email} as role=${row.role}`);
+    }
   }
 
   const res = await pgClient.query(

@@ -18,6 +18,7 @@ import {
   MorphingDialogTrigger,
 } from "@/components/core/morphing-dialog";
 import { BrandSearchBar } from "@/components/brand/search-bar";
+import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import { validateBookletWebsiteUrl } from "./outreach-actions";
 import { deleteBookletVersion, saveBookletEdit } from "./booklet-actions";
 import { SectionCard } from "./section-card";
@@ -565,6 +566,7 @@ export function BookletPanel({
   organisationId,
   savedBooklet,
   priorVersions,
+  canGenerateBooklet = false,
   canDeleteBooklet = false,
   canEditBooklet = false,
 }: {
@@ -572,13 +574,25 @@ export function BookletPanel({
   savedBooklet: SavedBooklet | null;
   priorVersions: SavedBooklet[];
   /**
-   * Whether the viewer may delete the displayed version. Admin-only, matching
+   * Whether this reader may run a generation. CAMs and admins holding
+   * `client:contact` — the permission the route itself asks, because a run
+   * stores a new version and spends the AI allowance.
+   *
+   * A viewer is refused all three of these and gets the reading instead: the
+   * saved booklet, its sources and its history, with no Generate control and
+   * `VIEW_ONLY_CONTROL_NOTE` where it would have been. Before this, a viewer's
+   * Generate press spent the allowance and stored a version through the service
+   * role — a write the `client_booklets` INSERT policy exists to refuse.
+   */
+  canGenerateBooklet?: boolean;
+  /**
+   * Whether the reader may delete the displayed version. Admin-only, matching
    * the schema's delete policy — page.tsx passes actor.role === "admin", and
    * the action re-checks server-side regardless.
    */
   canDeleteBooklet?: boolean;
   /**
-   * Whether the viewer may correct the current version by hand. CAMs and
+   * Whether the reader may correct the current version by hand. CAMs and
    * admins holding client:contact — never viewers, who read the booklet and
    * its Edited badge but get no control. The action re-checks server-side
    * regardless, which is the refusal for anyone who reaches it anyway.
@@ -812,6 +826,10 @@ export function BookletPanel({
   // static rendering for every other visitor who didn't come from that link.
   useEffect(() => {
     if (autoTriggered.current) return;
+    // A viewer is refused by the route, so arriving with this param must not
+    // fire a request that can only come back 403 — they get the reading and the
+    // note below instead.
+    if (!canGenerateBooklet) return;
     if (!new URLSearchParams(window.location.search).has("booklet")) return;
     autoTriggered.current = true;
 
@@ -838,7 +856,7 @@ export function BookletPanel({
     <div ref={sectionRef}>
       <SectionCard
         action={
-          currentVersion && !busy ? (
+          currentVersion && !busy && (canGenerateBooklet || canEditBooklet || canDeleteBooklet) ? (
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               {canEditBooklet && (
                 <button
@@ -892,18 +910,20 @@ export function BookletPanel({
                   }}
                 />
               )}
-              <button
-                className="shrink-0 rounded-full border border-rule px-4 py-2 text-xs font-semibold text-lead transition-colors hover:bg-lead-wash disabled:opacity-50"
-                disabled={deleteArmed || editing}
-                onClick={() => {
-                  setEditing(false);
-                  setComposerOpen((open) => !open);
-                }}
-                type="button"
-                aria-expanded={composerOpen}
-              >
-                {composerOpen ? "Close" : "Regenerate"}
-              </button>
+              {canGenerateBooklet && (
+                <button
+                  className="shrink-0 rounded-full border border-rule px-4 py-2 text-xs font-semibold text-lead transition-colors hover:bg-lead-wash disabled:opacity-50"
+                  disabled={deleteArmed || editing}
+                  onClick={() => {
+                    setEditing(false);
+                    setComposerOpen((open) => !open);
+                  }}
+                  type="button"
+                  aria-expanded={composerOpen}
+                >
+                  {composerOpen ? "Close" : "Regenerate"}
+                </button>
+              )}
             </div>
           ) : undefined
         }
@@ -913,7 +933,16 @@ export function BookletPanel({
         title="Client booklet"
       >
 
-      {(!currentVersion || composerOpen) && (
+      {/* Where the Generate control would be. A viewer keeps everything else on
+          this card — the booklet text, its sources, its history — so the note
+          says why the one control is missing rather than leaving a gap. */}
+      {!canGenerateBooklet && (
+        <p className="mt-2 font-body text-[13px] leading-[1.6] text-dim">
+          {VIEW_ONLY_CONTROL_NOTE}
+        </p>
+      )}
+
+      {canGenerateBooklet && (!currentVersion || composerOpen) && (
         <BookletComposer
           busy={busy}
           websiteUrl={websiteUrl}

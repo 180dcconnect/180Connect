@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   classifyCompaniesHouseSourceConfidence,
+  companiesHouseSector,
   standardizeCompaniesHouseRecord,
 } from "./companies-house.ts";
 import type { RawCompaniesHouseRecord } from "./companies-house.ts";

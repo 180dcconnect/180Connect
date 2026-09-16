@@ -503,13 +503,20 @@ export default async function ClientOutreachPage({
             </Rise>
           )}
 
-          {/* F082 — Generate Client Booklet. Visible to CAMs, Admins, and Viewers.
+          {/* F082 — Generate Client Booklet. A generation stores a version and
+              spends the AI allowance, so it asks `client:contact` — the same
+              permission the route asks. A viewer reads the saved booklet, its
+              sources and its history and is shown no control (`canContact` is
+              false for them, and the panel renders the view-only note in its
+              place).
+
               The Rise carries z-index so the composer's search panel paints over the card
               beneath it — `relative z-20` is what orders them, not the
               entrance's filter, which `glass` removes. */}
           <Rise glass className="relative z-20">
             <BookletPanel
               organisationId={client.id}
+              canGenerateBooklet={canContact}
               canDeleteBooklet={isAdmin}
               canEditBooklet={!isViewer && canContact}
               savedBooklet={

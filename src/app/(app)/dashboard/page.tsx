@@ -1436,7 +1436,7 @@ export default async function DashboardPage({
               {/* Side-by-side row: Total Organisations curve + Customer Segmentation dial */}
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-12 items-stretch">
                 <div className="relative z-20 flex flex-col xl:col-span-8">
-                  <Rise glass className="h-full flex-1">
+                  <Rise glass className="relative z-20 h-full flex-1 focus-within:z-50">
                     <ProgressMetricCard
                       size="lg"
                       title="Total Organisations"
@@ -1577,7 +1577,7 @@ export default async function DashboardPage({
 
             {performance && (
               <Group className="space-y-4">
-                <Rise>
+                <Rise className="relative z-20 focus-within:z-50">
                   <PerformanceSection
                     summary={performance.summary}
                     cams={performance.cams}

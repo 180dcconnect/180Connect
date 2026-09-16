@@ -78,6 +78,7 @@ import {
 import { normalizeCompanyNumber } from "../ingestion/sources/companieshouse.ts";
 import {
   classifyCompaniesHouseSourceConfidence,
+  companiesHouseSector,
   standardizeCompaniesHouseRecord,
   type RawCompaniesHouseRecord,
 } from "./companies-house.ts";
@@ -1516,7 +1517,9 @@ export async function promotePendingCompaniesHouseRecords(
       continue;
     }
 
-    const result = await store.insertOrganisationAndLink(org, record.id);
+    const result = await store.insertOrganisationAndLink(org, record.id, {
+      sector: companiesHouseSector(raw.sic_codes),
+    });
     if ("error" in result) {
       await reportError(new Error(result.error), {
         operation: "standardize.companies_house.promote",
@@ -1846,8 +1849,14 @@ async function annotateCompanyOrReport(
 
   if (codes.length === 0) return;
 
+  const sector = companiesHouseSector(codes);
+
   try {
-    const result = await store.annotateOrganisation({ organisationId, sicCodes: codes });
+    const result = await store.annotateOrganisation({
+      organisationId,
+      sicCodes: codes,
+      ...(sector ? { sector } : {}),
+    });
     if ("error" in result) throw new Error(result.error);
   } catch (error) {
     await reportError(error instanceof Error ? error : new Error(String(error)), {

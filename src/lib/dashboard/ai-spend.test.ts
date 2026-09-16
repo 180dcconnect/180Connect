@@ -29,6 +29,7 @@ describe("aiSpendSummary", () => {
     assert.equal(summary.unpriced, 0);
     assert.deepEqual(summary.models, []);
     assert.equal(summary.periodFrom, "2026-09-01");
+    assert.equal(summary.periodTo, "2026-09-10");
   });
 
   it("sums month-to-date cost and tokens", () => {

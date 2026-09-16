@@ -1,35 +1,20 @@
--- ---------------------------------------------------------------------------
--- Field edits must be cast to the column's own type, not left as text.
--- ---------------------------------------------------------------------------
+-- Rollback of 20261004210000_cast_field_edits_to_column_type.
 --
--- Both dynamic apply-backs (20260923114000) bound the new value as a bare
--- parameter:
+-- Restores both functions to the bodies 20260923114000 wrote — the ones that
+-- bound the value as a bare `$1`, letting Postgres infer text.
 --
---     execute format('update public.organisations set %I = $1 where id = $2', ...)
---
--- `$1` is inferred as text, and Postgres will not assign text to an enum
--- column, so every edit to `geographic_reach` or `organisation_type` failed
--- with 42804 ("column ... is of type public.geographic_reach but expression is
--- of type text") — and because the RPC applies all-or-nothing, it took the rest
--- of the batch down with it. Text columns (sector, city, website …) were never
--- affected, which is why the bug only showed on the two enum fields.
---
--- The fix looks the column's type up in the catalog and casts to it. The
--- identifier still comes from the same fixed allowlist, the value is still a
--- parameter, and format_type() returns an already-quoted type name — so the
--- statement is no less guarded than before. The catalog lookup also replaces
--- the old information_schema existence check: a dropped column yields no row.
---
--- Membership in the enum is still checked by the caller (adminDirectEditsAction
--- and the panel's select); an out-of-set value now surfaces as 22P02 from the
--- cast rather than being silently accepted.
---
--- Reversibility: paired rollback in
---   ../rollback/20261004210000_cast_field_edits_to_column_type.down.sql,
---   which restores both bodies verbatim. Read its header first: reverting puts
---   the 42804 bug back, so it is the file to reach for only if this fix itself
---   is being withdrawn.
+-- Read this before running it. The migration being reverted is a bug fix, and
+-- this file puts the bug back:
+--   * every edit to an enum column (geographic_reach, organisation_type) fails
+--     with 42804 ("column ... is of type public.geographic_reach but expression
+--     is of type text");
+--   * because the RPCs apply all-or-nothing, one such edit takes the rest of the
+--     batch down with it;
+--   * a suggested edit on organisation_type can never be approved.
+-- Only roll back if the app code is going back with it, or if the fix itself is
+-- what is being withdrawn. Re-applying 20261004210000 is the way forward.
 
+-- 1. Admin direct field edits: back to the uncast dynamic apply-back.
 create or replace function public.apply_admin_field_edits(
   p_organisation_id uuid,
   p_changes         jsonb,   -- [{field_name, value}] — every element applied
@@ -45,7 +30,6 @@ declare
   v_change      jsonb;
   v_field       text;
   v_value       text;
-  v_type        text;
   v_valid       boolean;
   v_results     jsonb := '[]'::jsonb;
   v_applied     int  := 0;
@@ -85,8 +69,9 @@ begin
     v_field := v_change->>'field_name';
     v_value := btrim(v_change->>'value');
 
-    -- FIELD_SOURCES covers exactly the tracked set; anything outside it is
-    -- written with no field history rather than aborting the edit.
+    -- Provenance covers exactly the tracked fields. Other admin-writable
+    -- columns still get written; they just have no field history yet — the
+    -- honest state, not a fake row.
     v_valid := v_field in
       ('legal_name', 'website', 'contact_email', 'address_line_1', 'city',
        'postcode', 'organisation_type');
@@ -97,31 +82,33 @@ begin
       );
     end if;
 
-    -- Guarded dynamic apply-back: identifier from the allowlist above, value
-    -- parameterised, cast to the column's declared type (enum columns reject a
-    -- text parameter outright).
-    select pg_catalog.format_type(a.atttypid, a.atttypmod)
-      into v_type
-      from pg_catalog.pg_attribute a
-     where a.attrelid = 'public.organisations'::regclass
-       and a.attname  = v_field
-       and a.attnum   > 0
-       and not a.attisdropped;
-
-    if v_type is null then
+    -- Guarded dynamic apply-back, same three guards as decide_edit_suggestion's
+    -- (20260822160200): FK-shaped identifier comes from this fixed allowlist,
+    -- existence check, %-quoted identifier with a parameterised value.
+    -- 'organisation_type' is a Postgres enum column, which is why the update is
+    -- dynamic rather than a case list.
+    if not exists (
+      select 1
+        from information_schema.columns
+       where table_schema = 'public'
+         and table_name   = 'organisations'
+         and column_name  = v_field
+    ) then
       raise exception 'restricted field % no longer exists on the client record', v_field
         using errcode = '55000';
     end if;
 
     execute format(
-      'update public.organisations set %I = $1::%s where id = $2',
-      v_field, v_type
+      'update public.organisations set %I = $1 where id = $2',
+      v_field
     ) using v_value, p_organisation_id;
 
     v_applied := v_applied + 1;
     v_results := v_results || jsonb_build_object('field_name', v_field, 'ok', true);
   end loop;
 
+  -- One audit row per submission, not per field (audit-log-pattern §3: the
+  -- trail records real transitions; set_user_role set the no-noise convention).
   insert into public.audit_log (actor_user_id, action, target_table, target_id, detail)
   values (
     v_actor,
@@ -139,22 +126,20 @@ end;
 $$;
 
 comment on function public.apply_admin_field_edits(uuid, jsonb, text) is
-  'Admin direct field edits, attributed (20260923114000; cast fix 20261004210000): '
-  'applies each {field_name, value} change onto organisations — cast to the '
-  'column''s declared type, so enum columns such as geographic_reach and '
-  'organisation_type no longer fail with 42804 — records FIELD_SOURCES '
-  'provenance (source=''manual'', recorded_by=the admin) for tracked fields, and '
-  'writes one audit_log row (fields_direct_edited), all in the caller''s '
-  'transaction. SECURITY DEFINER; self-checks app.is_admin().';
+  'Admin direct field edits, attributed (20260923114000): applies each {field_name, '
+  'value} change onto organisations, records FIELD_SOURCES provenance (source=''manual'', '
+  'recorded_by=the admin) for tracked fields, and writes one audit_log row '
+  '(fields_direct_edited) — all in the caller''s transaction. SECURITY DEFINER; '
+  'self-checks app.is_admin(). Replaces adminDirectEditsAction''s direct UPDATE. '
+  'Value normalisation and enum checks stay in the action; the RPC accepts what '
+  'the action validated.';
 
 revoke execute on function public.apply_admin_field_edits(uuid, jsonb, text)
   from public, anon;
 grant execute on function public.apply_admin_field_edits(uuid, jsonb, text)
   to authenticated;
 
--- The approval path has the same dynamic apply-back and the same bug: an
--- approved suggestion on organisation_type could never be written. Body is
--- 20260923114000's, with the cast.
+-- 2. Approving a suggested edit: same, plus the stale-snapshot guard.
 create or replace function public.decide_edit_suggestion(
   p_suggestion_id uuid,
   p_approve       boolean,
@@ -169,7 +154,6 @@ declare
   v_actor       uuid := (select auth.uid());
   v_suggestion  public.edit_suggestions%rowtype;
   v_live_value  text;
-  v_type        text;
   v_reason      text := nullif(btrim(coalesce(p_reason, '')), '');
 begin
   if not app.is_active_user() then
@@ -197,6 +181,10 @@ begin
       using errcode = '55000';
   end if;
 
+  -- p_reason is optional by design (F079 AC2 "allows the admin to LEAVE a reason"):
+  -- blank strings are normalised to null so the column never carries whitespace
+  -- masquerading as a reason.
+
   if p_approve then
     -- Stale-snapshot guard: read what the column says NOW, inside the same
     -- transaction that will write it.
@@ -210,24 +198,31 @@ begin
         using errcode = '55000';
     end if;
 
-    select pg_catalog.format_type(a.atttypid, a.atttypmod)
-      into v_type
-      from pg_catalog.pg_attribute a
-     where a.attrelid = 'public.organisations'::regclass
-       and a.attname  = v_suggestion.field_name
-       and a.attnum   > 0
-       and not a.attisdropped;
-
-    if v_type is null then
+    -- Guarded dynamic apply-back (see header): FK-validated identifier, existence
+    -- check, %-quoted identifier, parameterised values. The organisations
+    -- updated_at trigger fires as normal.
+    if not exists (
+      select 1
+        from information_schema.columns
+       where table_schema = 'public'
+         and table_name   = 'organisations'
+         and column_name  = v_suggestion.field_name
+    ) then
       raise exception 'restricted field % no longer exists on the client record', v_suggestion.field_name
         using errcode = '55000';
     end if;
 
     execute format(
-      'update public.organisations set %I = $1::%s where id = $2',
-      v_suggestion.field_name, v_type
+      'update public.organisations set %I = $1 where id = $2',
+      v_suggestion.field_name
     ) using v_suggestion.proposed_value, v_suggestion.organisation_id;
 
+    -- F044 (20260923114000): the approval is a write to the field, so the field
+    -- history says a person corrected it, not that the old register still owns
+    -- the value. Provenance covers exactly the seven tracked fields; anything
+    -- else (runtime-restricted columns such as trading_name) is written with no
+    -- field history — the honest state, not an exception that would abort the
+    -- whole approval. Same guard as apply_admin_field_edits above.
     if v_suggestion.field_name in
       ('legal_name', 'website', 'contact_email', 'address_line_1', 'city',
        'postcode', 'organisation_type')
@@ -268,6 +263,8 @@ begin
     )
   );
 
+  -- AC3: tell the submitting CAM which way it went. create_notification is also
+  -- SECURITY DEFINER and self-checking; it silently skips a deactivated recipient.
   perform public.create_notification(
     v_suggestion.requested_by,
     'edit_suggestion_decided',
@@ -288,7 +285,8 @@ end;
 $$;
 
 comment on function public.decide_edit_suggestion(uuid, boolean, text) is
-  '#80/#81 (F078/F079), rewritten by F020 (#23), 20260923114000 added FIELD_SOURCES '
-  'provenance, 20261004210000 casts the applied value to the column''s declared '
-  'type so an approved organisation_type suggestion no longer fails with 42804. '
-  'Guards, errcodes, audit and notification unchanged.';
+  '#80/#81 (F078/F079), rewritten by F020 (#23), re-rewritten 20260923114000: '
+  'approval additionally records FIELD_SOURCES provenance (source=''manual'', '
+  'recorded_by=the deciding admin) so the field history attributes the correction '
+  'to a person. Everything else — guards, errcodes, audit, notification — '
+  'unchanged from the F020 body.';

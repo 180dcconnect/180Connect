@@ -472,9 +472,13 @@ export default async function AdminAnalyticsPage({
                       ))}
                   </select>
                 </div>
+                {/* `--ink`, the app's button colour (`docs/app-design-system.md`
+                    §Colour: "Buttons are --ink"). This read `bg-[#102a4e]`, a
+                    navy that existed on this button and nowhere else in the
+                    app — the page-local hex the design system forbids. */}
                 <button
                   type="submit"
-                  className="rounded-lg bg-[#102a4e] px-4 py-1.5 text-xs font-bold text-white transition-opacity hover:opacity-90"
+                  className="rounded-inset bg-ink px-4 py-1.5 text-xs font-bold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30"
                 >
                   Compare
                 </button>

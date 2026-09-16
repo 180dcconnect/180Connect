@@ -1,101 +1,22 @@
--- A manual entry's registration number was always filed as identifier_type
--- 'manual', whatever register the CAM had named — so a number copied out of the
--- charity register was indistinguishable from one typed off a letterhead.
+-- Rollback of 20261005100000_manual_entry_identifier_type.
 --
--- That is not a cosmetic mislabel. `organisation_identifiers.identifier_type`
--- is what every register-aware feature keys on: 360Giving grant history asks
--- for `uk_charity` / `uk_company` and refuses with "no charity or company
--- number on record" when it finds neither, the 360Giving mapper matches grants
--- to clients on `uk_company`, and the client list's filters and the score's
--- register factor read the same column. A charity added from the register with
--- "Use these details" therefore arrived with its charity number held, and every
--- one of those features acting as though it were absent.
+-- Reverses both code changes: approve_manual_entry goes back to filing every
+-- number as 'manual' (the version 20261002095000 created, verbatim), and the
+-- helper that classified it is dropped.
 --
--- The register is already on the row: `manual_entry_records.registry_name` is
--- stored from the closed list in src/lib/registration-number.ts ("Choice, not
--- free text" — the same reason that list exists), so the type is derivable
--- rather than something a person should have to pick twice.
---
--- ── Why only two registers ──
---
--- OSCR, CCNI and "Another register" stay 'manual' deliberately. We hold a file
--- for the England and Wales register and for Companies House, and 360Giving
--- addresses those two by `GB-CHC-` / `GB-COH-` prefixed numbers. Labelling a
--- Scottish (SC...) or Northern Irish (NIC...) number `uk_charity` would make the
--- grant lookup ask 360Giving the wrong question and read the empty answer as
--- "this charity has never taken a grant" — a wrong answer is worse than an
--- honest one, so the type stays 'manual' until there is a register file behind
--- it.
---
--- Reversibility: paired rollback in
---   ../rollback/20261005100000_manual_entry_identifier_type.down.sql. It restores
---   the previous approve_manual_entry and drops the helper; the rows this
---   migration re-labelled stay labelled, and the rollback's header says why.
+-- What reverting costs, and why the data half is NOT reversed: that migration
+-- also re-labelled identifiers already stored as 'manual' under a different
+-- type — the repair for every charity added from the register before it. Putting
+-- them back would mean matching on `app.identifier_type_for_registry` again,
+-- which no longer exists after this file runs, and it would also re-label rows
+-- the import path wrote correctly on its own. The re-labelled rows are therefore
+-- left as they are, and that is the better state: each one now says which
+-- register its number came from, which is what every register-aware feature
+-- reads. Only roll back if the app code goes back with it — with the older
+-- function, numbers typed under "Charity Commission" are filed as 'manual'
+-- again, which is the behaviour this migration existed to fix.
 
--- ---------------------------------------------------------------------------
--- The rule, in one place
--- ---------------------------------------------------------------------------
-
--- Mirrors `registerIdForName` in src/lib/registration-number.ts, because the
--- two must never disagree about which register a stored name means: that
--- function decides what the form shows for a name, and this one decides what
--- the record stores. Tolerant of the spellings older drafts hold ("CCEW",
--- "charity commission") for the same reason — a draft saved before the closed
--- list existed must still classify.
---
--- "England and Wales" is required before the bare name is trusted. A CAM
--- naming "Charity Commission of Kenya" under "Another register" is naming a
--- different country's regulator, and filing its number as a UK charity number
--- would send it to 360Giving as a GB-CHC number that is not its own.
-create or replace function app.identifier_type_for_registry(p_registry_name text)
-returns public.identifier_type
-language sql
-immutable
-set search_path = ''
-as $$
-  select case
-    when normalised.name like '%companies house%' then 'uk_company'::public.identifier_type
-    when normalised.name in ('ccew', 'charity commission')
-      or (normalised.name like 'charity commission%'
-          and normalised.name like '%england%'
-          and normalised.name like '%wales%')
-      then 'uk_charity'::public.identifier_type
-    else 'manual'::public.identifier_type
-  end
-  from (select lower(trim(coalesce(p_registry_name, ''))) as name) as normalised;
-$$;
-
-comment on function app.identifier_type_for_registry(text) is
-  'The identifier_type a registration number should be filed under, given the '
-  'register it was taken from. Only the two registers this deployment can act '
-  'on — the England and Wales charity register and Companies House — are '
-  'recognised; anything else stays ''manual''.';
-
--- ---------------------------------------------------------------------------
--- Repair what was already written
--- ---------------------------------------------------------------------------
-
--- Only rows that name a register we hold are touched, and only where the
--- organisation does not already carry that number under the right type — the
--- same number filed twice under one organisation would defeat dedup, which
--- matches on the value. Re-runnable: a second run finds nothing left to fix.
-update public.organisation_identifiers identifier
-   set identifier_type = app.identifier_type_for_registry(identifier.registry_name)
- where identifier.identifier_type = 'manual'
-   and app.identifier_type_for_registry(identifier.registry_name) <> 'manual'
-   and not exists (
-     select 1
-       from public.organisation_identifiers existing
-      where existing.organisation_id = identifier.organisation_id
-        and existing.id <> identifier.id
-        and existing.identifier_type = app.identifier_type_for_registry(identifier.registry_name)
-        and trim(existing.identifier_value) = trim(identifier.identifier_value)
-   );
-
--- ---------------------------------------------------------------------------
--- The approval, now classifying the number it files
--- ---------------------------------------------------------------------------
-
+-- 1. The approval files a number as 'manual' again.
 create or replace function public.approve_manual_entry(
   p_entry_id                 uuid,
   p_duplicate_decision       text,
@@ -280,14 +201,7 @@ begin
         organisation_id, identifier_type, identifier_value, registry_name,
         registry_country, is_primary, verified
       ) values (
-        v_organisation_id,
-        -- 20261005100000: the register the number came from decides the type, so
-        -- a number taken from the charity register is a uk_charity number and
-        -- every register-aware feature can find it. Still `verified = false`:
-        -- nothing has checked it against the register — a CAM copied it, or a
-        -- register *file* was read for it, and both are "held", not "checked".
-        app.identifier_type_for_registry(v_entry.registry_name),
-        trim(v_entry.registry_number),
+        v_organisation_id, 'manual', trim(v_entry.registry_number),
         nullif(trim(v_entry.registry_name), ''), v_entry.country_code, true, false
       );
     end if;
@@ -373,11 +287,12 @@ comment on function public.approve_manual_entry(uuid,text,boolean,uuid,text) is
   'F036/F042 manual-entry approval. 20260923114000: per-field provenance on '
   'create_new. 20261002095000: also carries sector and geographic_reach onto '
   'the organisation and files any size figures as one financial period with '
-  'financial_source = ''manual''. 20261005100000: files the registration number '
-  'under the register it names (uk_charity / uk_company) rather than always '
-  '''manual''. link_existing still writes neither.';
+  'financial_source = ''manual''. link_existing still writes neither.';
 
 revoke execute on function public.approve_manual_entry(uuid,text,boolean,uuid,text)
   from public, anon;
 grant execute on function public.approve_manual_entry(uuid,text,boolean,uuid,text)
   to authenticated;
+
+-- 2. The helper that decided which register a name means.
+drop function if exists app.identifier_type_for_registry(text);

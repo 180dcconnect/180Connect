@@ -31,7 +31,11 @@
 --   Documentation | Data Model tab 04 (OUTREACH_MESSAGES) description text owed
 --                 | against the spreadsheet, same three rows.
 --
--- Reversibility: paired rollback below restores the previous wording verbatim.
+-- Reversibility: paired rollback in
+--   ../rollback/20261004220000_news_hook_columns_cover_stage_one.down.sql
+--   restores the previous wording verbatim. The same three statements are
+--   repeated as a comment at the end of this file so the reversal is readable
+--   next to what it reverses; the file above is the artifact to deploy.
 
 comment on column public.outreach_messages.news_source is
   'Where the draft''s news hook came from: live (Exa lookup at generation time, F110 — both the first-contact email, when the news-hook opening was chosen, and every follow-up), stored (enrichment_results), or null when the draft has no hook.';

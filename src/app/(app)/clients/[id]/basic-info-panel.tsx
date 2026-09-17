@@ -42,10 +42,12 @@ import {
   InlineEnumInput,
   InlineFieldInput,
   fieldErrorsFrom,
+  restrictedFieldLabel,
   succeededFields,
 } from "./inline-edit";
 import { suggestEditsAction } from "./actions";
 import { adminDirectEditsAction } from "./admin-actions";
+import { useToast } from "@/components/ui/toast";
 import { readMissionFromWebsiteAction } from "./mission-actions";
 
 /**
@@ -330,6 +332,7 @@ export function BasicInfoPanel({
   /** Optional control pinned to the heading row. */
   action?: ReactNode;
 }) {
+  const { showToast } = useToast();
   const editable = new Set(editableFields ?? []);
   const isViewer = actorRole === "viewer";
   const isAdmin = actorRole === "admin";
@@ -559,7 +562,20 @@ export function BasicInfoPanel({
       // its value and its own error, which is the whole point of reporting the
       // batch per field rather than as one verdict.
       const landed = new Set(succeededFields(next));
+      // Confirm where the eye is not: the rows that landed close on success,
+      // so on a long record the only sign left of a save can be a row that
+      // stopped being a form. An admin's edit is a save; a CAM's is a request
+      // an admin still has to approve, and the toast says which happened.
       if (landed.size > 0) {
+        const what =
+          landed.size === 1
+            ? restrictedFieldLabel([...landed][0]!)
+            : `${landed.size} details`;
+        showToast(
+          isAdmin
+            ? `${what} saved for ${organisation.legal_name}`
+            : `${what} sent to an admin to review for ${organisation.legal_name}`,
+        );
         setEditing((rows) => rows.filter((row) => !landed.has(row)));
         setDrafts((current) =>
           Object.fromEntries(

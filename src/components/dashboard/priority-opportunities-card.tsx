@@ -25,21 +25,37 @@ import type { PriorityOpportunity } from "@/lib/priority-opportunities";
  * High here sits in High there, in the same green. The card never re-decides
  * a band or a colour of its own.
  *
- * "Why it scores highly" names the same five checks the record page's
- * breakdown names, with each one's share of the final score, so someone can
- * move between the two screens without translating anything.
+ * "Why it scores highly" names what each check actually found — "Works in
+ * Education", "£1.4m income (2024 accounts)", "6 matched grants" — rather than
+ * the check that read it. It used to print the check's name and how strong the
+ * reading was ("Sector: strong"), which told a CAM the engine liked something
+ * they could already read two lines above and nothing they could act on. The
+ * checks are still the record page's five, so the two screens agree; only the
+ * wording moved from the lever to the fact.
+ *
+ * The percentages are shares of the *lift* — of what pushed this score above a
+ * record with nothing on it — not shares of the score itself. Under the older
+ * composition maths a check with nothing on record still came back holding a
+ * fifth of the score, which is true of the arithmetic and false under this
+ * heading. See `scoutLiftShares`.
  *
  * The shares are drawn rather than spelled out. Repeating "% of score" on
  * every line said the same four words three times and still left the ranking to
  * be worked out by comparing numbers; the unit is stated once beside the
  * heading and each line carries a bar, so which check is doing the work is the
  * first thing the eye lands on.
+ *
+ * Under the lines, what the score could not read at all. A card showing only
+ * what lifted a number implies the rest was weighed and found wanting, when
+ * often it was never there — and "No accounts filed" is something a CAM can
+ * actually go and fix.
  */
 
 /**
  * Whether any line carries a share — the fallback context lines ("Works in
- * Healthcare") carry none, and a heading announcing "share of score" over
- * three lines that have no numbers would be promising something absent.
+ * Healthcare") carry none, as do the lines of a score with nothing lifting it,
+ * and a heading announcing a share over lines that have no numbers would be
+ * promising something absent.
  */
 function hasShares(highlights: PriorityOpportunity["highlights"]): boolean {
   return highlights.some((highlight) => highlight.sharePct !== null);
@@ -143,7 +159,7 @@ export function PriorityOpportunitiesCard({
                       {/* The unit, said once instead of on all three lines. */}
                       {hasShares(opportunity.highlights) && (
                         <p className="font-body text-[10px] font-medium text-faint">
-                          share of score
+                          share of the lift
                         </p>
                       )}
                     </div>
@@ -162,9 +178,9 @@ export function PriorityOpportunitiesCard({
                           </span>
                           {highlight.sharePct !== null && (
                             <>
-                              {/* Scaled against the whole score, not against
-                                  the largest line here: a 40% check is 40% of
-                                  what put this client on the card. */}
+                              {/* Scaled against the whole lift, not against the
+                                  largest line here: a 40% check did 40% of the
+                                  lifting that put this client on the card. */}
                               <span
                                 aria-hidden="true"
                                 className="h-1 w-9 shrink-0 overflow-hidden rounded-full bg-rule-soft"
@@ -182,6 +198,14 @@ export function PriorityOpportunitiesCard({
                         </li>
                       ))}
                     </ul>
+
+                    {opportunity.gaps.length > 0 && (
+                      // Absence, said plainly and last: not a warning, just
+                      // the part of the picture nobody has filled in yet.
+                      <p className="mt-2.5 font-body text-[11.5px] leading-[1.5] text-faint">
+                        Not scored on: {opportunity.gaps.join(", ").toLowerCase()}
+                      </p>
+                    )}
                   </div>
                 )}
 

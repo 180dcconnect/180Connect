@@ -16,6 +16,8 @@ function action(overrides: Partial<MyAction> = {}): MyAction {
     organisationName: "Oxford Homeless Project",
     dueDate: "2026-09-16",
     isOverdue: false,
+    daysOverdue: 0,
+    priority: "normal",
     origin: "self",
     assignedByName: null,
     ...overrides,

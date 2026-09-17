@@ -36,6 +36,9 @@ function input(overrides: Partial<DataHealthInput> = {}): DataHealthInput {
     enrichmentReview: 0,
     missingWebsite: 40,
     missingEmail: 80,
+    incompleteRecords: 0,
+    discrepancies: 0,
+    unassignedOwner: 0,
     runs: [],
     ...overrides,
   };

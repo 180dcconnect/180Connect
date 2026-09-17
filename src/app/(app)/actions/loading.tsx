@@ -5,7 +5,7 @@ import { ActionsHeader } from "./actions-header";
 /**
  * Mirrors page.tsx: bone ground, the `max-w-3xl` column, the real Actions
  * header (title and tab row are static, so drawn once and never guessed at),
- * then the action list.
+ * then the task list.
  *
  * Without this file a click on "Actions" showed nothing until the server had
  * finished, because Next cannot prefetch a page rendered per request.
@@ -13,13 +13,13 @@ import { ActionsHeader } from "./actions-header";
  */
 export default function Loading() {
   return (
-    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+    <div className="min-h-screen bg-paper px-6 py-10 sm:px-10 sm:py-12">
       <div className="mx-auto w-full max-w-3xl space-y-6">
         <div>
           <ActionsHeader current="/actions">
-            <p className="mt-3 text-sm leading-[1.7] text-foreground/50">
-              Outstanding work assigned to you, overdue first. Mark something complete to
-              drop it from this list — it stays on record.
+            <p className="mt-3 font-body text-sm leading-[1.7] text-dim">
+              Outstanding work assigned to you, overdue first. Mark a task complete to
+              remove it from this list — it stays on record.
             </p>
           </ActionsHeader>
         </div>

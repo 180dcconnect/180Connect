@@ -60,9 +60,8 @@ export default async function AdminPage() {
           <Tile href="/admin/cam-settings" title="CAM queue settings">
             View outreach preferences and queue configuration for team members.
           </Tile>
-          <Tile href="/admin/actions" title="Assign actions">
-            Give a team member a piece of client work and track outstanding vs completed
-            work across the team.
+          <Tile href="/admin/actions" title="Team tasks">
+            Balance client work across the team and track what is open, completed or cancelled.
           </Tile>
         </Section>
 

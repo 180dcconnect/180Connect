@@ -41,10 +41,10 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   ];
 
   // Actions badge: outstanding work assigned to the viewer — the length of
-  // their My actions queue. A `head: true` count, not rows: the badge needs a
+  // their My tasks queue. A `head: true` count, not rows: the badge needs a
   // number, not the work itself. Fails soft to no badge rather than a wrong
   // zero, so a broken count reads as "no information", not "nothing due".
-  // Leadership is never assigned an action, and never sees My actions, so the
+  // Leadership is never assigned a task, and never sees My tasks, so the
   // badge would always be a zero counting nothing — skip the read entirely.
   let myOpenActionCount: number | undefined;
   if (canView(actor.role, "client:view") && !isViewOnly(actor.role)) {
@@ -65,19 +65,19 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
 
   // Actions: working through your own queue and handing work out as tabs
   // under one row, mirroring the Analytics group. Everyone lands on My
-  // actions — the queue they open most days — except leadership, who have no
-  // queue of their own and land on Assign actions instead. Each page keeps its
+  // tasks — the queue they open most days — except leadership, who have no
+  // queue of their own and land on Team tasks instead. Each page keeps its
   // own gate, and the tab row never offers one the role cannot open.
   //
-  // Leadership never reaches My actions at all: nothing is ever assigned to a
+  // Leadership never reaches My tasks at all: nothing is ever assigned to a
   // viewer, so the page would be a permanently empty queue. They get the whole
-  // team's work on Assign actions instead, read-only — the same tab
+  // team's work on Team tasks instead, read-only — the same tab
   // `actionsTabsFor` offers them.
   if (canView(actor.role, "client:view")) {
     sections[0].items.push(
       {
         href: isViewOnly(actor.role) ? "/admin/actions" : "/actions",
-        label: "Actions",
+        label: "Tasks",
         icon: "actions",
         matches: ACTIONS_ROUTES,
         count: myOpenActionCount,

@@ -144,7 +144,7 @@ export function OffboardPanel({ users }: { users: HandoverUser[] }) {
                 <strong>
                   {preview.organisations.reduce((sum, o) => sum + o.open_actions, 0)}
                 </strong>
-                {" open actions on them"}
+                {" open tasks on them"}
               </p>
               <ul className="mt-3 space-y-1 text-sm text-foreground/75">
                 {preview.organisations.map((organisation) => (
@@ -159,7 +159,7 @@ export function OffboardPanel({ users }: { users: HandoverUser[] }) {
                 <>
                   <p className="mt-4 text-sm">
                     <strong>{preview.crossOrgActions.length}</strong>
-                    {" action(s) on clients they do not own — these move too"}
+                    {" task(s) on clients they do not own — these move too"}
                   </p>
                   <ul className="mt-2 space-y-1 text-sm text-foreground/75">
                     {preview.crossOrgActions.map((action) => (

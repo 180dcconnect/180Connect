@@ -42,7 +42,7 @@ export default async function OwnershipRequestsPage() {
         <p className="mt-3 text-sm text-foreground/65">
           A CAM cannot take a client another CAM owns — they ask here instead.{" "}
           {canDecide
-            ? "Approving moves the client to them, along with their open actions, and records the handover in the audit log. Rejecting leaves ownership exactly as it is."
+            ? "Approving moves the client to them, along with their open tasks, and records the handover in the audit log. Rejecting leaves ownership exactly as it is."
             : "Each request shows who decided it and what happened to the client."}
         </p>
 

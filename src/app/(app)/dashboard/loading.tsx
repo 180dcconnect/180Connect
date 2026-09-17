@@ -7,7 +7,7 @@ import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
  * same order: header, the F206 work strip, the admin duty queue beside Sending
  * capacity, the pipeline group (growth curve beside the queue dial, then the
  * three stat tiles), Performance, Priority Opportunities, the AI spend preview
- * beside Your actions, and the Recent updates feed.
+ * beside Your tasks, and the Recent updates feed.
  *
  * The previous version was a mirror of a dashboard one redesign behind: it
  * drew the old `AiSpendCard` (window control, spend headline, daily chart) and
@@ -27,7 +27,7 @@ import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
  * `AiSpendOverviewPreview`'s headline/plot/footer rows.
  *
  * Two things it deliberately does not try to predict, because they are data: the
- * length of the lists (Your actions is drawn at its five action rows, the feed
+ * length of the lists (Your tasks is drawn at its five task rows, the feed
  * at its five) and whether a section renders at all (the engine-health panel,
  * the onboarding guide, the leaderboard and the health cards are conditional).
  * Those move the page by a card at most, and no static skeleton can be right
@@ -286,7 +286,7 @@ export default function Loading() {
           </div>
         </div>
 
-        {/* AI spend preview beside Your actions */}
+        {/* AI spend preview beside Your tasks */}
         <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
           {/* AiSpendOverviewPreview: header row, spend headline beside the
               window pills, the "What it went on" split, the stick plot, and the

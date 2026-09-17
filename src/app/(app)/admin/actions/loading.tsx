@@ -1,76 +1,48 @@
 import { Skeleton } from "@/components/ui/skeleton";
-
 import { ActionsHeader } from "../../actions/actions-header";
 
-/**
- * Mirrors page.tsx's shell: bone ground, the real Actions header (title and
- * tab row are static, so drawn once and never guessed at), then the assign
- * form card and the outstanding/completed sections.
- *
- * Approximated because it is data: how many actions are outstanding or
- * completed, and whether any read failed.
- */
 export default function Loading() {
   return (
-    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <div className="mx-auto w-full max-w-4xl space-y-8">
-        <div>
-          <ActionsHeader current="/admin/actions">
-            <Skeleton className="mt-3 h-4 w-full max-w-xl" />
-            <Skeleton className="mt-2 h-4 w-2/3 max-w-xl" />
-          </ActionsHeader>
-        </div>
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-paper px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+      <div className="mx-auto w-full max-w-[1400px] space-y-6">
+        <ActionsHeader current="/admin/actions">
+          <Skeleton className="mt-3 h-4 w-full max-w-3xl" />
+        </ActionsHeader>
 
-        <div aria-hidden="true" className="space-y-8">
-          {/* Assign form card */}
-          <section className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm sm:p-6">
-            <Skeleton className="h-[25px] w-44" />
-            <div className="mt-4 space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                {Array.from({ length: 2 }).map((_, index) => (
-                  <div key={index}>
-                    <Skeleton className="h-4 w-24" />
-                    <Skeleton className="mt-1.5 h-10 w-full rounded-lg" />
-                  </div>
-                ))}
-              </div>
-              <div>
-                <Skeleton className="h-4 w-36" />
-                <Skeleton className="mt-1.5 h-10 w-full rounded-lg" />
-              </div>
-              <div>
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="mt-1.5 h-16 w-full rounded-lg" />
-              </div>
-              <div>
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="mt-1.5 h-10 w-48 rounded-lg" />
-              </div>
-              <Skeleton className="h-9 w-32 rounded-full" />
+        <div aria-hidden="true" className="space-y-4">
+          <div className="flex flex-wrap gap-2 rounded-panel border border-rule bg-white px-5 py-3">
+            <Skeleton className="h-10 min-w-60 flex-1 rounded-inset" />
+            {Array.from({ length: 5 }).map((_, index) => (
+              <Skeleton key={index} className="h-10 w-32 rounded-inset" />
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-9 w-28 rounded-inset" />
+          </div>
+
+          <div className="overflow-hidden rounded-panel border border-rule bg-white">
+            <div className="grid grid-cols-[2.2fr_1.35fr_1fr_8rem_7rem_7.5rem_2rem] gap-4 border-b border-rule bg-paper px-5 py-3">
+              {Array.from({ length: 7 }).map((_, index) => (
+                <Skeleton key={index} className="h-4 w-full max-w-24" />
+              ))}
             </div>
-          </section>
-
-          {/* Outstanding + completed */}
-          {(["Outstanding", "Completed"] as const).map((heading) => (
-            <section key={heading}>
-              <Skeleton className="ml-1 h-4 w-36" />
-              <div className="mt-3 space-y-3">
-                {Array.from({ length: 2 }).map((_, index) => (
-                  <div
-                    key={index}
-                    className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm"
-                  >
-                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                      <Skeleton className="h-5 w-48 max-w-full" />
-                      <Skeleton className="h-6 w-24 rounded-full" />
-                    </div>
-                    <Skeleton className="mt-2 h-4 w-64 max-w-full" />
-                    <Skeleton className="mt-1.5 h-4 w-40 max-w-full" />
-                  </div>
-                ))}
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className="grid grid-cols-[2.2fr_1.35fr_1fr_8rem_7rem_7.5rem_2rem] items-center gap-4 border-b border-rule-soft px-5 py-4 last:border-b-0">
+                <div>
+                  <Skeleton className="h-4 w-44 max-w-full" />
+                  <Skeleton className="mt-2 h-3 w-56 max-w-full" />
+                </div>
+                <Skeleton className="h-4 w-36 max-w-full" />
+                <Skeleton className="h-4 w-28 max-w-full" />
+                <Skeleton className="h-4 w-16" />
+                <Skeleton className="h-6 w-16 rounded-full" />
+                <Skeleton className="h-6 w-20 rounded-full" />
+                <Skeleton className="size-7 rounded-inset" />
               </div>
-            </section>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     </div>

@@ -138,7 +138,7 @@ export function AccountControls({
   const clientPhrase =
     ownedClientCount > 0
       ? `Their ${ownedClientCount} client${ownedClientCount === 1 ? "" : "s"} and open actions`
-      : "Their open actions";
+      : "Their open tasks";
 
   return (
     <>

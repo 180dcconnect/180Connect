@@ -67,8 +67,10 @@ import {
   type EnrichmentMissionRow,
 } from "@/lib/mission";
 import {
+  applyOpportunityFacts,
   selectPriorityOpportunities,
-  type OpportunityFactors,
+  type OpportunityFacts,
+  type OpportunityRow,
   type PriorityOpportunity,
 } from "@/lib/priority-opportunities";
 import {
@@ -127,7 +129,20 @@ type RawAiGenerationCostRow = Omit<AiGenerationCostRow, "activity"> & { activity
  * serialised input.
  */
 type DashboardScoreRow = LatestScoreRow & {
-  score_factors: { factors: OpportunityFactors } | null;
+  // The whole stored breakdown, not just the factors: the card ranks by the
+  // weights that were applied and names what was never read from `readings`.
+  score_factors: OpportunityRow["score_factors"];
+};
+
+/**
+ * One filed period, narrowed to what a priority card's income line needs. The
+ * read filters out periods with no income figure, so `total_income` is always
+ * a number by the time it lands here.
+ */
+type OpportunityPeriodRow = {
+  organisation_id: string;
+  total_income: number;
+  period_end: string | null;
 };
 
 /**
@@ -364,7 +379,7 @@ export default async function DashboardPage({
   const viewerState = loadViewerState(actor.id);
   viewerState.catch(() => {});
 
-  // "Your actions" — every open action assigned to this person, the same read
+  // "Your tasks" — every open task assigned to this person, the same read
   // the Actions page makes, so the card and that page agree about what is
   // overdue. Only for accounts that can hold work; a view-only account has none.
   const actionsRead = canWrite
@@ -372,7 +387,7 @@ export default async function DashboardPage({
         supabase
           .from("actions")
           .select(
-            "id, title, description, due_date, status, organisation_id, created_by_user_id, created_at, " +
+            "id, title, description, due_date, status, priority, organisation_id, created_by_user_id, created_at, " +
               "organisation:organisations!actions_organisation_id_fkey(legal_name), " +
               "created_by_user:users!actions_created_by_user_id_fkey(full_name)",
           )
@@ -1020,6 +1035,56 @@ export default async function DashboardPage({
               }),
             }));
           }
+
+          // The figures behind three of the five checks, for the same six ids:
+          // the newest filing that carries an income, and how many 360Giving
+          // grants are matched. Two small keyed reads, fired together, so a
+          // card can say "£1.4m income (2024 accounts)" and "6 matched grants"
+          // instead of "Size: strong". Both fail soft — the cards fall back to
+          // the check names they used before.
+          const rankedIds = priorityOpportunities.map((opportunity) => opportunity.id);
+          const [periodsResult, grantsResult] = await Promise.all([
+            supabase
+              .from("financial_periods")
+              .select("organisation_id, total_income, period_end")
+              .in("organisation_id", rankedIds)
+              .not("total_income", "is", null)
+              .order("period_end", { ascending: false })
+              .overrideTypes<OpportunityPeriodRow[], { merge: false }>(),
+            supabase
+              .from("grants")
+              .select("organisation_id")
+              .in("organisation_id", rankedIds)
+              .overrideTypes<{ organisation_id: string }[], { merge: false }>(),
+          ]);
+          if (periodsResult.error) {
+            await reportError(periodsResult.error, {
+              operation: "dashboard.opportunity_financials",
+            });
+          }
+          if (grantsResult.error) {
+            await reportError(grantsResult.error, {
+              operation: "dashboard.opportunity_grants",
+            });
+          }
+          const factsById = new Map<string, OpportunityFacts>();
+          for (const id of rankedIds) factsById.set(id, {});
+          // Ordered newest first above, so the first row per organisation is
+          // the newest filing that actually carries an income figure.
+          for (const period of periodsResult.data ?? []) {
+            const facts = factsById.get(period.organisation_id);
+            if (!facts || facts.incomeGBP !== undefined) continue;
+            facts.incomeGBP = period.total_income;
+            facts.incomePeriodEnd = period.period_end;
+          }
+          // Counted here rather than with a count-per-id round trip: the ranked
+          // six between them hold a handful of grant rows.
+          for (const grant of grantsResult.data ?? []) {
+            const facts = factsById.get(grant.organisation_id);
+            if (!facts) continue;
+            facts.matchedGrantCount = (facts.matchedGrantCount ?? 0) + 1;
+          }
+          priorityOpportunities = applyOpportunityFacts(priorityOpportunities, factsById);
         }
       }
 
@@ -1171,7 +1236,7 @@ export default async function DashboardPage({
 
   const replyTracking = summariseTrackedReplies(trackedReplies, rows);
   const metrics = computeDashboardMetrics(rows, replyTracking);
-  // "Your actions": open actions overdue or due this week, and unsent drafts on
+  // "Your tasks": open tasks overdue or due this week, and unsent drafts on
   // this person's own clients. Replies waiting and follow-ups due are not here
   // — the inbox's Inbound Replies and Follow-up Due tabs are their home. Both
   // reads fail soft: a failed one empties its half of the card, never the page.

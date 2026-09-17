@@ -8,7 +8,6 @@
 
 import { GroupTabs } from "@/components/ui/group-tabs";
 import { getCurrentActor } from "@/lib/auth/actor";
-import { isViewOnly } from "@/lib/auth/permissions";
 import { actionsTabsFor } from "./actions-group";
 
 /**
@@ -16,8 +15,8 @@ import { actionsTabsFor } from "./actions-group";
  * exists here and a tab that exists there cannot disagree.
  */
 const HEADINGS: Record<string, { title: string }> = {
-  "/admin/actions": { title: "Assign actions" },
-  "/actions": { title: "My actions" },
+  "/admin/actions": { title: "Team tasks" },
+  "/actions": { title: "My tasks" },
 };
 
 export async function ActionsHeader({
@@ -36,16 +35,10 @@ export async function ActionsHeader({
   // profile read is request-cached, so the AppShell above already paid for it.
   const actor = await getCurrentActor();
   const tabs = actor.ok ? actionsTabsFor(actor.actor.role) : [];
-  const viewOnly = actor.ok && isViewOnly(actor.actor.role);
-
-  // Leadership reads this page and assigns nothing, so "Assign actions" would
-  // name a thing they cannot do. Same page, honest title.
-  const title = viewOnly && current === "/admin/actions" ? "Team actions" : heading.title;
-
   return (
     <>
       <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] leading-[1] font-semibold tracking-[-0.03em] text-ink">
-        {title}
+        {heading.title}
       </h1>
       {/* One tab is not a choice — a row of exactly one reads as a control that
           does nothing. Leadership has only this page in the group. */}

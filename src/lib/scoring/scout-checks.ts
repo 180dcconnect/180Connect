@@ -35,6 +35,11 @@ export type ScoutCheck = {
   lowers: string;
   /** What we can say when the check found nothing at all. */
   blank: string;
+  /**
+   * The same absence in a few words, for a card with no room for `blank` —
+   * "No sector recorded". Names the missing record, never the column.
+   */
+  gap: string;
   /** Names the input this parameter reads, for the "we do have something" case. */
   subject: string;
 };
@@ -48,6 +53,7 @@ export const SCOUT_CHECKS: ScoutCheck[] = [
     raises: "Working in a sector ranked near the top in score settings.",
     lowers: "Working in a sector ranked near the bottom in score settings.",
     blank: "No sector recorded, so this check found nothing to go on.",
+    gap: "No sector recorded",
     subject: "Sector fit against the branch's priorities",
   },
   {
@@ -59,6 +65,7 @@ export const SCOUT_CHECKS: ScoutCheck[] = [
     raises: "Being inside a priority area.",
     lowers: "Being outside every priority area.",
     blank: "No town or city recorded, so this check found nothing to go on.",
+    gap: "No town or city recorded",
     subject: "Location against the branch's priority regions",
   },
   {
@@ -70,6 +77,7 @@ export const SCOUT_CHECKS: ScoutCheck[] = [
     lowers: "An income band scored low in score settings.",
     blank:
       "No accounts with an income figure have been filed against this record.",
+    gap: "No accounts filed",
     subject: "Income size",
   },
   {
@@ -81,6 +89,7 @@ export const SCOUT_CHECKS: ScoutCheck[] = [
     lowers:
       "Nothing here counts against a client: it either helps or stays neutral.",
     blank: "No grants matched to this organisation.",
+    gap: "No matched grants",
     subject: "Previous grant history",
   },
   {
@@ -94,6 +103,7 @@ export const SCOUT_CHECKS: ScoutCheck[] = [
     lowers:
       "A hard no floors it. Soft no and gone quiet sit low, and anything we are still waiting on slides down the longer the silence runs, over about a month.",
     blank: "No outreach recorded against this client yet.",
+    gap: "No outreach recorded",
     subject: "Outreach history",
   },
 ];
@@ -123,6 +133,44 @@ export function scoutContributions(row: {
   return parts.map((part) => ({
     key: part.key,
     percent: total === 0 ? 0 : (part.weighted / total) * 100,
+  }));
+}
+
+/**
+ * How much of the *lift* each check is responsible for — what actually pushed
+ * this score above a record with nothing on it.
+ *
+ * `scoutContributions` answers a different question: what the score is made
+ * of. Because it divides weighted value by the weighted total, a check sitting
+ * on the neutral 0.5 ("nothing on record") still comes back holding a fifth of
+ * the score under equal weights. That is honest as composition and wrong as a
+ * reason — a card headed "why it scores highly" must not print 19% next to an
+ * empty check.
+ *
+ * So lift measures each check against the neutral instead of against zero:
+ *
+ *     lift  = max(0, factor − 0.5) × weight
+ *     share = lift / Σ lift
+ *
+ * A neutral or below-neutral check contributes exactly 0 and drops out; the
+ * shares that remain sum to 100 across only the checks doing the lifting. Use
+ * this wherever the question is "what raised this", and `scoutContributions`
+ * wherever it is "what is this number made of" (the record page's breakdown).
+ */
+export function scoutLiftShares(row: {
+  factors: Record<ScoutCheckKey, number>;
+  weights: Record<ScoutCheckKey, number>;
+}): { key: ScoutCheckKey; percent: number }[] {
+  const parts = SCOUT_CHECKS.map(({ key }) => ({
+    key,
+    lift:
+      Math.max(0, Math.min(1, row.factors[key]) - SCOUT_NO_READING) *
+      Math.max(0, row.weights[key]),
+  }));
+  const total = parts.reduce((sum, part) => sum + part.lift, 0);
+  return parts.map((part) => ({
+    key: part.key,
+    percent: total === 0 ? 0 : (part.lift / total) * 100,
   }));
 }
 

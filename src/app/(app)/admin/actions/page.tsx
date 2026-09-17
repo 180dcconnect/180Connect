@@ -1,140 +1,182 @@
 import { redirect } from "next/navigation";
-import { getViewingActor } from "@/lib/auth/actor";
-import { adminRouteDestination } from "@/lib/auth/admin-route";
-import { isViewOnly } from "@/lib/auth/permissions";
-import { reportError } from "@/lib/error-logging";
-import { createClient } from "@/lib/supabase/server";
-import { fetchPaged } from "@/lib/supabase/fetch-paged";
-import { type TeamActionRow } from "@/lib/actions";
+
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { InlineAlert } from "@/components/ui/inline-alert";
+import { formatTeamTasks, taskPriorityToDb, type TeamActionRow } from "@/lib/actions";
+import { getViewingActor } from "@/lib/auth/actor";
+import { adminRouteDestination } from "@/lib/auth/admin-route";
+import { hasPermission } from "@/lib/auth/permissions";
+import { dayKeyOf } from "@/lib/display-format";
+import { reportError } from "@/lib/error-logging";
+import { fetchPaged } from "@/lib/supabase/fetch-paged";
+import { createClient } from "@/lib/supabase/server";
+import { isUuid } from "@/lib/validation";
 import { ActionsHeader } from "../../actions/actions-header";
-import { AssignActionPanel } from "./assign-action-panel";
+import { TaskFilters, type TeamTaskFilterValues } from "./task-filters";
+import {
+  TeamTasksPanel,
+  type TaskClientOption,
+  type TaskTeamMember,
+} from "./team-tasks-panel";
 
-/**
- * What the client picker needs: a name to list and search, and the owner so the
- * form can say when the person being assigned isn't the one who owns the
- * client. Override types explicitly — supabase-js infers an embedded owner as
- * an array, which is neither what PostgREST returns nor what the picker reads
- * (same `.overrideTypes` as the admin analytics page's org read).
- */
-type ClientPickerRow = {
-  id: string;
-  legal_name: string;
-  owner_id: string | null;
-  owner: { full_name: string | null } | null;
-};
+const PAGE_SIZE = 50;
 
 const ACTION_SELECT =
-  "id, title, description, due_date, status, organisation_id, created_by_user_id, assignee_user_id, created_at, " +
+  "id, title, description, due_date, status, priority, organisation_id, created_by_user_id, assignee_user_id, created_at, updated_at, " +
   "organisation:organisations!actions_organisation_id_fkey(legal_name), " +
   "created_by_user:users!actions_created_by_user_id_fkey(full_name), " +
   "assignee:users!actions_assignee_user_id_fkey(full_name)";
 
-/**
- * F169 — Admin-Assigned Actions. An admin creates a client-linked action and
- * hands it to a specific team member — an active CAM or admin (AC1); it
- * appears in that person's own Actions tab (/actions, F168) the moment they
- * next load it — a plain server render, no "accept" step, no realtime
- * plumbing needed (AC2). This page is the team-wide half: everyone's
- * admin-assigned work, outstanding separated from completed (AC3) — see
- * AssignActionPanel.
- *
- * `user:manage` gates this the same way /admin and /admin/users do — F169's
- * own dependency note calls it "useful team management", and every admin
- * capability already sits behind that permission.
- *
- * Client and team pickers are fetched here rather than in the panel so the
- * form has real options on first paint, same shape as AssignOwnerForm's
- * `team` prop on the client profile page.
- */
-export default async function AdminActionsPage() {
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+function scalar(value: string | string[] | undefined): string {
+  return typeof value === "string" ? value : "";
+}
+
+function oneOf<const T extends readonly string[]>(value: string, choices: T, fallback: T[number]): T[number] {
+  return choices.includes(value) ? (value as T[number]) : fallback;
+}
+
+function hrefForPage(params: URLSearchParams, page: number): string {
+  const next = new URLSearchParams(params);
+  if (page <= 1) next.delete("page");
+  else next.set("page", String(page));
+  const query = next.toString();
+  return query ? `/admin/actions?${query}` : "/admin/actions";
+}
+
+export default async function AdminActionsPage({ searchParams }: { searchParams?: SearchParams }) {
   const authorization = await getViewingActor("user:manage", { route: "/admin/actions" });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
+  const raw = searchParams ? await searchParams : {};
+  const query = scalar(raw.q).trim().slice(0, 120);
+  const status = oneOf(scalar(raw.status), ["open", "completed", "cancelled", "all"] as const, "open");
+  const priority = oneOf(scalar(raw.priority), ["high", "normal", "low", "all"] as const, "all");
+  const due = oneOf(scalar(raw.due), ["all", "overdue", "today", "week", "undated"] as const, "all");
+  const sort = oneOf(scalar(raw.sort), ["due", "priority", "updated"] as const, "due");
+  const assigneeParam = scalar(raw.assignee);
+  const clientParam = scalar(raw.client);
+  const assignee = assigneeParam === "unassigned" || isUuid(assigneeParam) ? assigneeParam : "";
+  const client = isUuid(clientParam) ? clientParam : "";
+  const page = Math.max(1, Number.parseInt(scalar(raw.page), 10) || 1);
+
+  const filters: TeamTaskFilterValues = { query, status, assignee, client, priority, due, sort };
   const supabase = await createClient();
+  const canManage = hasPermission(authorization.actor.role, "user:manage");
 
-  // Leadership (viewer) watches the team's work and hands none of it out: they
-  // get the outstanding and completed lists, not the assign form. The two
-  // picker reads exist only to fill that form, so for them they are skipped
-  // rather than fetched and discarded.
-  const canAssign = !isViewOnly(authorization.actor.role);
-  const empty = <T,>(): Promise<{ data: T[]; error: null }> =>
-    Promise.resolve({ data: [], error: null });
+  let tasksQuery = supabase.from("actions").select(ACTION_SELECT, { count: "exact" });
+  if (status !== "all") tasksQuery = tasksQuery.eq("status", status);
+  if (assignee === "unassigned") tasksQuery = tasksQuery.is("assignee_user_id", null);
+  else if (assignee) tasksQuery = tasksQuery.eq("assignee_user_id", assignee);
+  if (client) tasksQuery = tasksQuery.eq("organisation_id", client);
+  if (priority !== "all") tasksQuery = tasksQuery.eq("priority", taskPriorityToDb(priority));
+  if (query) tasksQuery = tasksQuery.ilike("title", `%${query.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`);
 
-  const [actionsResult, teamResult, clientsResult] = await Promise.all([
+  const today = new Date();
+  const todayKey = dayKeyOf(today);
+  if (due === "overdue") tasksQuery = tasksQuery.lt("due_date", todayKey).eq("status", "open");
+  if (due === "today") tasksQuery = tasksQuery.eq("due_date", todayKey);
+  if (due === "week") {
+    const weekEnd = new Date(today);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+    tasksQuery = tasksQuery.gte("due_date", todayKey).lte("due_date", dayKeyOf(weekEnd));
+  }
+  if (due === "undated") tasksQuery = tasksQuery.is("due_date", null);
+
+  if (sort === "priority") {
+    tasksQuery = tasksQuery.order("priority").order("due_date", { nullsFirst: false }).order("created_at");
+  } else if (sort === "updated") {
+    tasksQuery = tasksQuery.order("updated_at", { ascending: false });
+  } else {
+    tasksQuery = tasksQuery.order("due_date", { nullsFirst: false }).order("priority").order("created_at");
+  }
+  tasksQuery = tasksQuery.range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
+
+  const [tasksResult, teamResult, clientsResult] = await Promise.all([
+    tasksQuery.overrideTypes<TeamActionRow[], { merge: false }>(),
     supabase
-      .from("actions")
-      .select(ACTION_SELECT)
-      .order("created_at", { ascending: false })
-      .overrideTypes<TeamActionRow[], { merge: false }>(),
-    canAssign
-      ? supabase
-          .from("users")
-          .select("id, full_name, role, email")
-          .in("role", ["cam", "admin"])
-          .eq("is_active", true)
-          .order("full_name")
-      : empty<{ id: string; full_name: string | null; role: string | null; email: string | null }>(),
-    // Every client, not the first thousand alphabetically: the picker's search
-    // must cover the whole list or it silently hides clients. A handful of
-    // narrow columns ordered by name, walked past PostgREST's row cap with
-    // fetchPaged (the admin analytics page's pattern) — small payload, one
-    // extra read. The owner join backs the picker's "doesn't own this client"
-    // note, and nothing else here reads it.
-    canAssign
-      ? fetchPaged<ClientPickerRow>((from, to) =>
-          supabase
-            .from("organisations")
-            .select("id, legal_name, owner_id, owner:users!organisations_owner_id_fkey(full_name)")
-            .order("legal_name")
-            .order("id")
-            .range(from, to)
-            .overrideTypes<ClientPickerRow[], { merge: false }>(),
-        )
-      : empty<ClientPickerRow>(),
+      .from("users")
+      .select("id, full_name, role, email")
+      .in("role", ["cam", "admin"])
+      .eq("is_active", true)
+      .is("deleted_at", null)
+      .order("full_name")
+      .overrideTypes<TaskTeamMember[], { merge: false }>(),
+    fetchPaged<TaskClientOption>(
+      (from, to) =>
+        supabase
+          .from("organisations")
+          .select("id, legal_name, owner_id, owner:users!organisations_owner_id_fkey(full_name)")
+          .order("legal_name")
+          .order("id")
+          .range(from, to)
+          .overrideTypes<TaskClientOption[], { merge: false }>(),
+      { pagesPerRound: 4 },
+    ),
   ]);
 
-  if (actionsResult.error) {
-    await reportError(actionsResult.error, { operation: "admin.actions.page_list" });
-  }
-  if (teamResult.error) {
-    await reportError(teamResult.error, { operation: "admin.actions.page_team" });
-  }
-  if (clientsResult.error) {
-    await reportError(clientsResult.error, { operation: "admin.actions.page_clients" });
-  }
+  if (tasksResult.error) await reportError(tasksResult.error, { operation: "admin.tasks.page_list" });
+  if (teamResult.error) await reportError(teamResult.error, { operation: "admin.tasks.page_team" });
+  if (clientsResult.error) await reportError(clientsResult.error, { operation: "admin.tasks.page_clients" });
 
-  // The root element is a `div`, not a `main`: the admin layout's AppShell
-  // already renders the `main` this is slotted into.
+  const tasks = formatTeamTasks(tasksResult.data ?? []);
+  const team = teamResult.data ?? [];
+  const clients = clientsResult.data ?? clientsResult.partial;
+  const total = tasksResult.count ?? tasks.length;
+  const currentParams = new URLSearchParams();
+  if (query) currentParams.set("q", query);
+  if (status !== "open") currentParams.set("status", status);
+  if (assignee) currentParams.set("assignee", assignee);
+  if (client) currentParams.set("client", client);
+  if (priority !== "all") currentParams.set("priority", priority);
+  if (due !== "all") currentParams.set("due", due);
+  if (sort !== "due") currentParams.set("sort", sort);
+  const previousHref = page > 1 ? hrefForPage(currentParams, page - 1) : null;
+  const nextHref = page * PAGE_SIZE < total ? hrefForPage(currentParams, page + 1) : null;
+
   return (
-    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <Stage className="mx-auto w-full max-w-4xl space-y-8">
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-paper px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+      <Stage className="mx-auto w-full max-w-[1400px] space-y-6">
         <Rise>
           <ActionsHeader current="/admin/actions">
-            <p className="mt-3 max-w-xl text-sm leading-[1.7] text-foreground/65">
-              {canAssign
-                ? "Give a team member a piece of client work. It appears on their Actions tab straight away — nothing for them to accept first."
-                : "Every piece of client work the team has been given, outstanding and completed."}
+            <p className="mt-3 font-body text-sm leading-[1.7] text-dim">
+              Balance client work across the team, see what is becoming urgent, and keep completed or cancelled tasks on record.
             </p>
           </ActionsHeader>
         </Rise>
 
-        <Group>
+        <Group className="space-y-4">
           <Rise>
-            {(actionsResult.error || teamResult.error || clientsResult.error) && (
+            <TaskFilters
+              key={query}
+              values={filters}
+              team={[
+                { value: "unassigned", label: "Unassigned" },
+                ...team.map((member) => ({ value: member.id, label: member.full_name?.trim() || member.email || "Unnamed team member" })),
+              ]}
+              clients={clients.map((option) => ({ value: option.id, label: option.legal_name }))}
+            />
+          </Rise>
+
+          {(tasksResult.error || teamResult.error || clientsResult.error) && (
+            <Rise>
               <InlineAlert
                 variant="page"
-                message="Some of this page could not be loaded. This has been recorded — refresh and try again."
+                message="Some team tasks could not be loaded. This has been recorded — refresh and try again."
               />
-            )}
-          </Rise>
-          <Rise>
-            <AssignActionPanel
-              team={teamResult.data ?? []}
-              clients={clientsResult.data ?? []}
-              initialActions={actionsResult.data ?? []}
-              canAssign={canAssign}
+            </Rise>
+          )}
+
+          <Rise className="space-y-4">
+            <TeamTasksPanel
+              tasks={tasks}
+              team={team}
+              clients={clients}
+              canManage={canManage}
+              total={total}
+              previousHref={previousHref}
+              nextHref={nextHref}
             />
           </Rise>
         </Group>

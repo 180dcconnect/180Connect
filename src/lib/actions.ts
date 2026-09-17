@@ -24,10 +24,33 @@
 
 
 import { z } from "zod";
-import { nonEmptyTrimmed, safeValidate } from "./validation.ts";
+import { isIsoDate, nonEmptyTrimmed, safeValidate } from "./validation.ts";
 import { dayKeyOf } from "./display-format.ts";
 
 export type ActionStatus = "open" | "completed" | "cancelled";
+export type TaskPriority = "high" | "normal" | "low";
+
+export const TASK_PRIORITIES: readonly TaskPriority[] = ["high", "normal", "low"];
+
+const PRIORITY_FROM_DB: Record<number, TaskPriority> = {
+  1: "high",
+  2: "normal",
+  3: "low",
+};
+
+const PRIORITY_TO_DB: Record<TaskPriority, number> = {
+  high: 1,
+  normal: 2,
+  low: 3,
+};
+
+export function taskPriorityFromDb(value: number | null | undefined): TaskPriority {
+  return PRIORITY_FROM_DB[value ?? 2] ?? "normal";
+}
+
+export function taskPriorityToDb(value: TaskPriority): number {
+  return PRIORITY_TO_DB[value];
+}
 
 export type ActionRow = {
   id: string;
@@ -38,6 +61,7 @@ export type ActionRow = {
   organisation_id: string;
   created_by_user_id: string | null;
   created_at: string;
+  priority?: number | null;
   organisation: { legal_name: string } | null;
   created_by_user: { full_name: string | null } | null;
 };
@@ -58,6 +82,9 @@ export type MyAction = {
   organisationName: string;
   dueDate: string | null;
   isOverdue: boolean;
+  /** Calendar days past due, today counting as 0. 0 when not overdue. */
+  daysOverdue: number;
+  priority: TaskPriority;
   origin: ActionOrigin;
   assignedByName: string | null;
 };
@@ -164,6 +191,24 @@ export function isActionOverdue(dueDate: string | null, now: Date): boolean {
 }
 
 /**
+ * Whole calendar days between `dueDate` and `now`'s own day, floored at 0 for
+ * a date that is not overdue. Parsed by hand, same as `formatDueDate`: a plain
+ * calendar date has no time of day, so going through `new Date(dueDate)` and
+ * a timestamp subtraction risks an off-by-one from wherever the server or
+ * browser sits relative to UTC.
+ */
+export function daysOverdue(dueDate: string | null, now: Date): number {
+  if (!dueDate) return 0;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dueDate);
+  if (!match) return 0;
+  const [, year, month, day] = match;
+  const due = new Date(Number(year), Number(month) - 1, Number(day));
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((today.getTime() - due.getTime()) / (24 * 60 * 60 * 1000));
+  return Math.max(0, days);
+}
+
+/**
  * F168 AC3 / F171 AC2: only open work belongs in the default view —
  * completed (F171) and cancelled actions are filtered out here as a
  * defensive second layer, not only in the page's own query, matching the
@@ -198,6 +243,8 @@ export function formatMyActions(
         organisationName: row.organisation?.legal_name?.trim() || "Unknown client",
         dueDate: row.due_date,
         isOverdue: isActionOverdue(row.due_date, now),
+        daysOverdue: daysOverdue(row.due_date, now),
+        priority: taskPriorityFromDb(row.priority),
         origin,
         assignedByName:
           origin === "assigned"
@@ -254,6 +301,8 @@ export type TeamActionRow = {
   created_by_user_id: string | null;
   assignee_user_id: string | null;
   created_at: string;
+  updated_at?: string;
+  priority?: number | null;
   organisation: { legal_name: string } | null;
   created_by_user: { full_name: string | null } | null;
   assignee: { full_name: string | null } | null;
@@ -271,6 +320,25 @@ export type TeamAssignedAction = {
   assigneeName: string;
   assignedByName: string;
   createdAt: string;
+};
+
+export type TeamTask = {
+  id: string;
+  title: string;
+  description: string | null;
+  organisationId: string;
+  organisationName: string;
+  dueDate: string | null;
+  isOverdue: boolean;
+  daysOverdue: number;
+  status: ActionStatus;
+  priority: TaskPriority;
+  assigneeId: string | null;
+  assigneeName: string;
+  assignedByName: string;
+  origin: ActionOrigin;
+  createdAt: string;
+  updatedAt: string;
 };
 
 /**
@@ -329,6 +397,52 @@ export function formatTeamAssignedActions(
     });
 }
 
+/**
+ * The team tracker is deliberately broader than the legacy assignment list:
+ * it includes work raised by an admin, by the assignee themselves, and by a
+ * system process. The UI can explain the origin without hiding legitimate
+ * team workload from the people responsible for balancing it.
+ */
+export function formatTeamTasks(
+  rows: readonly TeamActionRow[],
+  now: Date = new Date(),
+): TeamTask[] {
+  return rows.map((row): TeamTask => {
+    const origin: ActionOrigin =
+      row.created_by_user_id === null
+        ? "system"
+        : row.created_by_user_id === row.assignee_user_id
+          ? "self"
+          : "assigned";
+    const open = row.status === "open";
+    const isOverdue = open && isActionOverdue(row.due_date, now);
+
+    return {
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      organisationId: row.organisation_id,
+      organisationName: row.organisation?.legal_name?.trim() || "Unknown client",
+      dueDate: row.due_date,
+      isOverdue,
+      daysOverdue: isOverdue ? daysOverdue(row.due_date, now) : 0,
+      status: row.status,
+      priority: taskPriorityFromDb(row.priority),
+      assigneeId: row.assignee_user_id,
+      assigneeName:
+        row.assignee?.full_name?.trim() ||
+        (open ? "Unassigned" : "Former team member"),
+      assignedByName:
+        origin === "system"
+          ? "System"
+          : row.created_by_user?.full_name?.trim() || UNKNOWN_PERSON,
+      origin,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at ?? row.created_at,
+    };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // F169 — creating and assigning a new action.
 // ---------------------------------------------------------------------------
@@ -339,10 +453,10 @@ export type AssignActionInput = {
   title: string;
   description: string | null;
   dueDate: string | null;
+  priority: TaskPriority;
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Validates one create-and-assign submission; same "return a message, don't
@@ -357,9 +471,10 @@ export function validateAssignAction(input: {
   title: unknown;
   description: unknown;
   dueDate: unknown;
+  priority?: unknown;
 }): { success: true; data: AssignActionInput } | { success: false; message: string } {
   if (typeof input.organisationId !== "string" || !UUID_RE.test(input.organisationId)) {
-    return { success: false, message: "Choose a client for this action." };
+    return { success: false, message: "Choose a client for this task." };
   }
   if (typeof input.assigneeUserId !== "string" || !UUID_RE.test(input.assigneeUserId)) {
     return { success: false, message: "Choose a team member to assign this to." };
@@ -384,10 +499,21 @@ export function validateAssignAction(input: {
   let dueDate: string | null = null;
   if (typeof input.dueDate === "string" && input.dueDate.trim()) {
     const trimmed = input.dueDate.trim();
-    if (!DATE_ONLY_RE.test(trimmed) || Number.isNaN(Date.parse(trimmed))) {
+    if (!isIsoDate(trimmed)) {
       return { success: false, message: "Enter a valid due date." };
     }
     dueDate = trimmed;
+  }
+
+  let priority: TaskPriority = "normal";
+  if (input.priority !== undefined && input.priority !== null && input.priority !== "") {
+    if (
+      typeof input.priority !== "string" ||
+      !TASK_PRIORITIES.includes(input.priority as TaskPriority)
+    ) {
+      return { success: false, message: "Choose High, Normal or Low priority." };
+    }
+    priority = input.priority as TaskPriority;
   }
 
   return {
@@ -398,6 +524,50 @@ export function validateAssignAction(input: {
       title: parsed.data.title,
       description,
       dueDate,
+      priority,
+    },
+  };
+}
+
+export type UpdateTeamTaskInput = Omit<AssignActionInput, "organisationId"> & {
+  actionId: string;
+  expectedUpdatedAt: string;
+};
+
+export function validateUpdateTeamTask(input: {
+  actionId: unknown;
+  assigneeUserId: unknown;
+  title: unknown;
+  description: unknown;
+  dueDate: unknown;
+  priority: unknown;
+  expectedUpdatedAt: unknown;
+}): { success: true; data: UpdateTeamTaskInput } | { success: false; message: string } {
+  if (typeof input.actionId !== "string" || !UUID_RE.test(input.actionId)) {
+    return { success: false, message: "That task could not be found. Refresh and try again." };
+  }
+  if (typeof input.expectedUpdatedAt !== "string" || Number.isNaN(Date.parse(input.expectedUpdatedAt))) {
+    return { success: false, message: "Refresh this task before saving your changes." };
+  }
+  const parsed = validateAssignAction({
+    organisationId: "00000000-0000-0000-0000-000000000000",
+    assigneeUserId: input.assigneeUserId,
+    title: input.title,
+    description: input.description,
+    dueDate: input.dueDate,
+    priority: input.priority,
+  });
+  if (!parsed.success) return parsed;
+  return {
+    success: true,
+    data: {
+      actionId: input.actionId,
+      assigneeUserId: parsed.data.assigneeUserId,
+      title: parsed.data.title,
+      description: parsed.data.description,
+      dueDate: parsed.data.dueDate,
+      priority: parsed.data.priority,
+      expectedUpdatedAt: input.expectedUpdatedAt,
     },
   };
 }
@@ -440,7 +610,7 @@ export function assigneeOwnerNote({
   return `${assigneeName} doesn't own this client — it's owned by ${owner}.`;
 }
 
-const ASSIGN_GENERIC_FAILURE = "The action could not be saved. Refresh and try again.";
+const ASSIGN_GENERIC_FAILURE = "The task could not be saved. Refresh and try again.";
 
 /**
  * Maps a Postgres error from the plain ACTIONS insert onto something safe to
@@ -456,7 +626,7 @@ export function assignActionFailure(error: { code?: string; message?: string }):
   }
   switch (error.code) {
     case "42501":
-      return { status: 403, error: "Only an admin can assign actions." };
+      return { status: 403, error: "Only an administrator can assign tasks." };
     case "23514":
       return { status: 400, error: "Enter what needs to be done." };
     case "23503":
@@ -472,7 +642,7 @@ export function assignActionFailure(error: { code?: string; message?: string }):
 
 export type RpcFailure = { status: number; error: string };
 
-const COMPLETE_GENERIC_FAILURE = "This action could not be marked complete. Refresh and try again.";
+const COMPLETE_GENERIC_FAILURE = "This task could not be marked complete. Refresh and try again.";
 
 /**
  * Maps a Postgres error from complete_action onto something safe to show a
@@ -486,11 +656,11 @@ export function completeActionFailure(error: { code?: string; message?: string }
   }
   switch (error.code) {
     case "42501":
-      return { status: 403, error: "Only the person it's assigned to (or an admin) can complete this action." };
+      return { status: 403, error: "Only the person it is assigned to (or an administrator) can complete this task." };
     case "55000":
-      return { status: 409, error: "This action is no longer open — it may already be completed." };
+      return { status: 409, error: "This task is no longer open — it may already be completed." };
     case "P0002":
-      return { status: 404, error: "That action could not be found. Refresh and try again." };
+      return { status: 404, error: "That task could not be found. Refresh and try again." };
     default:
       return { status: 500, error: COMPLETE_GENERIC_FAILURE };
   }

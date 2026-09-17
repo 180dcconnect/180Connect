@@ -1487,10 +1487,14 @@ declare
   v_action_a    uuid := '00000000-0000-4000-c000-000000000001';
   v_act_mine    uuid := '00000000-0000-4000-c000-000000000021';
   v_act_theirs  uuid := '00000000-0000-4000-c000-000000000022';
+  v_team_task   uuid := '00000000-0000-4000-c000-000000000023';
   v_assignee    uuid;
   v_status      public.action_status;
   v_completed_at timestamptz;
   v_completed_by uuid;
+  v_priority    smallint;
+  v_title       text;
+  v_updated_at  timestamptz;
   v_count       bigint;
 begin
   if not tests.tables_exist('actions', 'organisations', 'users') then
@@ -1632,6 +1636,132 @@ begin
   select count(*) into v_count from public.actions where id = v_act_theirs;
   return next is(v_count, 1::bigint,
     'CAM cannot delete an action they raised once it belongs to someone else');
+
+  -- Team tasks tracker: priority is stored compactly but edited only through
+  -- the audited admin RPC. Viewer and CAM controls are hidden in the app; these
+  -- refusals are the load-bearing backstop if either reaches the write anyway.
+  if to_regprocedure(
+       'public.update_team_task(uuid,text,text,date,smallint,uuid,timestamp with time zone)'
+     ) is null
+     or to_regprocedure(
+       'public.set_team_task_status(uuid,public.action_status,timestamp with time zone)'
+     ) is null then
+    return next skip(13, 'Team tasks tracker RPCs not yet migrated');
+    return;
+  end if;
+
+  insert into public.actions
+    (id, organisation_id, assignee_user_id, created_by_user_id, title)
+  values
+    (v_team_task, v_org_cam_a, v_cam_a, v_admin, 'Prepare the renewal pack');
+
+  select priority, updated_at
+    into v_priority, v_updated_at
+    from public.actions where id = v_team_task;
+  return next is(v_priority, 2::smallint,
+    'existing writers get Normal priority by default');
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'update public.actions set priority = 1 where id = %L', v_team_task)),
+    '42501',
+    'admin cannot change task priority by direct write — the audited RPC is required'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.update_team_task(%L, %L, null, null, 1, %L, %L)',
+      v_team_task, 'CAM edit', v_cam_b, v_updated_at)),
+    '42501',
+    'CAM cannot use the Team tasks edit RPC'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.update_team_task(%L, %L, null, null, 1, %L, %L)',
+      v_team_task, 'Viewer edit', v_cam_b, v_updated_at)),
+    '42501',
+    'viewer cannot use the Team tasks edit RPC'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.update_team_task(%L, %L, %L, %L, 1, %L, %L)',
+      v_team_task, 'Prepare and send the renewal pack', 'Include the revised figures',
+      '2026-10-01', v_cam_b, v_updated_at)),
+    null,
+    'admin can edit and reassign a team task through the RPC'
+  );
+
+  select title, priority, assignee_user_id, updated_at
+    into v_title, v_priority, v_assignee, v_updated_at
+    from public.actions where id = v_team_task;
+  return next ok(
+    v_title = 'Prepare and send the renewal pack'
+      and v_priority = 1
+      and v_assignee = v_cam_b,
+    'the Team tasks edit RPC changes the requested fields together'
+  );
+  return next ok(
+    exists (
+      select 1 from public.audit_log
+       where target_table = 'actions' and target_id = v_team_task
+         and action = 'action_updated'
+    ) and exists (
+      select 1 from public.audit_log
+       where target_table = 'actions' and target_id = v_team_task
+         and action = 'action_reassigned'
+    ),
+    'editing and reassigning a team task records both audit events'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.update_team_task(%L, %L, null, null, 2, %L, %L)',
+      v_team_task, 'Stale edit', v_cam_a, v_updated_at - interval '1 second')),
+    '40001',
+    'a stale team task edit is refused instead of overwriting newer work'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.set_team_task_status(%L, ''cancelled'', %L)',
+      v_team_task, v_updated_at)),
+    '42501',
+    'viewer cannot change a team task status'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_team_task_status(%L, ''cancelled'', %L)',
+      v_team_task, v_updated_at)),
+    null,
+    'admin can cancel a team task through the audited RPC'
+  );
+  select status, updated_at into v_status, v_updated_at
+    from public.actions where id = v_team_task;
+  return next is(v_status, 'cancelled'::public.action_status,
+    'the cancelled task remains on record');
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_team_task_status(%L, ''open'', %L)',
+      v_team_task, v_updated_at)),
+    null,
+    'admin can restore a cancelled task to Open from the same screen'
+  );
+  return next ok(
+    exists (
+      select 1 from public.audit_log
+       where target_table = 'actions' and target_id = v_team_task
+         and action = 'action_cancelled'
+    ) and exists (
+      select 1 from public.audit_log
+       where target_table = 'actions' and target_id = v_team_task
+         and action = 'action_reopened'
+    ),
+    'cancel and restore each leave an audit event'
+  );
 end;
 $$;
 

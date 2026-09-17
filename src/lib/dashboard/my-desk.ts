@@ -1,5 +1,5 @@
 /**
- * The dashboard's "Your actions" card, decided: the open actions assigned to
+ * The dashboard's "Your tasks" card, decided: the open tasks assigned to
  * this person that are overdue or due within the week, and the emails they
  * drafted but never sent.
  *

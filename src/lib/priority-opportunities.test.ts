@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  applyOpportunityFacts,
+  scoreGaps,
   scoreHighlights,
   formatPriorityScore,
   priorityScoreOutOf100,
@@ -127,19 +129,23 @@ describe("selectPriorityOpportunities", () => {
 });
 
 describe("scoreHighlights", () => {
-  it("names the helping checks in the record page's words, by share", () => {
+  it("names what each check found, ranked by share of the lift", () => {
     const highlights = scoreHighlights(
       org({
+        sector: "Education",
+        facts: { incomeGBP: 1_400_000, incomePeriodEnd: "2024-03-31" },
+        outreach_status: "responded",
         score_factors: factors({ sector: 0.7, size: 0.9, previousContact: 0.8 }),
       }),
     );
     assert.deepEqual(
       highlights.map((highlight) => highlight.label),
-      ["Size", "Previous contact", "Sector"],
+      ["£1.4m income (2024 accounts)", "Replied to us", "Education is a priority sector"],
     );
+    // The fact is the line; the bar carries how much it counted.
     assert.deepEqual(
       highlights.map((highlight) => highlight.strength),
-      ["strong", "strong", "above average"],
+      [null, null, null],
     );
     for (const highlight of highlights) {
       assert.ok(
@@ -149,7 +155,22 @@ describe("scoreHighlights", () => {
     }
   });
 
-  it("ranks by weight-aware share, not raw factor value", () => {
+  it("shares the lift, so the three lines account for all of it", () => {
+    const highlights = scoreHighlights(
+      org({ score_factors: factors({ sector: 0.7, size: 0.9, previousContact: 0.8 }) }),
+    );
+    const total = highlights.reduce((sum, highlight) => sum + (highlight.sharePct ?? 0), 0);
+    assert.ok(Math.abs(total - 100) <= 1, `lift shares sum to ${total}`);
+  });
+
+  it("falls back to the check's name when the figure was not fetched", () => {
+    const highlights = scoreHighlights(
+      org({ score_factors: factors({ size: 0.9 }) }),
+    );
+    assert.deepEqual(highlights, [{ label: "Size", strength: "strong", sharePct: 100 }]);
+  });
+
+  it("ranks by weight-aware lift, not raw factor value", () => {
     const highlights = scoreHighlights(
       org({
         score_factors: factors(
@@ -158,18 +179,53 @@ describe("scoreHighlights", () => {
         ),
       }),
     );
-    assert.deepEqual(
-      highlights.map((highlight) => highlight.label)[0],
-      "Size",
-    );
+    // sector lifts 0.4 × 0.05 = 0.020; size lifts 0.1 × 0.35 = 0.035.
+    assert.equal(highlights[0].label, "Size");
   });
 
-  it("skips neutral checks — absence is not a reason", () => {
+  it("gives a check with nothing on record no share of the lift", () => {
     const highlights = scoreHighlights(
       org({ score_factors: factors({ size: 0.9 }) }),
     );
     assert.ok(!highlights.some((highlight) => highlight.label === "Sector"));
     assert.ok(!highlights.some((highlight) => highlight.label === "Geography"));
+    // The old composition maths handed every neutral check a fifth of the
+    // score under equal weights; nothing here may inherit that.
+    assert.equal(highlights.length, 1);
+  });
+
+  it("counts matched grants, and counts one of them singular", () => {
+    const one = scoreHighlights(
+      org({
+        facts: { matchedGrantCount: 1 },
+        score_factors: factors({ partnershipHistory: 0.6 }),
+      }),
+    );
+    assert.equal(one[0].label, "1 matched grant");
+    const six = scoreHighlights(
+      org({
+        facts: { matchedGrantCount: 6 },
+        score_factors: factors({ partnershipHistory: 0.9 }),
+      }),
+    );
+    assert.equal(six[0].label, "6 matched grants");
+  });
+
+  it("claims a priority sector or area only above the helping cut", () => {
+    const strong = scoreHighlights(
+      org({ sector: "Education", city: "Leeds", score_factors: factors({ sector: 0.7, geography: 0.7 }) }),
+    );
+    assert.deepEqual(
+      strong.map((highlight) => highlight.label),
+      ["Education is a priority sector", "Leeds is a priority area"],
+    );
+    const slight = scoreHighlights(
+      org({ sector: "Education", city: "Leeds", score_factors: factors({ sector: 0.52, geography: 0.52 }) }),
+    );
+    assert.deepEqual(
+      slight.map((highlight) => highlight.label),
+      ["Works in Education", "Based in Leeds"],
+    );
   });
 
   it("caps at three lines", () => {
@@ -187,11 +243,12 @@ describe("scoreHighlights", () => {
     assert.equal(highlights.length, 3);
   });
 
-  it("reports honest strengths when nothing is actively helping", () => {
+  it("reports honest strengths, and no share, when nothing is lifting", () => {
     const highlights = scoreHighlights(
       org({ score_factors: factors({ sector: 0.4, size: 0.45 }) }),
     );
     assert.ok(highlights.length > 0);
+    assert.ok(highlights.every((highlight) => highlight.sharePct === null));
     assert.ok(
       highlights.every((highlight) =>
         ["middling", "weak", "very weak"].includes(highlight.strength ?? ""),
@@ -223,11 +280,67 @@ describe("scoreHighlights", () => {
 
   it("never leaks factor keys or table language", () => {
     const highlights = scoreHighlights(
-      org({ score_factors: factors({ sector: 0.7, size: 0.9 }) }),
+      org({
+        sector: "Education",
+        outreach_status: "no_response",
+        facts: { incomeGBP: 90_000 },
+        score_factors: factors({ sector: 0.7, size: 0.9 }),
+      }),
     );
     for (const highlight of highlights) {
-      assert.match(highlight.label, /^[A-Z]/);
-      assert.doesNotMatch(highlight.label, /score_factors|priority_|latest_scores|trading_name/i);
+      assert.doesNotMatch(
+        highlight.label,
+        /score_factors|priority_|latest_scores|trading_name|not_contacted|no_response/i,
+      );
     }
+  });
+});
+
+describe("scoreGaps", () => {
+  it("names what the score could not read, in the record's words", () => {
+    const gaps = scoreGaps(
+      org({
+        score_factors: {
+          ...factors({ sector: 0.7 }),
+          readings: { sector: true, geography: false, size: false, previousContact: true },
+        },
+      }),
+    );
+    assert.deepEqual(gaps, ["No town or city recorded", "No accounts filed", "No matched grants"]);
+  });
+
+  it("falls back to the neutral value for rows written before the flags", () => {
+    const gaps = scoreGaps(org({ score_factors: factors({ sector: 0.7, size: 0.9 }) }));
+    assert.deepEqual(gaps, [
+      "No town or city recorded",
+      "No matched grants",
+      "No outreach recorded",
+    ]);
+  });
+
+  it("says nothing when there is no breakdown to read", () => {
+    assert.deepEqual(scoreGaps(org()), []);
+  });
+});
+
+describe("applyOpportunityFacts", () => {
+  it("rebuilds the lines of the ranked few once their figures arrive", () => {
+    const ranked = selectPriorityOpportunities([
+      org({ id: "a", score_factors: factors({ size: 0.9 }) }),
+    ]);
+    assert.equal(ranked[0].highlights[0].label, "Size");
+
+    const withFacts = applyOpportunityFacts(
+      ranked,
+      new Map([["a", { incomeGBP: 250_000, incomePeriodEnd: "2025-12-31" }]]),
+    );
+    assert.equal(withFacts[0].highlights[0].label, "£250k income (2025 accounts)");
+  });
+
+  it("leaves an opportunity alone when no figures came back for it", () => {
+    const ranked = selectPriorityOpportunities([
+      org({ id: "a", score_factors: factors({ size: 0.9 }) }),
+    ]);
+    assert.deepEqual(applyOpportunityFacts(ranked, new Map()), ranked);
   });
 });

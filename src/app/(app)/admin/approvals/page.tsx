@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
 import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
+import { Rise, Stage } from "@/components/dashboard-stage";
 import {
   EDIT_SUGGESTION_SELECT,
   type EditSuggestionRow,
@@ -49,32 +51,45 @@ export default async function AdminApprovalsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f1f2f4] p-6">
-      <section className="mx-auto w-full max-w-4xl rounded-2xl bg-white p-8 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm font-bold text-brand">Admin workspace</p>
-            <h1 className="mt-1 text-3xl font-bold">Approvals</h1>
-          </div>
-          <Link
-            className="text-sm font-bold text-brand hover:underline"
-            href="/admin"
-          >
-            Back to admin
-          </Link>
-        </div>
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+      <Stage className="mx-auto w-full max-w-[1400px] space-y-8">
+        <Rise>
+          <header className="space-y-5">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] font-semibold leading-[1] tracking-[-0.03em] text-ink">
+                  Approvals
+                </h1>
+                <p className="mt-3 text-sm leading-[1.65] text-dim">
+                  Review changes proposed by Client Account Managers before they reach
+                  the live client record.
+                </p>
+              </div>
+              <Link
+                className="inline-flex w-fit items-center gap-1.5 rounded-inset px-2 py-1 text-[13px] font-semibold text-lead transition-colors hover:bg-lead-wash focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30"
+                href="/admin"
+              >
+                <ArrowLeft className="size-3.5" aria-hidden="true" />
+                Back to admin
+              </Link>
+            </div>
+          </header>
+        </Rise>
 
         {error && (
-          <div className="mt-5">
+          <Rise>
             <InlineAlert
               variant="page"
-              message="The pending approvals could not be loaded. Please refresh and try again."
+              className="rounded-panel border-stop/20 bg-stop-wash/60 text-stop"
+              message="The approvals list could not be loaded. Refresh the page and try again."
             />
-          </div>
+          </Rise>
         )}
 
-        <ApprovalsPanel initialSuggestions={data ?? []} canDecide={canDecide} />
-      </section>
-    </main>
+        <Rise>
+          <ApprovalsPanel initialSuggestions={data ?? []} canDecide={canDecide} />
+        </Rise>
+      </Stage>
+    </div>
   );
 }

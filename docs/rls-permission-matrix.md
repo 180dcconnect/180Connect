@@ -841,10 +841,20 @@ column rather than an assumption that the assignee always did it — since an
 admin can complete someone else's action too, "who" genuinely isn't always
 `assignee_user_id`.
 
-This closes `status` for every transition, not just completion: nothing in
-F171 or elsewhere builds a "cancel" flow, so that exit stays theoretically
-reachable only by a future audited RPC of its own, the same way this one now
-owns completion.
+**Team task management RPCs**
+(`supabase/migrations/20261017040000_team_tasks_tracker.sql`) add the admin
+paths used by the Team tasks tracker. `update_team_task(...)` edits the work
+fields and may reassign the task; `set_team_task_status(...)` completes,
+cancels or restores it. Both are `SECURITY DEFINER`, self-check active-admin
+access, lock the row, reject a stale `updated_at`, and write ownership or
+status changes to `audit_log` in the same transaction. Viewers retain the
+shared read and receive no write path. The existing `complete_action(...)`
+remains the CAM path for completing their own task.
+
+`ACTIONS.priority` is a checked `smallint` translated at the application edge:
+1 High, 2 Normal, 3 Low. Existing rows and old writers receive Normal from the
+column default. It carries no direct UPDATE grant; team-page edits reach it
+through `update_team_task(...)` alongside the audited assignee check.
 
 Deletion requires the CAM to have **raised** the action and to **still hold** it, and it
 must still be open. A completed or cancelled action is handover history and only an admin

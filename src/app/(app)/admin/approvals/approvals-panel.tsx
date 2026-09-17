@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 import Link from "next/link";
-import { Check, FileEdit, History, X } from "lucide-react";
-import { OriginButton } from "@/components/ui/origin-button";
+import { ArrowRight, Check, FileEdit, History, Loader2, X } from "lucide-react";
 import { InlineAlert } from "@/components/ui/inline-alert";
+import { Pill } from "@/app/(app)/clients/[id]/section-card";
 import {
   restrictedFieldLabel,
   type EditSuggestionRow,
@@ -12,17 +12,42 @@ import {
 import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import { decideEditSuggestionAction } from "./actions";
 
+type ApprovalTab = "pending" | "history";
+type PillTone = "go" | "hold" | "stop" | "neutral";
+
+const STATUS_LABEL: Record<EditSuggestionRow["status"], string> = {
+  pending: "Pending review",
+  approved: "Approved",
+  rejected: "Rejected",
+  superseded: "Replaced",
+};
+
+const STATUS_TONE: Record<EditSuggestionRow["status"], PillTone> = {
+  pending: "hold",
+  approved: "go",
+  rejected: "stop",
+  superseded: "neutral",
+};
+
 function personLabel(person: { full_name: string | null; email: string } | null) {
-  if (!person) return "—";
+  if (!person) return "Unknown team member";
   return person.full_name ?? person.email;
 }
 
-const STATUS_PILL: Record<EditSuggestionRow["status"], string> = {
-  pending: "border-amber-200 bg-amber-50 text-amber-900",
-  approved: "border-emerald-200 bg-emerald-50 text-emerald-900",
-  rejected: "border-neutral-200 bg-neutral-100 text-foreground/65",
-  superseded: "border-neutral-200 bg-neutral-100 text-foreground/45",
-};
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+function DisplayValue({ value }: { value: string | null }) {
+  return value ? (
+    <span>{value}</span>
+  ) : (
+    <span className="italic text-faint">Not provided</span>
+  );
+}
 
 export function ApprovalsPanel({
   initialSuggestions,
@@ -37,7 +62,7 @@ export function ApprovalsPanel({
    */
   canDecide: boolean;
 }) {
-  const [activeTab, setActiveTab] = useState<"pending" | "history">("pending");
+  const [activeTab, setActiveTab] = useState<ApprovalTab>("pending");
   const [pending, setPending] = useState(() =>
     initialSuggestions.filter((row) => row.status === "pending"),
   );
@@ -45,14 +70,17 @@ export function ApprovalsPanel({
     initialSuggestions.filter((row) => row.status !== "pending"),
   );
   const [reasons, setReasons] = useState<Record<string, string>>({});
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [busyDecision, setBusyDecision] = useState<{
+    id: string;
+    approve: boolean;
+  } | null>(null);
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
     message: string;
   } | null>(null);
 
   async function handleDecision(row: EditSuggestionRow, approve: boolean) {
-    setBusyId(row.id);
+    setBusyDecision({ id: row.id, approve });
     setFeedback(null);
     const reasonText = reasons[row.id]?.trim() || undefined;
 
@@ -64,15 +92,11 @@ export function ApprovalsPanel({
       });
 
       if (!result.ok) {
-        setFeedback({
-          type: "error",
-          message: result.error,
-        });
+        setFeedback({ type: "error", message: result.error });
         return;
       }
 
-      // AC3: Genuinely pending items only — item moves out of pending view immediately
-      setPending((prev) => prev.filter((item) => item.id !== row.id));
+      setPending((current) => current.filter((item) => item.id !== row.id));
 
       const updatedRow: EditSuggestionRow = {
         ...row,
@@ -80,57 +104,71 @@ export function ApprovalsPanel({
         decided_at: new Date().toISOString(),
         rejection_reason: reasonText ?? null,
       };
-      setDecided((prev) => [updatedRow, ...prev]);
+      setDecided((current) => [updatedRow, ...current]);
 
-      const clientName = row.organisations?.legal_name ?? "client";
+      const clientName = row.organisations?.legal_name ?? "the client";
       const fieldLabel = restrictedFieldLabel(row.field_name);
       setFeedback({
         type: "success",
         message: approve
-          ? `Approved correction to ${fieldLabel} for ${clientName}. Live record updated.`
-          : `Rejected edit suggestion for ${clientName}. Live record unchanged.`,
+          ? `${fieldLabel} for ${clientName} was approved and applied to the live record.`
+          : `The suggested change for ${clientName} was rejected. The live record was not changed.`,
       });
     } catch {
       setFeedback({
         type: "error",
-        message: "Could not reach the server. Please check your connection and try again.",
+        message: "The decision could not be saved. Check your connection and try again.",
       });
     } finally {
-      setBusyId(null);
+      setBusyDecision(null);
     }
   }
 
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    let nextTab: ApprovalTab | null = null;
+    if (event.key === "ArrowLeft" || event.key === "Home") nextTab = "pending";
+    if (event.key === "ArrowRight" || event.key === "End") nextTab = "history";
+    if (!nextTab) return;
+
+    event.preventDefault();
+    setActiveTab(nextTab);
+    document.getElementById(`approvals-tab-${nextTab}`)?.focus();
+  }
+
   return (
-    <div className="mt-8 space-y-6">
-      {/* Subtitle / Context description */}
-      <p className="text-sm leading-relaxed text-foreground/65">
-        {canDecide
-          ? "Review proposals from Client Account Managers. Approving applies the suggested value directly to the live client record and audits the change; rejecting leaves the record intact."
-          : "Proposals from Client Account Managers, and how each one was decided."}
-      </p>
+    <div className="space-y-6">
       {!canDecide && (
-        <p className="text-sm leading-relaxed text-foreground/55">{VIEW_ONLY_CONTROL_NOTE}</p>
+        <div className="rounded-inset bg-paper px-4 py-3">
+          <p className="text-[13px] leading-[1.55] text-dim">
+            {VIEW_ONLY_CONTROL_NOTE}
+          </p>
+        </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-black/10 pb-3">
+      <div
+        className="flex items-end gap-6 border-b border-rule"
+        role="tablist"
+        aria-label="Approval views"
+      >
         <button
           type="button"
+          id="approvals-tab-pending"
           onClick={() => setActiveTab("pending")}
-          className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors ${
+          onKeyDown={handleTabKeyDown}
+          tabIndex={activeTab === "pending" ? 0 : -1}
+          className={`relative inline-flex cursor-pointer items-center gap-2 pb-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30 ${
             activeTab === "pending"
-              ? "bg-black text-white"
-              : "text-foreground/70 hover:bg-black/5 hover:text-foreground"
+              ? "text-lead after:absolute after:inset-x-0 after:bottom-[-1px] after:h-0.5 after:bg-lead"
+              : "text-dim hover:text-ink"
           }`}
+          aria-controls="approvals-panel-pending"
           aria-selected={activeTab === "pending"}
           role="tab"
         >
-          <span>Pending review</span>
+          Awaiting review
           <span
-            className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-              activeTab === "pending"
-                ? "bg-white/20 text-white"
-                : "bg-black/10 text-foreground/75"
+            className={`rounded-full px-2 py-0.5 text-[11px] tabular-nums ${
+              activeTab === "pending" ? "bg-lead-wash text-lead" : "bg-paper-sunk text-dim"
             }`}
           >
             {pending.length}
@@ -139,22 +177,23 @@ export function ApprovalsPanel({
 
         <button
           type="button"
+          id="approvals-tab-history"
           onClick={() => setActiveTab("history")}
-          className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors ${
+          onKeyDown={handleTabKeyDown}
+          tabIndex={activeTab === "history" ? 0 : -1}
+          className={`relative inline-flex cursor-pointer items-center gap-2 pb-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30 ${
             activeTab === "history"
-              ? "bg-black text-white"
-              : "text-foreground/70 hover:bg-black/5 hover:text-foreground"
+              ? "text-lead after:absolute after:inset-x-0 after:bottom-[-1px] after:h-0.5 after:bg-lead"
+              : "text-dim hover:text-ink"
           }`}
+          aria-controls="approvals-panel-history"
           aria-selected={activeTab === "history"}
           role="tab"
         >
-          <History className="h-4 w-4" aria-hidden="true" />
-          <span>Decided history</span>
+          Decision history
           <span
-            className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-              activeTab === "history"
-                ? "bg-white/20 text-white"
-                : "bg-black/10 text-foreground/75"
+            className={`rounded-full px-2 py-0.5 text-[11px] tabular-nums ${
+              activeTab === "history" ? "bg-lead-wash text-lead" : "bg-paper-sunk text-dim"
             }`}
           >
             {decided.length}
@@ -162,227 +201,272 @@ export function ApprovalsPanel({
         </button>
       </div>
 
-      {/* Feedback banner */}
       {feedback && (
-        <div role="status" aria-live="polite">
+        <div aria-live="polite">
           {feedback.type === "error" ? (
-            <InlineAlert variant="page" message={feedback.message} />
+            <InlineAlert
+              variant="page"
+              className="rounded-panel border-stop/20 bg-stop-wash/60 text-stop"
+              message={feedback.message}
+            />
           ) : (
-            <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900">
-              <Check className="h-4 w-4 shrink-0 text-emerald-700" aria-hidden="true" />
+            <p
+              role="status"
+              className="flex items-start gap-2 rounded-inset bg-go-wash px-4 py-3 text-sm font-medium text-go"
+            >
+              <Check className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
               <span>{feedback.message}</span>
-            </div>
+            </p>
           )}
         </div>
       )}
 
-      {/* Tab: Pending Items */}
-      {activeTab === "pending" && (
-        <section aria-label="Pending Approvals">
-          {pending.length === 0 ? (
-            <div className="rounded-2xl border border-black/10 bg-neutral-50/50 px-6 py-12 text-center">
-              <Check className="mx-auto h-8 w-8 text-emerald-600" aria-hidden="true" />
-              <h2 className="mt-3 text-base font-bold text-foreground">
-                No pending approvals
-              </h2>
-              <p className="mt-1 text-sm text-foreground/60">
-                All suggested client edits have been reviewed and decided.
-              </p>
-            </div>
-          ) : (
-            <ul className="space-y-5">
-              {pending.map((row) => {
-                const isBusy = busyId === row.id;
-                const fieldLabel = restrictedFieldLabel(row.field_name);
-                const clientName = row.organisations?.legal_name ?? "Unknown client";
+      <section
+        id="approvals-panel-pending"
+        role="tabpanel"
+        aria-labelledby="approvals-tab-pending"
+        hidden={activeTab !== "pending"}
+      >
+        {pending.length === 0 ? (
+          <div className="rounded-panel border border-dashed border-rule bg-white px-6 py-12 text-center">
+            <Check className="mx-auto size-6 text-go" aria-hidden="true" />
+            <h2 className="mt-3 font-body text-[18px] font-semibold tracking-[-0.01em] text-ink">
+              Nothing is waiting for review
+            </h2>
+            <p className="mt-1 text-[13px] leading-[1.55] text-dim">
+              New client-record changes will appear here when a CAM sends one for approval.
+            </p>
+          </div>
+        ) : (
+          <ul className="space-y-4">
+            {pending.map((row) => {
+              const isBusy = busyDecision?.id === row.id;
+              const approving = isBusy && busyDecision.approve;
+              const rejecting = isBusy && !busyDecision.approve;
+              const fieldLabel = restrictedFieldLabel(row.field_name);
+              const clientName = row.organisations?.legal_name ?? "Unknown client";
+              const headingId = `suggestion-${row.id}`;
 
-                return (
-                  <li
-                    key={row.id}
-                    className="rounded-2xl border border-black/10 bg-white p-5 shadow-xs transition-shadow hover:shadow-sm"
+              return (
+                <li key={row.id}>
+                  <article
+                    aria-labelledby={headingId}
+                    className="rounded-panel border border-rule bg-white px-5 py-5 sm:px-6"
                   >
-                    {/* Header: AC2 Item type badge and status badge */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-black/8 pb-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {/* AC2: Distinguishable item type label */}
-                        <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-900">
-                          <FileEdit className="h-3.5 w-3.5 text-blue-700" aria-hidden="true" />
-                          Client Edit Suggestion
-                        </span>
-                        <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-foreground/75">
-                          Field: {fieldLabel}
-                        </span>
+                    <header className="border-b border-rule-soft pb-4">
+                      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                        <div className="min-w-0">
+                          <h2
+                            id={headingId}
+                            className="font-body text-[20px] font-semibold leading-[1.25] tracking-[-0.015em] text-ink"
+                          >
+                            <Link
+                              href={`/clients/${row.organisation_id}`}
+                              className="transition-colors hover:text-lead hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30"
+                            >
+                              {clientName}
+                            </Link>
+                          </h2>
+                          <p className="mt-1 text-[13px] leading-[1.55] text-dim">
+                            Proposed by {personLabel(row.requested_by_user)} on{" "}
+                            {formatDateTime(row.created_at)}
+                          </p>
+                        </div>
+                        <Pill tone="hold">Pending review</Pill>
                       </div>
-                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-900">
-                        Pending review
-                      </span>
+                    </header>
+
+                    <div className="mt-4 flex items-center gap-2 text-[13.5px] font-semibold text-ink">
+                      <FileEdit className="size-[15px] text-faint" aria-hidden="true" />
+                      Proposed change: {fieldLabel}
                     </div>
 
-                    {/* Client & Content */}
-                    <div className="mt-4">
-                      <h3 className="text-lg font-bold text-foreground">
-                        <Link
-                          href={`/clients/${row.organisation_id}`}
-                          className="hover:text-brand hover:underline"
-                        >
-                          {clientName}
-                        </Link>
-                      </h3>
-                      <p className="mt-0.5 text-xs text-foreground/55">
-                        Proposed by {personLabel(row.requested_by_user)} on{" "}
-                        {new Date(row.created_at).toLocaleString("en-GB", {
-                          dateStyle: "medium",
-                          timeStyle: "short",
-                        })}
-                      </p>
-                    </div>
-
-                    {/* Value comparison diff */}
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-xl border border-black/8 bg-neutral-50 p-3">
-                        <p className="text-xs font-semibold text-foreground/60">
-                          Current live value
-                        </p>
-                        <p className="mt-1 text-sm font-medium text-foreground break-words">
-                          {row.current_value ? (
-                            <span>{row.current_value}</span>
-                          ) : (
-                            <span className="italic text-foreground/45">Not provided</span>
-                          )}
-                        </p>
+                    <dl className="mt-3 grid overflow-hidden rounded-inset border border-rule-soft bg-paper sm:grid-cols-2">
+                      <div className="p-4">
+                        <dt className="text-[12.5px] font-medium text-dim">Current live value</dt>
+                        <dd className="mt-1 break-words text-sm font-medium leading-[1.55] text-ink">
+                          <DisplayValue value={row.current_value} />
+                        </dd>
                       </div>
-                      <div className="rounded-xl border border-emerald-200/70 bg-emerald-50/40 p-3">
-                        <p className="text-xs font-semibold text-emerald-800">
-                          Proposed new value
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-emerald-950 break-words">
+                      <div className="border-t border-rule-soft bg-lead-wash/55 p-4 sm:border-t-0 sm:border-l">
+                        <dt className="text-[12.5px] font-medium text-lead">Proposed value</dt>
+                        <dd className="mt-1 break-words text-sm font-semibold leading-[1.55] text-ink">
                           {row.proposed_value}
-                        </p>
+                        </dd>
                       </div>
-                    </div>
+                    </dl>
 
                     {canDecide && (
-                      <>
-                        {/* Optional Rejection Reason */}
-                        <div className="mt-4">
-                          <label
-                            htmlFor={`reason-${row.id}`}
-                            className="block text-xs font-semibold text-foreground/70"
-                          >
-                            Rejection reason (optional — visible to proposing CAM if rejected)
-                          </label>
-                          <textarea
-                            id={`reason-${row.id}`}
-                            disabled={isBusy}
-                            rows={2}
-                            value={reasons[row.id] ?? ""}
-                            onChange={(e) =>
-                              setReasons((prev) => ({ ...prev, [row.id]: e.target.value }))
-                            }
-                            placeholder="e.g. Registered address confirmed via Companies House does not match."
-                            className="mt-1 w-full rounded-xl border border-black/15 bg-white px-3 py-2 text-sm placeholder:text-foreground/40 focus:border-brand focus:outline-none"
-                          />
-                        </div>
+                      <div className="mt-4 border-t border-rule-soft pt-4">
+                        <label
+                          htmlFor={`reason-${row.id}`}
+                          className="block text-[13px] font-semibold text-ink"
+                        >
+                          Reason for rejecting <span className="font-normal text-dim">(optional)</span>
+                        </label>
+                        <p className="mt-0.5 text-[12.5px] leading-[1.5] text-dim">
+                          Add context for the CAM if you do not approve this change.
+                        </p>
+                        <textarea
+                          id={`reason-${row.id}`}
+                          disabled={isBusy}
+                          rows={2}
+                          value={reasons[row.id] ?? ""}
+                          onChange={(event) =>
+                            setReasons((current) => ({
+                              ...current,
+                              [row.id]: event.target.value,
+                            }))
+                          }
+                          placeholder="For example, the public register shows a different address."
+                          className="mt-2 w-full resize-y rounded-inset border border-rule bg-white px-3 py-2 text-sm leading-[1.55] text-ink outline-none transition-[border-color,box-shadow] placeholder:text-faint focus-visible:border-lead focus-visible:ring-2 focus-visible:ring-lead/20 disabled:opacity-60"
+                        />
 
-                        {/* Action buttons */}
-                        <div className="mt-4 flex flex-wrap items-center gap-3">
-                          <OriginButton
-                            size="sm"
-                            variant="default"
-                            disabled={isBusy}
-                            loading={isBusy}
-                            onClick={() => void handleDecision(row, true)}
+                        <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                          <button
                             type="button"
+                            disabled={isBusy}
+                            onClick={() => void handleDecision(row, true)}
+                            className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-inset border border-ink bg-ink px-3.5 text-[13px] font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30 disabled:pointer-events-none disabled:opacity-50"
                           >
-                            <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                            Approve and apply
-                          </OriginButton>
-                          <OriginButton
-                            size="sm"
-                            variant="outline"
+                            {approving ? (
+                              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                            ) : (
+                              <Check className="size-3.5" aria-hidden="true" />
+                            )}
+                            {approving ? "Applying change" : "Approve and apply"}
+                          </button>
+                          <button
+                            type="button"
                             disabled={isBusy}
                             onClick={() => void handleDecision(row, false)}
-                            type="button"
+                            className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-inset border border-rule bg-white px-3.5 text-[13px] font-semibold text-stop transition-colors hover:border-stop/40 hover:bg-stop-wash focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stop/25 disabled:pointer-events-none disabled:opacity-50"
                           >
-                            <X className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                            Reject
-                          </OriginButton>
+                            {rejecting ? (
+                              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                            ) : (
+                              <X className="size-3.5" aria-hidden="true" />
+                            )}
+                            {rejecting ? "Saving decision" : "Reject"}
+                          </button>
                         </div>
-                      </>
+                      </div>
                     )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-      )}
+                  </article>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
-      {/* Tab: Decided History */}
-      {activeTab === "history" && (
-        <section aria-label="Decided Approvals History">
-          {decided.length === 0 ? (
-            <div className="rounded-2xl border border-black/10 bg-neutral-50/50 px-6 py-12 text-center">
-              <History className="mx-auto h-8 w-8 text-foreground/40" aria-hidden="true" />
-              <h2 className="mt-3 text-base font-bold text-foreground">
-                No decisions recorded yet
+      <section
+        id="approvals-panel-history"
+        role="tabpanel"
+        aria-labelledby="approvals-tab-history"
+        hidden={activeTab !== "history"}
+      >
+        {decided.length === 0 ? (
+          <div className="rounded-panel border border-dashed border-rule bg-white px-6 py-12 text-center">
+            <History className="mx-auto size-6 text-faint" aria-hidden="true" />
+            <h2 className="mt-3 font-body text-[18px] font-semibold tracking-[-0.01em] text-ink">
+              No decisions have been recorded
+            </h2>
+            <p className="mt-1 text-[13px] leading-[1.55] text-dim">
+              Approved and rejected changes will stay here as a readable audit trail.
+            </p>
+          </div>
+        ) : (
+          <section
+            aria-labelledby="decision-history-heading"
+            className="overflow-hidden rounded-panel border border-rule bg-white"
+          >
+            <div className="px-5 py-4 sm:px-6">
+              <h2
+                id="decision-history-heading"
+                className="font-body text-[18px] font-semibold tracking-[-0.01em] text-ink"
+              >
+                Recorded decisions
               </h2>
-              <p className="mt-1 text-sm text-foreground/60">
-                Decided edit suggestions will appear here for audit reference.
+              <p className="mt-1 text-[13px] leading-[1.55] text-dim">
+                What was proposed, what happened, and who made the decision.
               </p>
             </div>
-          ) : (
-            <ul className="space-y-4">
+            <ul className="divide-y divide-rule-soft border-t border-rule-soft">
               {decided.map((row) => {
                 const fieldLabel = restrictedFieldLabel(row.field_name);
                 const clientName = row.organisations?.legal_name ?? "Unknown client";
+                const approved = row.status === "approved";
+                const rejected = row.status === "rejected";
 
                 return (
-                  <li
-                    key={row.id}
-                    className="rounded-2xl border border-black/10 bg-white p-4 shadow-xs"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Link
-                          href={`/clients/${row.organisation_id}`}
-                          className="font-bold text-foreground hover:text-brand hover:underline"
-                        >
-                          {clientName}
-                        </Link>
-                        <span className="text-xs text-foreground/50">•</span>
-                        <span className="text-xs font-semibold text-foreground/75">
-                          {fieldLabel}
-                        </span>
+                  <li key={row.id} className="px-5 py-5 sm:px-6">
+                    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                      <div className="min-w-0">
+                        <h3 className="font-body text-[16px] font-semibold leading-[1.35] text-ink">
+                          <Link
+                            href={`/clients/${row.organisation_id}`}
+                            className="transition-colors hover:text-lead hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30"
+                          >
+                            {clientName}
+                          </Link>
+                        </h3>
+                        <p className="mt-0.5 text-[13px] text-dim">
+                          Proposed change: {fieldLabel}
+                        </p>
                       </div>
-                      <span
-                        className={`rounded-full border px-2.5 py-0.5 text-xs font-bold capitalize ${
-                          STATUS_PILL[row.status]
-                        }`}
-                      >
-                        {row.status}
-                      </span>
+                      <Pill tone={STATUS_TONE[row.status]}>{STATUS_LABEL[row.status]}</Pill>
                     </div>
 
-                    <p className="mt-2 text-sm text-foreground/75">
-                      <span className="text-foreground/55 line-through">
-                        {row.current_value || "Not provided"}
-                      </span>{" "}
-                      →{" "}
-                      <span className="font-semibold text-foreground">
-                        {row.proposed_value}
-                      </span>
-                    </p>
+                    <dl className="mt-3 grid items-stretch overflow-hidden rounded-inset bg-paper sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+                      <div className="p-3.5">
+                        <dt className="text-[12px] font-medium text-dim">
+                          {approved ? "Previous value" : "Live value kept"}
+                        </dt>
+                        <dd className="mt-1 break-words text-[13.5px] font-medium leading-[1.5] text-ink">
+                          <DisplayValue value={row.current_value} />
+                        </dd>
+                      </div>
+                      <div className="hidden items-center border-x border-rule-soft px-3 text-faint sm:flex">
+                        {approved ? (
+                          <ArrowRight className="size-4" aria-hidden="true" />
+                        ) : rejected ? (
+                          <X className="size-4 text-stop" aria-hidden="true" />
+                        ) : (
+                          <History className="size-4" aria-hidden="true" />
+                        )}
+                      </div>
+                      <div
+                        className={`border-t border-rule-soft p-3.5 sm:border-t-0 ${
+                          approved
+                            ? "bg-go-wash/50"
+                            : rejected
+                              ? "bg-stop-wash/45"
+                              : "bg-paper-sunk/60"
+                        }`}
+                      >
+                        <dt
+                          className={`text-[12px] font-medium ${
+                            approved ? "text-go" : rejected ? "text-stop" : "text-dim"
+                          }`}
+                        >
+                          {approved
+                            ? "Applied value"
+                            : rejected
+                              ? "Suggested value not applied"
+                              : "Earlier suggested value"}
+                        </dt>
+                        <dd className="mt-1 break-words text-[13.5px] font-semibold leading-[1.5] text-ink">
+                          {row.proposed_value}
+                        </dd>
+                      </div>
+                    </dl>
 
-                    <div className="mt-2 flex flex-wrap items-center gap-x-3 text-xs text-foreground/50">
+                    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] leading-[1.5] text-dim">
                       <span>Proposed by {personLabel(row.requested_by_user)}</span>
                       {row.decided_at && (
                         <span>
-                          Decided on{" "}
-                          {new Date(row.decided_at).toLocaleString("en-GB", {
-                            dateStyle: "medium",
-                            timeStyle: "short",
-                          })}
+                          Decided {formatDateTime(row.decided_at)}
                           {row.decided_by_user && (
                             <> by {personLabel(row.decided_by_user)}</>
                           )}
@@ -391,18 +475,29 @@ export function ApprovalsPanel({
                     </div>
 
                     {row.rejection_reason && (
-                      <p className="mt-2 rounded-lg bg-neutral-50 px-3 py-1.5 text-xs text-foreground/75">
-                        <strong className="font-semibold text-foreground/85">Reason:</strong>{" "}
-                        {row.rejection_reason}
-                      </p>
+                      <div className="mt-3 rounded-inset bg-paper px-3.5 py-2.5">
+                        <p className="text-[12px] font-semibold text-ink">Reason given</p>
+                        <p className="mt-0.5 text-[13px] leading-[1.55] text-dim">
+                          {row.rejection_reason}
+                        </p>
+                      </div>
                     )}
+
+                    <Link
+                      href={`/clients/${row.organisation_id}`}
+                      className="mt-3 inline-flex text-[13px] font-semibold text-lead transition-colors hover:text-lead-mid hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30"
+                    >
+                      {canDecide && approved
+                        ? "Review or correct client record"
+                        : "Open client record"}
+                    </Link>
                   </li>
                 );
               })}
             </ul>
-          )}
-        </section>
-      )}
+          </section>
+        )}
+      </section>
     </div>
   );
 }

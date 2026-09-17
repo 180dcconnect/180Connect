@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { formatDueDate, groupMyActionsByDueDate, type MyAction } from "@/lib/actions";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Pill } from "@/app/(app)/clients/[id]/section-card";
 import { CompleteActionButton } from "./complete-action-button";
 
 const ORIGIN_LABEL: Record<MyAction["origin"], (assignedByName: string | null) => string> = {
@@ -36,6 +37,9 @@ function ActionRow({ action }: { action: MyAction }) {
       </Link>
 
       <div className="flex shrink-0 flex-col items-end gap-2">
+        <Pill tone={action.priority === "high" ? "stop" : action.priority === "normal" ? "hold" : "neutral"}>
+          {action.priority === "high" ? "High" : action.priority === "normal" ? "Normal" : "Low"}
+        </Pill>
         {action.dueDate && (
           <span
             className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] tabular-nums ${
@@ -83,7 +87,7 @@ function ActionGroup({ heading, actions }: { heading: string; actions: readonly 
  */
 export function ActionsList({ actions }: { actions: readonly MyAction[] }) {
   if (actions.length === 0) {
-    return <EmptyState message="Nothing outstanding — your queue is clear." />;
+    return <EmptyState message="Nothing outstanding — your task list is clear." />;
   }
 
   const groups = groupMyActionsByDueDate(actions);

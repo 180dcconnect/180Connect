@@ -19,11 +19,13 @@
 
 import {
   SCOUT_CHECKS,
-  scoutContributions,
+  scoutLiftShares,
   SCOUT_HELPING_CUT,
   SCOUT_NO_READING,
+  type ScoutCheck,
   type ScoutCheckKey,
 } from "./scoring/scout-checks.ts";
+import { formatIncome } from "./income-range.ts";
 import { resolveMissionText } from "./mission.ts";
 
 export type OpportunityFactors = {
@@ -32,6 +34,24 @@ export type OpportunityFactors = {
   size: number;
   partnershipHistory: number;
   previousContact: number;
+};
+
+/**
+ * The record's own figures behind three of the five checks, so a card can say
+ * "£1.4m income" instead of "Size: strong".
+ *
+ * Optional throughout, and fetched for the ranked few only — the dashboard
+ * ranks first and reads these for the six cards it is about to draw, the same
+ * way it already fetches their missions. A card without them still renders;
+ * it falls back to the check's name and how strong the reading was.
+ */
+export type OpportunityFacts = {
+  /** Income on the newest filed period that carries one, in pounds. */
+  incomeGBP?: number | null;
+  /** That filing's period end, for the year in brackets. */
+  incomePeriodEnd?: string | null;
+  /** Grants matched to this organisation in the public 360Giving data. */
+  matchedGrantCount?: number | null;
 };
 
 export type OpportunityRow = {
@@ -53,7 +73,11 @@ export type OpportunityRow = {
   score_factors?: {
     factors: OpportunityFactors;
     weights?: Partial<Record<ScoutCheckKey, number>>;
+    /** Which factors are a real reading rather than a stand-in for "no data". */
+    readings?: Partial<Record<ScoutCheckKey, boolean>>;
   } | null;
+  /** The figures behind the checks, when the caller fetched them. */
+  facts?: OpportunityFacts | null;
   /** Register-filed purpose texts, for resolving the card's mission line. */
   charity_activities?: string | null;
   cic_community_statement?: string | null;
@@ -66,24 +90,31 @@ export type PriorityOpportunity = OpportunityRow & {
    * they would drop the decimal and take the column's alignment with them.
    */
   displayScore: string;
-  /** What pushes this score up, strongest weight-aware share first. */
+  /** What pushes this score up, largest share of the lift first. */
   highlights: OpportunityHighlight[];
+  /** What the score could not read at all — "No accounts filed". */
+  gaps: string[];
   /** Resolved mission text for the card; absent when the record holds none. */
   mission?: string | null;
 };
 
 /**
- * One line under "why it scores highly": a canonical check name, how strong
- * its reading is, and the weight-aware share of the final score behind it —
- * the breakdown card's row shape in miniature, so the two surfaces read as
- * one thing.
+ * One line under "why it scores highly".
+ *
+ * The line leads with the *fact* wherever the record holds it — "Works in
+ * Education", "£1.4m income (2024 accounts)", "6 matched grants" — rather than
+ * the name of the check that read it. "Sector: strong" told a CAM only that
+ * the engine liked something they could already see two lines above; the fact
+ * is the thing they can act on, and it is the same fact the record page shows.
+ * Where the figure was not fetched, the check's own name and the strength of
+ * its reading stand in, so a line is never empty.
  */
 export type OpportunityHighlight = {
-  /** Canonical check name, e.g. "Sector" — the record page's word. */
+  /** The fact, e.g. "6 matched grants" — or the check's name as a stand-in. */
   label: string;
-  /** Reading strength, e.g. "strong" — null when the line is fallback context. */
+  /** Reading strength, e.g. "strong" — null whenever the label is the fact itself. */
   strength: string | null;
-  /** Share of the final score, 0–100 — null when there is no breakdown. */
+  /** Share of the *lift*, 0–100 — null when there is no usable breakdown. */
   sharePct: number | null;
 };
 
@@ -130,22 +161,28 @@ function isFiniteNumber(value: unknown): value is number {
 }
 
 /**
- * What pushes one opportunity's score up, strongest weight-aware share first,
- * at most three lines.
+ * What pushed one opportunity's score up, largest share of the lift first, at
+ * most three lines.
  *
- * Deliberately not exhaustive: the card answers "what is pulling this number
- * up", and only checks genuinely helping (> 0.55, the record page's own cut)
- * qualify. Neutrals (exactly 0.5, "nothing on record") are absence, not a
- * reason, and never appear. The record page's breakdown table carries all
- * five checks for the moment someone questions the number.
+ * Two decisions live here.
  *
- * Ordering is by share of the final score, not raw factor value: a 0.9
- * reading on a lightly-weighted check moves the number less than a 0.7 on a
- * heavy one, and the card must rank what moved the number. Shares come from
- * the persisted factors *and* weights, so they reproduce the stored score.
+ * **Lift, not composition.** Shares come from `scoutLiftShares`, which measures
+ * each check against the neutral 0.5 rather than against zero. The breakdown
+ * card's `scoutContributions` answers "what is this number made of", and under
+ * that arithmetic a check with nothing on record still holds a fifth of the
+ * score — true as composition, false as a reason. A card headed "why it scores
+ * highly" must not print a share beside an empty check, so an unread or
+ * below-neutral check lifts nothing, scores 0, and drops out on its own.
  *
- * Without a usable breakdown, falls back to what the record itself says
- * (sector, city) so the card never renders a bare score with no context.
+ * **The fact, not the lever.** Each line names what the check actually found —
+ * "Works in Education", "£1.4m income (2024 accounts)", "6 matched grants" —
+ * falling back to the check's name and reading strength only where the figure
+ * was not fetched. See `factLine`.
+ *
+ * A score with nothing above neutral is still ranked and still shown: its
+ * lines carry honest strength words and no share, because there is no lift to
+ * apportion. Without a usable breakdown at all, falls back to what the record
+ * itself says (sector, city) so the card never renders a bare score.
  */
 export function scoreHighlights(row: OpportunityRow): OpportunityHighlight[] {
   // Stored JSON — guarded, never trusted blindly.
@@ -180,30 +217,36 @@ export function scoreHighlights(row: OpportunityRow): OpportunityHighlight[] {
         readings.map(({ check, weight }) => [check.key, weight as number]),
       ) as Record<ScoutCheckKey, number>;
       const shares = new Map(
-        scoutContributions({ factors: values, weights: weightValues }).map((share) => [
+        scoutLiftShares({ factors: values, weights: weightValues }).map((share) => [
           share.key,
           share.percent,
         ]),
       );
-      const candidates = readings
-        .filter(({ value }) => (value as number) !== SCOUT_NO_READING)
+      const lifting = readings
         .map(({ check, value }) => ({
           check,
           value: value as number,
           share: shares.get(check.key) ?? 0,
         }))
+        .filter(({ share }) => share > 0)
         .sort((a, b) => b.share - a.share);
-      const helping = candidates.filter(({ value }) => value > SCOUT_HELPING_CUT);
-      // A score with nothing actively helping it is still ranked, so show
-      // the top real readings with honest strength words rather than
-      // pretending something pushed it up.
-      const picked = (helping.length > 0 ? helping : candidates).slice(0, 3);
-      if (picked.length > 0) {
-        return picked.map(({ check, value, share }) => ({
-          label: check.label,
-          strength: strengthWord(value),
-          sharePct: Math.round(share),
-        }));
+
+      if (lifting.length > 0) {
+        return lifting.slice(0, 3).map(({ check, value, share }) =>
+          highlightFor(check, value, row, Math.round(share)),
+        );
+      }
+
+      // Nothing above neutral: the score is still ranked, so say what the
+      // record does hold rather than pretending something pushed it up. No
+      // share — there is no lift to take a share of.
+      const readable = readings
+        .map(({ check, value }) => ({ check, value: value as number }))
+        .filter(({ value }) => value !== SCOUT_NO_READING)
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 3);
+      if (readable.length > 0) {
+        return readable.map(({ check, value }) => highlightFor(check, value, row, null));
       }
     }
   }
@@ -218,8 +261,130 @@ export function scoreHighlights(row: OpportunityRow): OpportunityHighlight[] {
 }
 
 /**
+ * One line: the fact if the record holds it, otherwise the check's name and
+ * how strong its reading was.
+ *
+ * The strength word is dropped whenever a fact is available — "£1.4m income:
+ * strong" says the same thing twice, once in the engine's voice, and the bar
+ * beside the line already carries how much it counted.
+ */
+function highlightFor(
+  check: ScoutCheck,
+  value: number,
+  row: OpportunityRow,
+  sharePct: number | null,
+): OpportunityHighlight {
+  const fact = factLine(check.key, value, row);
+  return fact !== null
+    ? { label: fact, strength: null, sharePct }
+    : { label: check.label, strength: strengthWord(value), sharePct };
+}
+
+/**
+ * What the check found, in the words of the job — or null where the record
+ * does not hold it and the check's own name has to stand in.
+ *
+ * Deliberately no internal names: a sector is named as the sector, a filing as
+ * the year of the accounts, an outreach state as the thing that happened
+ * ("Replied to us"), never as the stored status.
+ */
+function factLine(
+  key: ScoutCheckKey,
+  value: number,
+  row: OpportunityRow,
+): string | null {
+  switch (key) {
+    // Sector and city are already on the card as identity ("Education ·
+    // Manchester"), so the line that earns its place here is the judgement:
+    // that this is one of the sectors or places the branch prioritises. Both
+    // are claimed only above the helping cut — a sector ranked mid-table
+    // raised the score a little and is not "a priority sector".
+    case "sector": {
+      const sector = row.sector?.trim();
+      if (!sector) return null;
+      return value > SCOUT_HELPING_CUT ? `${sector} is a priority sector` : `Works in ${sector}`;
+    }
+    case "geography": {
+      const city = row.city?.trim();
+      if (!city) return null;
+      return value > SCOUT_HELPING_CUT ? `${city} is a priority area` : `Based in ${city}`;
+    }
+    case "size": {
+      const income = row.facts?.incomeGBP;
+      if (!isFiniteNumber(income)) return null;
+      const year = filingYear(row.facts?.incomePeriodEnd);
+      return year ? `${formatIncome(income)} income (${year} accounts)` : `${formatIncome(income)} income`;
+    }
+    case "partnershipHistory": {
+      const count = row.facts?.matchedGrantCount;
+      if (!isFiniteNumber(count) || count <= 0) return null;
+      return count === 1 ? "1 matched grant" : `${count} matched grants`;
+    }
+    case "previousContact":
+      return OUTREACH_FACTS[row.outreach_status] ?? null;
+  }
+}
+
+/**
+ * The outreach stage as the thing that happened, not as the stored status.
+ * Every status the scorer recognises is here; an unrecognised one falls back
+ * to the check's name rather than inventing a sentence for it.
+ */
+const OUTREACH_FACTS: Record<string, string> = {
+  converted: "Worked with us before",
+  future_potential: "Flagged as future potential",
+  responded: "Replied to us",
+  not_contacted: "Nobody has approached them yet",
+  loss_due_timing: "Last time was timing, not a no",
+  initial_outreach_sent: "Outreach sent, no reply yet",
+  follow_up_sent: "Followed up, no reply yet",
+  no_response: "Chased, never replied",
+  soft_no: "Said no, politely",
+  hard_no: "Asked not to be approached",
+};
+
+/** The year of a filing's period end, for the bracket after an income figure. */
+function filingYear(periodEnd: string | null | undefined): string | null {
+  if (!periodEnd) return null;
+  const match = /^(\d{4})/.exec(periodEnd.trim());
+  return match ? match[1] : null;
+}
+
+/**
+ * What the score could not read, in a few words each — "No accounts filed".
+ *
+ * A card that shows only what lifted a score quietly implies the rest was
+ * weighed and found wanting, when often it was never there. Saying so turns a
+ * low line into something a CAM can act on: file the accounts, record the
+ * sector, and the score means more next time.
+ *
+ * Reads the persisted `readings` flags where a row has them (a "checked, found
+ * nothing" 0.5 and a "never had the data" 0.5 are the same number and only the
+ * flags tell them apart), and falls back to the neutral value itself for rows
+ * written before those flags existed. Partnership history has no flag by
+ * design — F092 treats never-checked and confirmed-zero as one thing — so the
+ * value is all there is either way.
+ */
+export function scoreGaps(row: OpportunityRow): string[] {
+  const raw = row.score_factors;
+  const factors =
+    raw && typeof raw === "object" && raw.factors && typeof raw.factors === "object"
+      ? (raw.factors as Partial<Record<ScoutCheckKey, unknown>>)
+      : undefined;
+  if (!factors) return [];
+  const flags = raw?.readings;
+
+  return SCOUT_CHECKS.filter((check) => {
+    const flag = flags?.[check.key];
+    if (typeof flag === "boolean") return !flag;
+    return factors[check.key] === SCOUT_NO_READING;
+  }).map((check) => check.gap);
+}
+
+/**
  * How strong a 0–1 reading is, in the record page's words
- * (`scoutReadingFor`'s bands, without the subject prefix).
+ * (`scoutReadingFor`'s bands, without the subject prefix). Used only where no
+ * fact was available to name instead.
  */
 function strengthWord(value: number): string {
   if (value >= 0.75) return "strong";
@@ -264,8 +429,31 @@ export function selectPriorityOpportunities(
       ...row,
       displayScore: formatPriorityScore(row.priority_score as number),
       highlights: scoreHighlights(row),
+      gaps: scoreGaps(row),
       // The register's own words, resolved the one canonical way
       // (`src/lib/mission.ts`) rather than the card picking a column.
       mission: resolveMissionText(row),
     }));
+}
+
+/**
+ * Second pass: hand the ranked few their figures and rebuild their lines.
+ *
+ * The order is deliberate — rank first on what the page already fetched, then
+ * read income and grant counts for the six ids that survived, the same way the
+ * card's missions are fetched. Reading them for every client to use six would
+ * cost the dashboard two whole-table reads for a card that shows six rows.
+ *
+ * An id absent from `factsById` simply keeps the lines it already had.
+ */
+export function applyOpportunityFacts(
+  opportunities: PriorityOpportunity[],
+  factsById: Map<string, OpportunityFacts>,
+): PriorityOpportunity[] {
+  return opportunities.map((opportunity) => {
+    const facts = factsById.get(opportunity.id);
+    if (!facts) return opportunity;
+    const withFacts = { ...opportunity, facts };
+    return { ...withFacts, highlights: scoreHighlights(withFacts) };
+  });
 }

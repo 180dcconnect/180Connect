@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/app-shell";
+import { ToastProvider } from "@/components/ui/toast";
 
 /**
  * The signed-in app's one shell: sidebar + content area, for every section in
@@ -18,7 +19,15 @@ import { AppShell } from "@/components/app-shell";
  *
  * Settings stays outside this group on purpose: it has its own shell and its
  * own sidebar (see src/app/settings/layout.tsx).
+ *
+ * `ToastProvider` sits here for the same reason the shell does: one live region
+ * for the whole signed-in app, so a screen that saves something can confirm it
+ * without mounting a toaster of its own.
  */
 export default function SignedInLayout({ children }: { children: React.ReactNode }) {
-  return <AppShell>{children}</AppShell>;
+  return (
+    <ToastProvider>
+      <AppShell>{children}</AppShell>
+    </ToastProvider>
+  );
 }

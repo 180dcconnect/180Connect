@@ -5,7 +5,7 @@ import { formatDueDate, type MyAction } from "@/lib/actions";
 import type { MyDesk } from "@/lib/dashboard/my-desk";
 
 /**
- * Your actions — work with a date on it, and emails drafted but never sent.
+ * Your tasks — work with a date on it, and emails drafted but never sent.
  *
  * Replaces the Action Center. Its reply and follow-up rows already have homes
  * in the inbox (Inbound Replies, Follow-up Due); what nothing on the dashboard
@@ -31,11 +31,18 @@ function ActionRowItem({ action }: { action: MyAction }) {
             {action.organisationName}
           </span>
         </span>
-        {action.dueDate && (
-          <Pill tone={action.isOverdue ? "stop" : "hold"}>
-            {action.isOverdue ? "Overdue" : "Due"} {formatDueDate(action.dueDate)}
+        <span className="flex shrink-0 flex-col items-end gap-1.5">
+          <Pill tone={action.priority === "high" ? "stop" : action.priority === "normal" ? "hold" : "neutral"}>
+            {action.priority === "high" ? "High" : action.priority === "normal" ? "Normal" : "Low"}
           </Pill>
-        )}
+          {action.dueDate && (
+            <Pill tone={action.isOverdue ? "stop" : "hold"}>
+              {action.isOverdue
+                ? `Overdue ${action.daysOverdue} ${action.daysOverdue === 1 ? "day" : "days"}`
+                : `Due ${formatDueDate(action.dueDate)}`}
+            </Pill>
+          )}
+        </span>
       </Link>
     </li>
   );
@@ -60,7 +67,7 @@ export function MyActionsCard({ desk }: { desk: MyDesk }) {
             id="my-actions-heading"
             className="font-body text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink"
           >
-            Your actions
+            Your tasks
           </h2>
           <p className="mt-1 font-body text-[13px] leading-[1.55] text-dim">
             {desk.overdue.length > 0
@@ -74,7 +81,7 @@ export function MyActionsCard({ desk }: { desk: MyDesk }) {
           href="/actions"
           className="font-body text-[13px] font-semibold text-lead transition-colors hover:text-lead-mid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
         >
-          All your actions →
+          All your tasks →
         </Link>
       </div>
 
@@ -90,11 +97,12 @@ export function MyActionsCard({ desk }: { desk: MyDesk }) {
         <p className="border-t border-rule-soft px-5 py-2.5 font-body text-[12.5px] text-dim">
           {[
             hiddenActions > 0 ? `${hiddenActions} more due this week` : null,
-            otherOpen > 0 ? `${otherOpen} due later or with no date` : null,
+            desk.laterCount > 0 ? `${desk.laterCount} due later` : null,
+            desk.undatedCount > 0 ? `${desk.undatedCount} with no date` : null,
           ]
             .filter(Boolean)
             .join(" · ")}
-          {" — on the Actions page."}
+          {" — on the Tasks page."}
         </p>
       )}
 

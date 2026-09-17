@@ -52,6 +52,9 @@ export type DataHealthInput = {
   enrichmentReview: number | null;
   missingWebsite: number | null;
   missingEmail: number | null;
+  incompleteRecords: number | null;
+  discrepancies: number | null;
+  unassignedOwner: number | null;
   /** Newest first. Null when the runs could not be read. */
   runs: readonly IngestionRunRow[] | null;
 };
@@ -135,6 +138,27 @@ export function summariseDataHealth(input: DataHealthInput): DataHealthSummary {
     },
     { key: "no-website", label: "Clients with no website", value: input.missingWebsite, tone: "idle" },
     { key: "no-email", label: "Clients with no contact email", value: input.missingEmail, tone: "idle" },
+    {
+      key: "incomplete",
+      label: "Records missing key details",
+      value: input.incompleteRecords,
+      tone: input.incompleteRecords ? "attention" : "idle",
+      href: "/admin/incomplete-records",
+    },
+    {
+      key: "discrepancies",
+      label: "Conflicting details to review",
+      value: input.discrepancies,
+      tone: input.discrepancies ? "attention" : "idle",
+      href: "/admin/discrepancies",
+    },
+    {
+      key: "unassigned",
+      label: "Clients with no CAM assigned",
+      value: input.unassignedOwner,
+      tone: input.unassignedOwner ? "attention" : "idle",
+      href: "/clients?owner=unassigned",
+    },
   ];
 
   const sources = input.runs ? latestPerSource(input.runs, input.now) : null;
@@ -143,6 +167,16 @@ export function summariseDataHealth(input: DataHealthInput): DataHealthSummary {
   if (input.duplicates) {
     warnings.push(
       `${plural(input.duplicates, "imported record may be", "imported records may be")} a client we already have. An admin decides whether to merge.`,
+    );
+  }
+  if (input.discrepancies) {
+    warnings.push(
+      `${plural(input.discrepancies, "record has", "records have")} conflicting details waiting on a decision.`,
+    );
+  }
+  if (input.unassignedOwner) {
+    warnings.push(
+      `${plural(input.unassignedOwner, "client has", "clients have")} no CAM assigned to look after them.`,
     );
   }
   for (const source of sources ?? []) {

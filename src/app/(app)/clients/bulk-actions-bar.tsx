@@ -541,8 +541,8 @@ export function BulkActionsBar({
                     : `Assign ${clients(count)} to ${assigneeName}?`,
                 description:
                   assignOwnerId === "unassigned"
-                    ? "Clients return to the unowned pool and open actions are unassigned."
-                    : "Ownership and open actions move in one action, recorded in each client's audit log.",
+                    ? "Clients return to the unowned pool and open tasks are unassigned."
+                    : "Ownership and open tasks move together, recorded in each client's audit log.",
                 details: [
                   { label: "New owner", value: assigneeName },
                   { label: "Reason", value: assignReason.trim() },

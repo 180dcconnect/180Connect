@@ -64,7 +64,7 @@ export default async function ActionsPage() {
   const { data: actionRows, error: actionsError } = await supabase
     .from("actions")
     .select(
-      "id, title, description, due_date, status, organisation_id, created_by_user_id, created_at, " +
+      "id, title, description, due_date, status, priority, organisation_id, created_by_user_id, created_at, " +
         "organisation:organisations!actions_organisation_id_fkey(legal_name), " +
         "created_by_user:users!actions_created_by_user_id_fkey(full_name)",
     )
@@ -85,13 +85,13 @@ export default async function ActionsPage() {
   );
 
   return (
-    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+    <div className="min-h-screen bg-paper px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="mx-auto w-full max-w-3xl space-y-6">
         <Rise>
           <ActionsHeader current="/actions">
-            <p className="mt-3 text-sm leading-[1.7] text-foreground/50">
-              Outstanding work assigned to you, overdue first. Mark something complete to
-              drop it from this list — it stays on record.
+            <p className="mt-3 font-body text-sm leading-[1.7] text-dim">
+              Outstanding work assigned to you, overdue first. Mark a task complete to
+              remove it from this list — it stays on record.
             </p>
           </ActionsHeader>
         </Rise>
@@ -101,7 +101,7 @@ export default async function ActionsPage() {
             {actionsError ? (
               <InlineAlert
                 variant="page"
-                message="Your actions could not be loaded. Refresh and try again."
+                message="Your tasks could not be loaded. Refresh and try again."
               />
             ) : (
               <ActionsList actions={actions} />

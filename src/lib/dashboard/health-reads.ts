@@ -23,7 +23,14 @@ const INGESTION_WINDOW = 100;
 
 export type DataHealthReads = Pick<
   DataHealthInput,
-  "contacts" | "duplicates" | "enrichmentReview" | "missingEmail" | "runs"
+  | "contacts"
+  | "duplicates"
+  | "enrichmentReview"
+  | "missingEmail"
+  | "incompleteRecords"
+  | "discrepancies"
+  | "unassignedOwner"
+  | "runs"
 >;
 
 type ReadError = { message: string } | null;
@@ -70,25 +77,56 @@ export async function readDataHealth(supabase: SupabaseClient): Promise<DataHeal
     }
   })();
 
-  const [contacts, duplicates, enrichmentReview, missingEmail, runRows] = await Promise.all([
-    countOf(supabase.from("contacts").select("id", head), "dashboard.data_health.contacts"),
-    // Admin- and leadership-readable only (RLS), which is who sees this card.
-    countOf(
-      supabase.from("entity_match_candidates").select("id", head).eq("match_status", "pending"),
-      "dashboard.data_health.duplicates",
-    ),
-    countOf(
-      supabase.from("enrichment_results").select("id", head).eq("needs_review", true),
-      "dashboard.data_health.enrichment_review",
-    ),
-    countOf(
-      supabase.from("organisations").select("id", head).is("contact_email", null),
-      "dashboard.data_health.missing_email",
-    ),
-    runs,
-  ]);
+  // A record counts as incomplete on the same terms as /admin/incomplete-records:
+  // no sector, no mission (charity_activities or cic_community_statement), no
+  // website, no contact email, or no city. This head-count skips that page's
+  // enrichment-suggested-mission fallback and its suppressed-organisation
+  // exclusion, so it can stay a single cheap count — expect it to run a touch
+  // ahead of the admin page's own figure, never behind.
+  const INCOMPLETE_FILTER =
+    "sector.is.null,sector.ilike.unclassified,and(charity_activities.is.null,cic_community_statement.is.null),website.is.null,contact_email.is.null,city.is.null";
 
-  return { contacts, duplicates, enrichmentReview, missingEmail, runs: runRows };
+  const [contacts, duplicates, enrichmentReview, missingEmail, incompleteRecords, discrepancies, unassignedOwner, runRows] =
+    await Promise.all([
+      countOf(supabase.from("contacts").select("id", head), "dashboard.data_health.contacts"),
+      // Admin- and leadership-readable only (RLS), which is who sees this card.
+      countOf(
+        supabase.from("entity_match_candidates").select("id", head).eq("match_status", "pending"),
+        "dashboard.data_health.duplicates",
+      ),
+      countOf(
+        supabase.from("enrichment_results").select("id", head).eq("needs_review", true),
+        "dashboard.data_health.enrichment_review",
+      ),
+      countOf(
+        supabase.from("organisations").select("id", head).is("contact_email", null),
+        "dashboard.data_health.missing_email",
+      ),
+      countOf(
+        supabase.from("organisations").select("id", head).or(INCOMPLETE_FILTER),
+        "dashboard.data_health.incomplete_records",
+      ),
+      countOf(
+        supabase.from("field_discrepancies").select("id", head).eq("status", "pending"),
+        "dashboard.data_health.discrepancies",
+      ),
+      countOf(
+        supabase.from("organisations").select("id", head).is("owner_id", null),
+        "dashboard.data_health.unassigned_owner",
+      ),
+      runs,
+    ]);
+
+  return {
+    contacts,
+    duplicates,
+    enrichmentReview,
+    missingEmail,
+    incompleteRecords,
+    discrepancies,
+    unassignedOwner,
+    runs: runRows,
+  };
 }
 
 /** The newest non-null value of one timestamp column. */

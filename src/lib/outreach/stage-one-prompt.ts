@@ -81,7 +81,7 @@ export type ClosingApproach = (typeof CLOSING_APPROACHES)[number];
 /**
  * Plain-English names for the two approach dials, beside the enums they name
  * so a screen can never invent its own wording for the same choice. The
- * compose window and the prompt lab both read these.
+ * compose window reads these.
  */
 export const OPENING_APPROACH_LABELS: Record<OpeningApproach, string> = {
   mission_led: "Mission-led",
@@ -122,8 +122,7 @@ export type ReplyClosingApproach = (typeof REPLY_CLOSING_APPROACHES)[number];
  * Plain-English names for the reply closings, beside the enum. Deliberately
  * different words from CLOSING_APPROACH_LABELS even where the value is the
  * same: inside a conversation the client already joined, "Request a short
- * introductory call" reads wrong. The reply composer and the prompt lab both
- * read these.
+ * introductory call" reads wrong. The reply composer reads these.
  */
 export const REPLY_CLOSING_APPROACH_LABELS: Record<ReplyClosingApproach, string> = {
   soft_cta: "Soft invitation",

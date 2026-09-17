@@ -3,16 +3,10 @@
 // The two halves of managing tags, in one client component — because they share
 // one list.
 //
-// Creating a tag and reading the list are two cards, and the old screen rendered
-// them as two independent components: the form held the result of its own submit
-// and the list held its own copy of the tags, so a tag you had just created was
-// nowhere on the page until a manual refresh. This owns the state and hands the
-// callbacks down, which is the call the client record's `TagsCard` already makes
-// for the same reason (`clients/[id]/tags-card.tsx`).
-//
-// The card's order is the old screen's: the form first, the list under it. The
-// form is two fields and the list can be long, so the one thing a person comes
-// here to do stays above the fold.
+// Creating a tag and reading the list are two cards. By default, the list of
+// tags is shown, with a "+ Create a tag" action button in the section header.
+// Touching the button reveals the CreateTagForm. Submitting or cancelling
+// closes the form and returns to the clean list view.
 
 import { useCallback, useState } from "react";
 
@@ -43,6 +37,7 @@ export function TagsPanel({
   canRestructure: boolean;
 }) {
   const [tags, setTags] = useState(initialTags);
+  const [isCreating, setIsCreating] = useState(false);
 
   const handleCreated = useCallback((tag: TagEntry) => {
     setTags((current) =>
@@ -50,6 +45,7 @@ export function TagsPanel({
         ? current
         : [...current, tag].sort(byName),
     );
+    setIsCreating(false);
   }, []);
 
   const handleRenamed = useCallback((tagId: string, name: string) => {
@@ -80,11 +76,26 @@ export function TagsPanel({
       ? "Each tag shows how many clients carry it. Creating a tag and changing its colour are yours to do; renaming or deleting one changes it on every client that already has it, so an administrator does that."
       : "Each tag shows how many clients carry it. Any CAM can put one on a client, and the client list can be filtered by it.";
 
+  const createAction = canCreate ? (
+    <button
+      type="button"
+      onClick={() => setIsCreating((prev) => !prev)}
+      className="inline-flex cursor-pointer items-center gap-1.5 rounded-inset border border-lead bg-lead px-3 py-1.5 text-xs font-semibold text-paper transition-colors hover:bg-lead-mid"
+    >
+      <span aria-hidden="true">{isCreating ? "×" : "+"}</span>
+      <span>{isCreating ? "Cancel" : "Create a tag"}</span>
+    </button>
+  ) : null;
+
   return (
     <Group className="space-y-6">
-      {canCreate && (
+      {canCreate && isCreating && (
         <Rise>
-          <CreateTagForm existingNames={tags.map((tag) => tag.name)} onCreated={handleCreated} />
+          <CreateTagForm
+            existingNames={tags.map((tag) => tag.name)}
+            onCreated={handleCreated}
+            onCancel={() => setIsCreating(false)}
+          />
         </Rise>
       )}
 
@@ -93,6 +104,7 @@ export function TagsPanel({
           headingId="tag-list-heading"
           title="The team’s tags"
           hint={listHint}
+          action={createAction}
         >
           <EditableTagList
             tags={tags}
@@ -103,6 +115,7 @@ export function TagsPanel({
             onRenamed={handleRenamed}
             onRecoloured={handleRecoloured}
             onDeleted={handleDeleted}
+            onCreateClick={() => setIsCreating(true)}
           />
         </SectionCard>
       </Rise>

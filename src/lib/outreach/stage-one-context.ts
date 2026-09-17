@@ -2,12 +2,8 @@
  * The client context a Stage 1 outreach draft is generated from — assembled in
  * one place so the two callers cannot drift apart.
  *
- * Those callers are the real one (`/api/clients/[id]/outreach-drafts/stage-one`,
- * which a CAM triggers from the client profile) and the prompt lab
- * (`/admin/email-lab`, where an admin tries prompts out before committing to
- * them). The whole point of the lab is that what it shows on screen is what the
- * real generation sends; that guarantee only holds if both build the context
- * with the same code, which is what this module is.
+ * The caller is the real generation route (`/api/clients/[id]/outreach-drafts/stage-one`,
+ * which a CAM triggers from the client profile).
  *
  * Split in two on the usual line: `loadStageOneExtras` does the reads,
  * `toStageOneContext` is pure and maps rows to the prompt's input, so the

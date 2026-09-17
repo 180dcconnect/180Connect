@@ -29,18 +29,21 @@ import { TagChip } from "@/lib/tags/tag-chips";
 import type { CreateTagResult } from "@/lib/tags/create-tag-core";
 
 import { TagColourPicker } from "./colour-picker";
-import { PRIMARY_BUTTON, TEXT_FIELD } from "./styles";
+import { PRIMARY_BUTTON, SECONDARY_BUTTON, TEXT_FIELD } from "./styles";
 import { createTagFormAction } from "./tags-actions";
 import type { TagEntry } from "./editable-tag-list";
 
 export function CreateTagForm({
   existingNames,
   onCreated,
+  onCancel,
 }: {
   /** Every tag name already in use, to answer "is this name taken?" as you type. */
   existingNames: string[];
   /** Hands the new tag to the panel, so it appears in the list below at once. */
   onCreated: (tag: TagEntry) => void;
+  /** Optional callback to close or cancel creating a tag. */
+  onCancel?: () => void;
 }) {
   const [state, action, pending] = useActionState<CreateTagResult | null, FormData>(
     createTagFormAction,
@@ -70,7 +73,21 @@ export function CreateTagForm({
   // No hint on this card: the page says what a tag is, once, above both cards.
   // This card's own job is to show you the tag you are about to make.
   return (
-    <SectionCard headingId="create-tag-heading" title="Create a tag">
+    <SectionCard
+      headingId="create-tag-heading"
+      title="Create a tag"
+      action={
+        onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="cursor-pointer font-body text-xs font-semibold text-dim hover:text-ink transition-colors"
+          >
+            Cancel
+          </button>
+        ) : null
+      }
+    >
       <form action={action} className="mt-4 flex flex-col gap-4">
         <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
           <label className="flex min-w-[16rem] flex-1 flex-col gap-1.5">
@@ -108,6 +125,17 @@ export function CreateTagForm({
           <button type="submit" disabled={pending || taken} className={PRIMARY_BUTTON}>
             {pending ? "Creating…" : "Create tag"}
           </button>
+
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={pending}
+              className={SECONDARY_BUTTON}
+            >
+              Cancel
+            </button>
+          )}
 
           {/*
             The two messages below are this screen's own, not `InlineAlert`s:

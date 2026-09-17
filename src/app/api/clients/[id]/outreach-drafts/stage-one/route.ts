@@ -182,8 +182,7 @@ export async function POST(
     );
   }
 
-  // Every read beyond the organisation row itself, shared with /admin/email-lab
-  // so the lab's preview of the prompt is built from the same context this is.
+  // Every read beyond the organisation row itself.
   const extras = await loadStageOneExtras(supabase, organisationId, "outreach.stage_one");
   const contact = extras.contact;
 

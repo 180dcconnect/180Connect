@@ -74,6 +74,7 @@ export function EditableTagList({
   onRenamed,
   onRecoloured,
   onDeleted,
+  onCreateClick,
 }: {
   tags: TagEntry[];
   usageById: TagUsage;
@@ -91,6 +92,8 @@ export function EditableTagList({
   onRenamed: (tagId: string, name: string) => void;
   onRecoloured: (tagId: string, colour: string | null) => void;
   onDeleted: (tagId: string) => void;
+  /** Optional callback to open the create tag form when list is empty. */
+  onCreateClick?: () => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
@@ -202,7 +205,21 @@ export function EditableTagList({
         </p>
       )}
 
-      <ul className="mt-3 divide-y divide-rule-soft">
+      {tags.length === 0 ? (
+        <div className="py-8 text-center">
+          <p className="font-body text-sm text-dim">No tags have been created yet.</p>
+          {canCreate && onCreateClick && (
+            <button
+              type="button"
+              onClick={onCreateClick}
+              className="mt-3 inline-flex cursor-pointer items-center gap-1.5 rounded-inset border border-lead bg-lead px-3.5 py-1.5 text-xs font-semibold text-paper transition-colors hover:bg-lead-mid"
+            >
+              <span>+ Create your first tag</span>
+            </button>
+          )}
+        </div>
+      ) : (
+        <ul className="mt-3 divide-y divide-rule-soft">
         {tags.map((tag) => {
           const usage = usageById[tag.id] ?? null;
           const editing = editingId === tag.id;
@@ -344,6 +361,7 @@ export function EditableTagList({
           );
         })}
       </ul>
+      )}
 
       {countsIncomplete && canRestructure && (
         <p className="mt-3 font-body text-[13px] leading-[1.6] text-dim">

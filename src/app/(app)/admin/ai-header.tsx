@@ -18,7 +18,6 @@ import { aiTabsFor } from "./ai-group";
 const HEADINGS: Record<string, { title: string }> = {
   "/admin/ai-generations": { title: "AI generation history" },
   "/admin/ml-readiness": { title: "Machine Learning" },
-  "/admin/email-lab": { title: "Email prompt lab" },
 };
 
 export async function AiHeader({

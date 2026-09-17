@@ -53,6 +53,7 @@ export type ClientListRow = {
   /** F215 — the charity's own filed description of its work (register text,
    * mirrored to enrichment_results.mission_statement). Companies have none. */
   charity_activities?: string | null;
+  cic_community_statement?: string | null;
   income_band?: string | null;
   total_income?: number | null;
   financial_periods?: FinancialPeriodRow[] | null;
@@ -97,6 +98,8 @@ export type VisibleClient = ClientListRow & {
    * explicit state the filter and sort both surface, never a silent zero. */
   priorityScore: number | null;
   priorityBand: "high" | "medium" | "low" | null;
+  /** Whether the record lacks either a mission statement or a sector. */
+  isIncomplete: boolean;
 };
 
 /**
@@ -158,6 +161,25 @@ export function grantCountOf(org: Pick<ClientListRow, "grant_total" | "grants">)
 }
 
 /**
+ * A client record is incomplete if it lacks either a mission statement or a sector.
+ * Mission can come from charity_activities (Charity Commission) or cic_community_statement (Companies House).
+ */
+export function isClientIncomplete(
+  client: Pick<ClientListRow, "sector" | "charity_activities" | "cic_community_statement">,
+): boolean {
+  const hasSector = Boolean(
+    client.sector &&
+    client.sector.trim().length > 0 &&
+    client.sector.toLowerCase() !== "unclassified",
+  );
+  const hasMission = Boolean(
+    (client.charity_activities && client.charity_activities.trim().length > 0) ||
+    (client.cic_community_statement && client.cic_community_statement.trim().length > 0),
+  );
+  return !hasSector || !hasMission;
+}
+
+/**
  * The default list view (F051 AC4): actively suppressed charities (F251) never
  * appear here, regardless of import method or manual entry (F051 AC1). A pending
  * suppression request isn't suppressed yet, so it still shows, flagged.
@@ -182,8 +204,24 @@ export function visibleClients(
       income_band: resolveClientIncomeBand(organisation),
       latest_income: resolveClientTotalIncome(organisation),
       has_grants: Boolean(organisation.has_grants || grantCountOf(organisation) > 0),
+      isIncomplete: isClientIncomplete(organisation),
       ...latestScoreOf(organisation),
     }));
+}
+
+/**
+ * Filter by completeness: narrows to records that are missing either a mission
+ * statement or a sector.
+ */
+export function filterByCompleteness(
+  clients: VisibleClient[],
+  incompleteFilter: string | boolean | null | undefined,
+): VisibleClient[] {
+  if (!incompleteFilter) return clients;
+  if (incompleteFilter === true || incompleteFilter === "true" || incompleteFilter === "1") {
+    return clients.filter((client) => client.isIncomplete);
+  }
+  return clients;
 }
 
 /**
@@ -470,6 +508,7 @@ export function emptyStateMessage({
   mission,
   similar,
   filterActive,
+  incomplete,
 }: {
   isOwnedView: boolean;
   search?: string | null;
@@ -487,7 +526,11 @@ export function emptyStateMessage({
    * plainly that it is gone. */
   similar?: string | boolean | null;
   filterActive: boolean;
+  incomplete?: string | boolean | null;
 }): string {
+  if (incomplete === true || incomplete === "true" || incomplete === "1") {
+    return "No incomplete client records found.";
+  }
   const question = ask?.trim();
   if (question) {
     return `No clients match “${question}”. Clear the question, or widen it — the filters below still work.`;

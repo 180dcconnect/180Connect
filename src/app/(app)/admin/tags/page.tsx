@@ -41,6 +41,7 @@ import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import { reportError } from "@/lib/error-logging";
 import { createClient } from "@/lib/supabase/server";
 import { CREATE_TAG_PERMISSION } from "@/lib/tags/create-tag-core";
+import { SET_TAG_COLOUR_PERMISSION } from "@/lib/tags/set-tag-colour-core";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { TagsPanel } from "./tags-panel";
 import type { TagEntry, TagUsage } from "./editable-tag-list";
@@ -97,6 +98,10 @@ export default async function TagsPage() {
   // Whether a control may be drawn — each one asking the permission its action
   // asks, so the two cannot drift apart.
   const canCreate = hasPermission(role, CREATE_TAG_PERMISSION);
+  // Same question the colour action asks (`tags:manage`). A CAM holds it; a
+  // viewer does not, and used to be offered "Change colour" anyway — a control
+  // whose only possible outcome was a refusal.
+  const canRecolour = hasPermission(role, SET_TAG_COLOUR_PERMISSION);
   const canRestructure = canRestructureTags(role);
 
   const supabase = await createClient();
@@ -211,6 +216,7 @@ export default async function TagsPage() {
             initialTags={existingTags}
             usageById={usageById}
             canCreate={canCreate}
+            canRecolour={canRecolour}
             canRestructure={canRestructure}
           />
         )}

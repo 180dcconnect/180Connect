@@ -94,6 +94,19 @@ begin
     'the refused update left the cycle exactly where it was'
   );
 
+  -- An end before the start stays the table's own CHECK's refusal. The trigger
+  -- builds a range from those dates, and `daterange('2026-06-01', '2026-04-04')`
+  -- raises 22000 before the constraint is ever reached — which would change the
+  -- error the RLS suite (and any other writer) sees for a backwards row. So the
+  -- code is pinned here as well as there: 23514, from the constraint.
+  return next throws_ok(
+    $sql$insert into public.outreach_cycles (name, starts_on, ends_on)
+          values ('Backwards 26', '2026-06-01', '2026-04-04')$sql$,
+    '23514',
+    null,
+    'a cycle ending before it starts is the constraint''s refusal, not the trigger''s'
+  );
+
   -- A third cycle after the second ends is fine, so the trigger is not simply
   -- refusing every second insert.
   insert into public.outreach_cycles (name, starts_on, ends_on)

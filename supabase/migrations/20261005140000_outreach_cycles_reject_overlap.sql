@@ -36,6 +36,14 @@
 --   reads the raw error — a psql session, a log — should still be able to tell
 --   what happened.
 --
+--   ONE ERROR CODE IS DELIBERATELY LEFT ALONE. A cycle whose end falls before
+--   its start is the table's own CHECK's to refuse (23514, asserted by
+--   `rls_policies.test.sql`), and `daterange(new.starts_on, new.ends_on)` would
+--   raise 22000 first — "range lower bound must be less than or equal to range
+--   upper bound" — turning a clear refusal into a confusing one for every
+--   writer, app or not. A backwards row is handed back untouched for the
+--   constraint to reject, so this trigger only ever speaks for overlaps.
+--
 -- Schema change approval record (SOP §7):
 --   Change        | Add app.outreach_cycles_reject_overlap() + one BEFORE
 --                 | INSERT OR UPDATE trigger on public.outreach_cycles.
@@ -75,6 +83,14 @@ declare
   v_clash_start date;
   v_clash_end   date;
 begin
+  -- Dates that run backwards are not this trigger's business: the table's CHECK
+  -- refuses them, and constructing a range from them here would raise 22000
+  -- instead, changing the error every existing caller sees. Hand the row back
+  -- and let the constraint do it.
+  if new.starts_on > new.ends_on then
+    return new;
+  end if;
+
   -- One writer at a time through the check below. `pg_advisory_xact_lock` is
   -- scoped to this transaction and released at its end, and the SELECT after it
   -- runs under READ COMMITTED, so it sees whatever the previous holder of the

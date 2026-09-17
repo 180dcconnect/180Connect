@@ -91,6 +91,9 @@ export default async function AdminPage() {
           <Tile href="/admin/discrepancies" title="Data discrepancies">
             Review fields where two sources disagree and choose which value to keep.
           </Tile>
+          <Tile href="/admin/incomplete-records" title="Incomplete records">
+            Review client records missing mission statements, sectors, or websites and fill them in.
+          </Tile>
         </Section>
 
         <Section label="Data imports">

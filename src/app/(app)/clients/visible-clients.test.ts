@@ -34,6 +34,9 @@ import {
   searchClientsByMission,
   searchClientsByMissionKeywords,
   sortClients,
+  emptyStateMessage,
+  filterByCompleteness,
+  isClientIncomplete,
   visibleClients,
   type ClientListRow,
 } from "./visible-clients.ts";
@@ -1652,4 +1655,96 @@ describe("filterByFinancialRecords", () => {
     assert.equal(financialRecordFilterLabel("none"), "No financial records");
   });
 });
+
+describe("isClientIncomplete and filterByCompleteness", () => {
+  it("identifies a complete client with both sector and charity_activities", () => {
+    const complete = org({
+      sector: "health",
+      charity_activities: "Provides community healthcare services.",
+    });
+    assert.equal(isClientIncomplete(complete), false);
+  });
+
+  it("identifies a complete client with sector and cic_community_statement", () => {
+    const completeCic = org({
+      sector: "education",
+      cic_community_statement: "Support local young people with mentoring.",
+    });
+    assert.equal(isClientIncomplete(completeCic), false);
+  });
+
+  it("identifies client without sector as incomplete", () => {
+    const missingSector = org({
+      sector: null,
+      charity_activities: "Charity activities present.",
+    });
+    assert.equal(isClientIncomplete(missingSector), true);
+
+    const unclassifiedSector = org({
+      sector: "unclassified",
+      charity_activities: "Charity activities present.",
+    });
+    assert.equal(isClientIncomplete(unclassifiedSector), true);
+  });
+
+  it("identifies client without mission as incomplete", () => {
+    const missingMission = org({
+      sector: "health",
+      charity_activities: null,
+      cic_community_statement: null,
+    });
+    assert.equal(isClientIncomplete(missingMission), true);
+  });
+
+  it("identifies client missing both sector and mission as incomplete", () => {
+    const missingBoth = org({
+      sector: null,
+      charity_activities: null,
+      cic_community_statement: null,
+    });
+    assert.equal(isClientIncomplete(missingBoth), true);
+  });
+
+  it("filters visible clients to only incomplete ones when incomplete=true", () => {
+    const complete = org({
+      id: "c-1",
+      legal_name: "Complete Charity",
+      sector: "health",
+      charity_activities: "Healthcare mission",
+    });
+    const incompleteNoSector = org({
+      id: "c-2",
+      legal_name: "No Sector Charity",
+      sector: null,
+      charity_activities: "Some mission",
+    });
+    const incompleteNoMission = org({
+      id: "c-3",
+      legal_name: "No Mission Charity",
+      sector: "environment",
+      charity_activities: null,
+    });
+
+    const clients = visibleClients([complete, incompleteNoSector, incompleteNoMission], []);
+    assert.equal(clients.find((c) => c.id === "c-1")?.isIncomplete, false);
+    assert.equal(clients.find((c) => c.id === "c-2")?.isIncomplete, true);
+    assert.equal(clients.find((c) => c.id === "c-3")?.isIncomplete, true);
+
+    const filtered = filterByCompleteness(clients, "true");
+    assert.deepEqual(filtered.map((c) => c.id), ["c-2", "c-3"]);
+
+    const unfiltered = filterByCompleteness(clients, undefined);
+    assert.equal(unfiltered.length, 3);
+  });
+
+  it("provides informative emptyStateMessage when incomplete filter is active", () => {
+    const message = emptyStateMessage({
+      isOwnedView: false,
+      filterActive: true,
+      incomplete: "true",
+    });
+    assert.equal(message, "No incomplete client records found.");
+  });
+});
+
 

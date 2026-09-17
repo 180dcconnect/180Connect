@@ -53,6 +53,7 @@ export const SAVED_VIEW_FILTER_KEYS = [
   "owner",
   "score",
   "financials",
+  "incomplete",
 ] as const;
 
 /** Keys whose URL form is a repeated param, stored as arrays in `filters`. */
@@ -287,6 +288,9 @@ export function describeFilters(
         .map((value) => financialRecordFilterLabel(value))
         .join(", "),
     );
+  }
+  if (filters.incomplete) {
+    parts.push("Incomplete records");
   }
   return parts.length > 0 ? parts.join(" · ") : "No filters — the whole list";
 }

@@ -56,6 +56,18 @@ export function isUuid(value: unknown): boolean {
   return z.uuid().safeParse(value).success;
 }
 
+/**
+ * Well-formed UUID, as a schema field.
+ *
+ * The schema half of `isUuid`: an id that arrives from the client — a route
+ * param, a row id echoed back by a form — is checked here rather than by a
+ * Postgres cast, which would 500 instead of refusing. Not for anything a person
+ * types, and the message never names a table or a column.
+ */
+export function uuidField(message = "That identifier could not be read. Try again.") {
+  return z.uuid(message);
+}
+
 /** Absolute http:// or https:// URL. */
 export function urlField(message = "Enter a valid URL.") {
   return z.string().trim().pipe(z.url({ protocol: /^https?$/, message }));

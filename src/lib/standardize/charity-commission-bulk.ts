@@ -11,7 +11,7 @@
 // Pure, no I/O, same as every other mapper here.
 
 import { normalizeCity } from "../city.ts";
-import { CLASSIFICATION_TO_SECTOR } from "../ingestion/sources/charity-commission-bulk-config.ts";
+import { sectorForClassifications } from "../charity-register/sector-map.ts";
 import { computeCompletenessScore, type StandardOrganisation } from "./types.ts";
 
 /** The payload shape the bulk adapter writes into raw_source_records. */
@@ -118,12 +118,7 @@ export function bulkOrganisationType(
 export function bulkSector(
   matchedClassifications: readonly string[] | undefined,
 ): string | null {
-  for (const description of Object.keys(CLASSIFICATION_TO_SECTOR)) {
-    if (matchedClassifications?.includes(description)) {
-      return CLASSIFICATION_TO_SECTOR[description];
-    }
-  }
-  return null;
+  return sectorForClassifications(matchedClassifications);
 }
 
 export function standardizeCharityCommissionBulkRecord(

@@ -20,9 +20,13 @@
 //   refusal is a bug report waiting to happen (`AGENTS.md` §Roles). Where the
 //   count could not be read, deleting is withheld too, and the card says so:
 //   an unknown count must never read as "safe to delete".
-// - **Who may do what.** Rename and Delete are drawn only for an administrator
-//   — the same question the actions ask (`canRestructureTags`) — and the card's
-//   hint says who to ask. A CAM used to press Rename and be told no.
+// - **Who may do what.** Every control is drawn only when the action behind it
+//   would accept the reader: Rename and Delete ask `canRestructureTags` (an
+//   administrator), changing a colour asks the `tags:manage` the recolour action
+//   asks. Leadership reached this page and was offered "Change colour" anyway,
+//   because that button alone was never gated — a control whose only possible
+//   outcome is a refusal. A row can now offer them nothing at all, and the card
+//   says why in one sentence rather than per row.
 // - **What a tag looks like.** The row rendered a `rounded-full` pill with
 //   brand-green text, so the tag on this screen did not match the tag on the
 //   record. It is the record's chip now (`TagChip`), and the colour picker is
@@ -30,6 +34,7 @@
 
 import { useTransition, useState } from "react";
 
+import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import { TagChip } from "@/lib/tags/tag-chips";
 import { deleteTagAction } from "@/lib/tags/delete-tag-action.ts";
 import { editTagAction } from "@/lib/tags/edit-tag-action";
@@ -64,6 +69,7 @@ export function EditableTagList({
   tags,
   usageById,
   canCreate,
+  canRecolour,
   canRestructure,
   onRenamed,
   onRecoloured,
@@ -73,6 +79,13 @@ export function EditableTagList({
   usageById: TagUsage;
   /** Whether this reader may create one at all — the empty state says who can. */
   canCreate: boolean;
+  /**
+   * Whether this reader may choose a colour — the same `tags:manage` the
+   * recolour action asks. Leadership reads this page and holds neither this nor
+   * restructuring, so a row offers them no control at all, and the note below
+   * stands where those controls would have been.
+   */
+  canRecolour: boolean;
   /** An administrator may rename and delete; a CAM may only recolour. */
   canRestructure: boolean;
   onRenamed: (tagId: string, name: string) => void;
@@ -181,6 +194,14 @@ export function EditableTagList({
 
   return (
     <>
+      {/* A reader who can change nothing gets the standard sentence once, where
+          the row controls would have been, instead of nine silent rows. */}
+      {!canRecolour && !canRestructure && (
+        <p className="mt-3 font-body text-[13px] leading-[1.6] text-dim">
+          {VIEW_ONLY_CONTROL_NOTE}
+        </p>
+      )}
+
       <ul className="mt-3 divide-y divide-rule-soft">
         {tags.map((tag) => {
           const usage = usageById[tag.id] ?? null;
@@ -242,19 +263,21 @@ export function EditableTagList({
                       </button>
                     )}
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setColourId(colouring ? null : tag.id);
-                        setConfirmingDeleteId(null);
-                        clearError(tag.id);
-                      }}
-                      disabled={pending}
-                      aria-expanded={colouring}
-                      className={`${canRestructure && !confirming ? "" : "ml-auto"} ${ROW_ACTION}`}
-                    >
-                      {tag.colour === null ? "Add a colour" : "Change colour"}
-                    </button>
+                    {canRecolour && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setColourId(colouring ? null : tag.id);
+                          setConfirmingDeleteId(null);
+                          clearError(tag.id);
+                        }}
+                        disabled={pending}
+                        aria-expanded={colouring}
+                        className={`${canRestructure && !confirming ? "" : "ml-auto"} ${ROW_ACTION}`}
+                      >
+                        {tag.colour === null ? "Add a colour" : "Change colour"}
+                      </button>
+                    )}
 
                     {canRestructure && !confirming && usage === 0 && (
                       <button

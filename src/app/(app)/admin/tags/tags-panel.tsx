@@ -30,12 +30,15 @@ export function TagsPanel({
   initialTags,
   usageById,
   canCreate,
+  canRecolour,
   canRestructure,
 }: {
   initialTags: TagEntry[];
   usageById: TagUsage;
   /** A CAM or an admin may create a tag (`tags:manage`); a viewer may not. */
   canCreate: boolean;
+  /** Whether this reader may choose a tag's colour — the same `tags:manage`. */
+  canRecolour: boolean;
   /** Only an administrator may rename or delete one (`canRestructureTags`). */
   canRestructure: boolean;
 }) {
@@ -73,7 +76,7 @@ export function TagsPanel({
   // job — and the screen says so rather than offering a button that refuses.
   const listHint = canRestructure
     ? "Each tag shows how many clients carry it. Renaming or deleting a tag changes it on every client that already has it, and a tag on a client has to be taken off those clients before it can be deleted."
-    : canCreate
+    : canRecolour
       ? "Each tag shows how many clients carry it. Creating a tag and changing its colour are yours to do; renaming or deleting one changes it on every client that already has it, so an administrator does that."
       : "Each tag shows how many clients carry it. Any CAM can put one on a client, and the client list can be filtered by it.";
 
@@ -95,6 +98,7 @@ export function TagsPanel({
             tags={tags}
             usageById={usageById}
             canCreate={canCreate}
+            canRecolour={canRecolour}
             canRestructure={canRestructure}
             onRenamed={handleRenamed}
             onRecoloured={handleRecoloured}

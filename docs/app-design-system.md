@@ -265,6 +265,7 @@ put `.dark` on `<html>` and define token overrides under it.
 | Instant on/off | `Switch` from `src/components/ui/material-design-3-switch.tsx` |
 | Pick one of a few (settings) | `OptionGroup` from `src/app/settings/option-group.tsx` |
 | A tag | `TagChip` from `src/lib/tags/tag-chips.tsx` |
+| A reading's shape | The sticks — `HorizontalStickGauge`, `StackedStickColumns` |
 
 **A tag is one chip, everywhere.** `TagChip` is the tag as it appears on the
 client record, on the tags screen's list and inside its colour picker: a
@@ -301,6 +302,34 @@ turning the switch off is the risky direction (`data-handling-rules` turns a
 privacy protection off that way). Its `haptic` prop plays a synthesised click;
 nothing in the app sets it, and nothing should without asking first — a setting's
 state must never depend on the sound card.
+
+**The sticks are the app's instrument.** `HorizontalStickGauge` (a share of a
+whole), `StackedStickColumns` (the last seven buckets, beside a numeral) and
+`stick-slider` (a value you set) all draw the same object — a 3px rounded
+stroke in `--lead`, spaced at the gauge's 8.5px pitch — and a card that needs a
+shape of its own should join them rather than invent one
+(`dashboard/ai-spend-daily-chart.tsx` is the worked example: spend as one
+vertical stick gauge per date, the same reading as the horizontal one stood on
+its end). Where the instrument is a share, the pitch is fixed; where it is a
+time series, the *dates* set the pitch and only the stroke has to give way, and
+only once the dates would otherwise overlap. Three rules keep them one family:
+
+- **Measure the width; never scale a `viewBox`.** A fixed `viewBox` the browser
+  fits to the card means one SVG unit is *not* one CSS pixel, so an instrument
+drawn for a one-column tile arrives stretched the moment its card takes two
+  columns — 4px sticks become 14px blocks, and the whole card reads as a cruder
+  object than the one next to it. `HorizontalStickGauge` measures its container
+  with a `ResizeObserver` and draws in pixels; anything carrying a time series
+  should do the same.
+- **Colour is the accent, or the data's own palette — never a state tone.** A
+  category is not good or bad, so it must not be drawn in `go`/`hold`/`stop`;
+  those mean state, and state comes from `Pill`. A category's five colours live
+  with its labels (`lib/dashboard/ai-spend.ts`), so the instrument, its legend
+  and the next screen that shows the same split agree.
+- **One category per mark.** A mark is 3px: five colours stacked inside a day's
+  column is a pattern, not a reading. Where a split matters, it gets a row of
+  its own (`AiSpendActivityGauge`), and the per-day detail is offered on hover,
+  one day at a time.
 
 `origin-button`, `gooey-action-button`, `send-button`, `gooey-email-input` and
 the other gooey/animated variants are one-off brand pieces, not app defaults.

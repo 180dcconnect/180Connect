@@ -16,6 +16,7 @@ import {
   filterByTags,
   filterByPriorityScore,
   filterByFinancialRecords,
+  filterByCompleteness,
   FINANCIAL_RECORD_FILTERS,
   financialRecordFilterLabel,
   hasActiveQueuePreferences,
@@ -143,6 +144,8 @@ type SearchParams = Promise<{
   score?: string | string[];
   // Filter by presence of financial records (charity commission, 360giving, any, none)
   financials?: string | string[];
+  /** Filter to incomplete records (missing mission or sector). */
+  incomplete?: string;
   /** Funnel stage the breakdown counts. */
   stage?: string;
   /** Field the breakdown groups by, and which end of it to show. */
@@ -259,6 +262,7 @@ export default async function ClientsPage({
     similar: similarParam,
     score: scoreParam,
     financials: financialsParam,
+    incomplete: incompleteParam,
     stage: stageParam,
     sort: sortParam,
     dir: dirParam,
@@ -313,13 +317,12 @@ export default async function ClientsPage({
    *   payload with no reader.
    */
   const listColumns = [
-    "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id",
+    "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, charity_activities, cic_community_statement",
     "owner:users!organisations_owner_id_fkey(full_name)",
     "org_tags(tag_id)",
     "financial_periods(income_band, total_income, period_end)",
     "grant_total:grants(count)",
     "latest_scores(priority_score, priority_band, scored_at)",
-    ...(missionTerm ? ["charity_activities"] : []),
   ].join(", ");
 
   // PostgREST caps a single response at 1000 rows — same truncation the
@@ -548,6 +551,7 @@ export default async function ClientsPage({
   // band is actually chosen (the filter's own AC3, enforced inside the function).
   matchingClients = filterByPriorityScore(matchingClients, scoreBands);
   matchingClients = filterByFinancialRecords(matchingClients, financialValues);
+  matchingClients = filterByCompleteness(matchingClients, incompleteParam);
 
   /**
    * F214 — Natural Language Charity Search (#209).
@@ -624,6 +628,7 @@ export default async function ClientsPage({
       askParam ||
       missionTerm ||
       similarParam ||
+      incompleteParam ||
       cityValues.length ||
       countryValues.length ||
       statusValues.length ||
@@ -661,6 +666,7 @@ export default async function ClientsPage({
     mission: missionTerm ?? undefined,
     owner: ownerFilter,
     score: scoreParam,
+    incomplete: incompleteParam,
   });
   const savedViewSummaries: SavedViewSummary[] = (savedViews.data ?? []).map((row) => {
     const filters = parseFilters(row.filters);
@@ -754,6 +760,7 @@ export default async function ClientsPage({
       // listSort below: junk leaves the URL on the next click.
       score: scoreBands,
       financials: financialValues,
+      incomplete: incompleteParam,
       // The validated term, not the raw param — same junk-leaves-the-URL rule.
       mission: missionTerm ?? undefined,
       // F216 — a dangling or ineligible id is dropped here (the banner says
@@ -946,6 +953,9 @@ export default async function ClientsPage({
                 ...(missionTerm
                   ? [{ category: "Filter by mission", label: missionTerm, value: missionTerm }]
                   : []),
+                ...(incompleteParam
+                  ? [{ category: "Filter by record completeness", label: "Missing mission or sector", value: "true" }]
+                  : []),
               ]}
               params={{
                 "Filter by city": "city",
@@ -958,6 +968,7 @@ export default async function ClientsPage({
                 "Filter by priority score": "score",
                 "Filter by financial records": "financials",
                 "Filter by mission": "mission",
+                "Filter by record completeness": "incomplete",
               }}
               categories={{
                 "Filter by city": uniqueCities.map(c => ({ label: c, value: c })),
@@ -981,6 +992,9 @@ export default async function ClientsPage({
                   label: f.label,
                   value: f.value,
                 })),
+                "Filter by record completeness": [
+                  { label: "Missing mission or sector", value: "true" },
+                ],
                 // F215 — free-text: the category renders a text input, not an
                 // option list. Options stay empty so no stale list can appear.
                 "Filter by mission": [],
@@ -1307,6 +1321,7 @@ export default async function ClientsPage({
                     mission: missionTerm,
                     similar: eligibleReference?.legal_name ?? (similarDangling || similarIneligible ? true : null),
                     filterActive,
+                    incomplete: incompleteParam,
                   })}
                 />
               ) : (

@@ -235,30 +235,61 @@ export default function Loading() {
           </div>
         </div>
 
-        {/* Admin row: the queues beside the AI spend they generate */}
+        {/* Admin row: the AI spend the queues generate, beside the work with a
+            date on it. Two columns for `AiSpendCard` and one for
+            `MyActionsCard` — the two used to be drawn the other way round here,
+            and the spend card in its old one-column shape. */}
         <div className="space-y-4">
           <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
             <div className="xl:col-span-2">
-              <div className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
-                <Skeleton className="h-6 w-40" />
-                <ul className="mt-4 divide-y divide-black/[0.06]">
-                  {Array.from({ length: 4 }).map((_, index) => (
-                    <li
-                      key={index}
-                      className="flex items-center justify-between gap-4 py-3"
-                    >
-                      <Skeleton className="h-4 w-40 max-w-full" />
-                      <Skeleton className="h-6 w-12 shrink-0" />
-                    </li>
-                  ))}
-                </ul>
+              <div className="flex flex-col rounded-panel border border-rule bg-white">
+                <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 px-5 pt-5 sm:px-6">
+                  <div>
+                    <Skeleton className="h-[23px] w-28" />
+                    <Skeleton className="mt-2.5 h-4 w-full" />
+                    <Skeleton className="mt-1.5 h-4 w-2/3" />
+                  </div>
+                  {/* The window control, then the link to the detail. */}
+                  <div className="flex flex-col items-end gap-2">
+                    <Skeleton className="h-[33px] w-32 rounded-inset" />
+                    <Skeleton className="h-4 w-44 max-w-full" />
+                  </div>
+                </div>
+                <div className="px-5 pt-4 sm:px-6">
+                  <SkeletonLine
+                    text="text-[clamp(1.75rem,4vw,2.5rem)]"
+                    width="w-32"
+                  />
+                  <Skeleton className="mt-2.5 h-4 w-56 max-w-full" />
+                  <Skeleton className="mt-5 h-[19px] w-32" />
+                  <Skeleton className="mt-3 h-[22px] w-full rounded-sm" />
+                  <Skeleton className="mt-3 h-3.5 w-full" />
+                </div>
+                <div className="mt-5 border-t border-rule-soft px-5 py-5 sm:px-6">
+                  <Skeleton className="h-[19px] w-32" />
+                  <Skeleton className="mt-2 h-[156px] w-full rounded-sm" />
+                </div>
+                <div className="px-5 pt-4 pb-5 sm:px-6">
+                  <Skeleton className="h-[18px] w-64 max-w-full" />
+                </div>
               </div>
             </div>
-            <div className="flex min-h-[220px] flex-col rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm">
-              <Skeleton className="h-5 w-32" />
-              <Skeleton className="mt-8 h-9 w-24" />
-              <Skeleton className="mt-4 h-3.5 w-full rounded-sm" />
-              <Skeleton className="mt-2 h-[17px] w-40" />
+            <div className="flex flex-col rounded-panel border border-rule bg-white">
+              <div className="px-5 pt-4 pb-3">
+                <Skeleton className="h-[23px] w-32" />
+                <Skeleton className="mt-2.5 h-4 w-48 max-w-full" />
+              </div>
+              <ul className="divide-y divide-rule-soft border-t border-rule-soft">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <li key={index} className="flex items-center gap-3 px-5 py-3">
+                    <div className="min-w-0 flex-1">
+                      <Skeleton className="h-[18px] w-2/5 max-w-full" />
+                      <Skeleton className="mt-1 h-[15px] w-28" />
+                    </div>
+                    <Skeleton className="h-6 w-24 shrink-0 rounded-full" />
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         </div>

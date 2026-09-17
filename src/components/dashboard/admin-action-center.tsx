@@ -5,7 +5,8 @@ import { cn } from "@/lib/utils";
 
 export interface AdminQueueCounts {
   pendingSuppressions: number;
-  ownershipRequests: number;
+  ownershipRequests?: number;
+  incompleteRecords: number;
   suggestedEdits: number;
   /**
    * High-priority clients with no owner — **not** the whole unowned pool.
@@ -35,11 +36,11 @@ export function AdminActionCenter({ counts }: { counts: AdminQueueCounts }) {
       urgent: counts.unassignedHighPriorityOrgs > 0,
     },
     {
-      title: "Ownership Requests",
-      count: counts.ownershipRequests,
-      href: "/admin/ownership-requests",
-      description: "CAMs requesting to take over clients",
-      urgent: counts.ownershipRequests > 0,
+      title: "Incomplete Records",
+      count: counts.incompleteRecords,
+      href: "/clients?incomplete=true",
+      description: "Missing mission statement or sector",
+      urgent: counts.incompleteRecords > 0,
     },
     {
       title: "Pending Suppressions",

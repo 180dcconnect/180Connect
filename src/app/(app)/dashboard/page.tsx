@@ -71,11 +71,11 @@ import {
   type PriorityOpportunity,
 } from "@/lib/priority-opportunities";
 import {
-  aiSpendSummary,
-  aiSpendWindowStart,
+  aiSpendFetchStart,
+  aiSpendReadings,
   toAiGenerationActivity,
   type AiGenerationCostRow,
-  type AiSpendSummary,
+  type AiSpendReading,
 } from "@/lib/dashboard/ai-spend";
 import { loadViewerState } from "@/lib/dashboard/viewer-state";
 import ProgressMetricCard from "@/components/ui/progress-metric-card";
@@ -314,9 +314,9 @@ export default async function DashboardPage({
   // read yet by this actor (INBOX_THREAD_STATE.read_state !== 'read').
   let unreadInboundOrgIds: Set<string> | undefined;
 
-  // F213 — admin-only month-to-date AI spend, plus the equal-length prior
-  // stretch it is compared against.
-  let aiSpend: AiSpendSummary | null = null;
+  // F213 — admin-only AI spend, for every window the card offers, each with
+  // the equal-length prior stretch it is compared against.
+  let aiSpend: AiSpendReading[] | null = null;
 
   // Data health and System health — admins and leadership only. The reads are
   // started with the others and streamed in by `HealthCards`; `orgHealthFacts`
@@ -629,29 +629,38 @@ export default async function DashboardPage({
       ),
     ]);
 
-    // F213 — month-to-date spend needs the current month plus the equal-length
-    // stretch before it, so the window starts where `aiSpendSummary` does and
-    // it splits the rows. The same `aiSpendNow` goes to both, so the fetch and
-    // the split agree on the boundary. Every role can read AI_GENERATIONS
-    // (§3.4), but the budget is an admin concern, so these reads are
-    // admin-only rather than the tile being hidden client-side.
+    // F213 — the spend card offers several windows, so the read has to reach
+    // back as far as the longest one needs *including its own comparison*:
+    // `aiSpendFetchStart` takes the widest requirement across the offered
+    // periods — two years, for the longest one's own comparison — where the
+    // month-to-date default needs about two. A shorter fetch would silently
+    // understate the longest window rather than fail. The same
+    // `aiSpendNow` goes to the fetch and to the split, so both agree on the
+    // boundary. Every role can read AI_GENERATIONS (§3.4), but the budget is an
+    // admin concern, so these reads are admin-only rather than the card being
+    // hidden client-side.
     const aiSpendNow = new Date();
     const adminReads =
       seesAdminView(actor.role)
         ? (() => {
-            const aiWindowStart = aiSpendWindowStart(aiSpendNow).toISOString();
+            const aiWindowStart = aiSpendFetchStart(aiSpendNow).toISOString();
             return Promise.all([
               // F181's approval queues, counted in one place
               // (src/lib/dashboard/admin-queue.ts).
               fetchAdminQueueTally(supabase),
-              fetchAllRows<RawAiGenerationCostRow>((from, to) =>
-                supabase
-                  .from("ai_generations")
-                  .select("created_at, cost_usd, total_tokens, model, activity")
-                  .gte("created_at", aiWindowStart)
-                  .order("created_at", { ascending: true })
-                  .range(from, to)
-                  .overrideTypes<RawAiGenerationCostRow[], { merge: false }>(),
+              // Four pages a round: the window is now two years wide (see
+              // above), and a round per thousand rows would make the longest
+              // period the slowest thing on the page.
+              fetchAllRows<RawAiGenerationCostRow>(
+                (from, to) =>
+                  supabase
+                    .from("ai_generations")
+                    .select("created_at, cost_usd, total_tokens, model, activity")
+                    .gte("created_at", aiWindowStart)
+                    .order("created_at", { ascending: true })
+                    .range(from, to)
+                    .overrideTypes<RawAiGenerationCostRow[], { merge: false }>(),
+                4,
               ),
               // Paged like ai_generations: a plain select would silently
               // truncate past PostgREST's 1000-row window and undercount spend.
@@ -662,13 +671,15 @@ export default async function DashboardPage({
                 model: string | null;
                 input_tokens: number | null;
                 output_tokens: number | null;
-              }>((from, to) =>
-                supabase
-                  .from("booklet_generations")
-                  .select("created_at, cost_usd, total_tokens, model, input_tokens, output_tokens")
-                  .gte("created_at", aiWindowStart)
-                  .order("created_at", { ascending: true })
-                  .range(from, to),
+              }>(
+                (from, to) =>
+                  supabase
+                    .from("booklet_generations")
+                    .select("created_at, cost_usd, total_tokens, model, input_tokens, output_tokens")
+                    .gte("created_at", aiWindowStart)
+                    .order("created_at", { ascending: true })
+                    .range(from, to),
+                4,
               ),
             ]);
           })()
@@ -904,6 +915,22 @@ export default async function DashboardPage({
         (row) => row.owner_id === null && scoreByOrg.get(row.id)?.band === "high",
       ).length;
 
+      // Incomplete records: clients missing a sector, a mission statement, or a website.
+      // Mission can come from charity_activities (Charity Commission) or cic_community_statement (Companies House).
+      const incompleteRecordsCount = rows.filter((row) => {
+        const hasSector = Boolean(
+          row.sector &&
+          row.sector.trim().length > 0 &&
+          row.sector.toLowerCase() !== "unclassified",
+        );
+        const hasMission = Boolean(
+          (row.charity_activities && row.charity_activities.trim().length > 0) ||
+          (row.cic_community_statement && row.cic_community_statement.trim().length > 0),
+        );
+        const hasWebsite = Boolean(row.website && row.website.trim().length > 0);
+        return !hasSector || !hasMission || !hasWebsite;
+      }).length;
+
       // "Your Priority Opportunities": this viewer's own book plus unclaimed
       // clients, ranked by score — who they should actually talk to next.
       // Gated on scoresLoaded (not just rows loading) so a failed scores read
@@ -1061,7 +1088,7 @@ export default async function DashboardPage({
           await reportError(bookletCosts.error, { operation: "dashboard.booklet_spend" });
         }
         if (!aiCosts.error && !bookletCosts.error) {
-          aiSpend = aiSpendSummary([
+          aiSpend = aiSpendReadings([
             // The row's own classification: initial, regeneration and
             // follow-up are told apart by the column, not assumed.
             ...(aiCosts.data ?? []).map((row) => ({ ...row, activity: toAiGenerationActivity(row.activity) })),
@@ -1078,6 +1105,7 @@ export default async function DashboardPage({
 
         adminCounts = {
           ownershipRequests: queue.tally?.ownershipRequests ?? 0,
+          incompleteRecords: incompleteRecordsCount,
           pendingSuppressions: queue.tally?.pendingSuppressions ?? 0,
           suggestedEdits: queue.tally?.suggestedEdits ?? 0,
           discrepancies: queue.tally?.discrepancies ?? 0,
@@ -1621,14 +1649,14 @@ export default async function DashboardPage({
             {(myDesk || (seesAdminView(actor.role) && aiSpend)) && (
               <Group className="space-y-4">
                 <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
-                  {myDesk && (
-                    <Rise className={`h-full ${seesAdminView(actor.role) && aiSpend ? "xl:col-span-2" : "xl:col-span-3"}`}>
-                      <MyActionsCard desk={myDesk} />
+                  {seesAdminView(actor.role) && aiSpend && (
+                    <Rise className={`h-full ${myDesk ? "xl:col-span-2" : "xl:col-span-3"}`}>
+                      <AiSpendCard readings={aiSpend} />
                     </Rise>
                   )}
-                  {seesAdminView(actor.role) && aiSpend && (
-                    <Rise className={`h-full ${!myDesk ? "xl:col-span-1" : ""}`}>
-                      <AiSpendCard summary={aiSpend} />
+                  {myDesk && (
+                    <Rise className={`h-full ${seesAdminView(actor.role) && aiSpend ? "xl:col-span-1" : "xl:col-span-3"}`}>
+                      <MyActionsCard desk={myDesk} />
                     </Rise>
                   )}
                 </div>

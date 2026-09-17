@@ -105,11 +105,13 @@ export function CreateTagForm({
               className={TEXT_FIELD}
             />
           </label>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col items-start gap-1.5">
             <span className="font-body text-[13px] font-medium text-dim">
               What it will look like on a client
             </span>
-            <TagChip label={trimmed === "" ? "New tag" : trimmed} colour={colour} />
+            <div className="flex h-10 items-center">
+              <TagChip label={trimmed === "" ? "New tag" : trimmed} colour={colour} />
+            </div>
           </div>
         </div>
 

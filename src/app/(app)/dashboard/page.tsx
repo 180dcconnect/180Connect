@@ -40,6 +40,7 @@ import {
   type TeamUserRow,
 } from "@/lib/performance-metrics";
 import { formatTeamActivities, type FormattedTeamActivity, type RawTeamActivityRow } from "@/lib/team-activity";
+import { collectReferencedUserIds } from "@/lib/timeline";
 import {
   buildRecentUpdates,
   recentUpdatesCutoff,
@@ -91,7 +92,7 @@ import { MyWorkStrip } from "@/components/dashboard/my-work-strip";
 import { PriorityOpportunitiesCard } from "@/components/dashboard/priority-opportunities-card";
 import { MyActionsCard } from "@/components/dashboard/my-actions-card";
 import { SendingCapacityCard, type SendingCapacity } from "@/components/dashboard/sending-capacity-card";
-import { AiSpendCard } from "@/components/dashboard/ai-spend-card";
+import { AiSpendOverviewPreview } from "@/components/dashboard/ai-spend-overview-preview";
 import { DataHealthCard } from "@/components/dashboard/data-health-card";
 import { SystemHealthCard } from "@/components/dashboard/system-health-card";
 import { readDataHealth, readSystemHealth, type DataHealthReads } from "@/lib/dashboard/health-reads";
@@ -451,7 +452,7 @@ export default async function DashboardPage({
           supabase
             .from("organisations")
             .select(
-              "id, legal_name, outreach_status, owner_id, updated_at, created_at, sector, organisation_type, city, country_code, website, charity_activities, cic_community_statement",
+              "id, legal_name, outreach_status, owner_id, updated_at, created_at, sector, organisation_type, city, country_code, website, contact_email, charity_activities, cic_community_statement",
             )
             .order("created_at", { ascending: true })
             .order("id", { ascending: true })
@@ -505,28 +506,29 @@ export default async function DashboardPage({
         .limit(RECENT_UPDATES_SOURCE_FETCH_CAP),
     );
 
-    // audit_log's actor_user_id and detail.from/detail.to are bare uuids
-    // (jsonb, not an FK PostgREST can embed), resolved in one batch — same
-    // approach as the client timeline page. Chained onto the audit read, so the
-    // lookup leaves the moment those rows land rather than after every other read.
+    // audit_log's actor_user_id and ownership detail.from/detail.to are bare
+    // uuids (jsonb, not an FK PostgREST can embed), resolved in one batch —
+    // same approach as the client timeline page. Only ownership from/to are
+    // user ids: for status_changed they are pipeline-status tokens, and
+    // passing one to the uuid `users.id` filter fails the whole lookup and
+    // leaves every audit entry reading as "A former team member". Shared
+    // helper, so the two pages cannot drift apart again. Chained onto the
+    // audit read, so the lookup leaves the moment those rows land rather than
+    // after every other read.
     const auditNames = auditRead.then(async ({ data }) => {
-      const referencedUserIds = new Set<string>();
-      for (const row of (data ?? []) as unknown as RecentAuditRow[]) {
-        if (row.actor_user_id) referencedUserIds.add(row.actor_user_id);
-        const detail =
-          row.detail && typeof row.detail === "object"
-            ? (row.detail as Record<string, unknown>)
-            : {};
-        if (typeof detail.from === "string") referencedUserIds.add(detail.from);
-        if (typeof detail.to === "string") referencedUserIds.add(detail.to);
-      }
+      const referencedUserIds = collectReferencedUserIds(
+        (data ?? []) as unknown as RecentAuditRow[],
+      );
 
       const names = new Map<string, string | null>();
       if (referencedUserIds.size > 0) {
-        const { data: referencedUsers } = await supabase
+        const { data: referencedUsers, error: namesError } = await supabase
           .from("users")
           .select("id, full_name")
           .in("id", Array.from(referencedUserIds));
+        if (namesError) {
+          await reportError(namesError, { operation: "dashboard.recent_updates_names" });
+        }
         for (const row of referencedUsers ?? []) {
           names.set(row.id, row.full_name);
         }
@@ -629,67 +631,83 @@ export default async function DashboardPage({
       ),
     ]);
 
-    // F213 — the spend card offers several windows, so the read has to reach
-    // back as far as the longest one needs *including its own comparison*:
-    // `aiSpendFetchStart` takes the widest requirement across the offered
-    // periods — two years, for the longest one's own comparison — where the
-    // month-to-date default needs about two. A shorter fetch would silently
-    // understate the longest window rather than fail. The same
-    // `aiSpendNow` goes to the fetch and to the split, so both agree on the
-    // boundary. Every role can read AI_GENERATIONS (§3.4), but the budget is an
-    // admin concern, so these reads are admin-only rather than the card being
-    // hidden client-side.
+    // F213 — every window the spend card offers, each with the equal-length
+    // prior stretch it is compared against. The fetch starts at the earliest
+    // instant any window's own comparison needs (`aiSpendFetchStart`); All
+    // time needs everything, and the paged reads below run to the first
+    // short page, so an unbounded window costs one read per thousand rows.
+    // The same `aiSpendNow` goes to the fetch and to the split, so both agree
+    // on the boundary. Every role can read AI_GENERATIONS (§3.4), but the
+    // budget is an admin concern, so these reads are admin-only rather than
+    // the card being hidden client-side.
     const aiSpendNow = new Date();
-    const adminReads =
-      seesAdminView(actor.role)
-        ? (() => {
-            const aiWindowStart = aiSpendFetchStart(aiSpendNow).toISOString();
-            return Promise.all([
-              // F181's approval queues, counted in one place
-              // (src/lib/dashboard/admin-queue.ts).
-              fetchAdminQueueTally(supabase),
-              // Four pages a round: the window is now two years wide (see
-              // above), and a round per thousand rows would make the longest
-              // period the slowest thing on the page.
-              fetchAllRows<RawAiGenerationCostRow>(
-                (from, to) =>
-                  supabase
-                    .from("ai_generations")
-                    .select("created_at, cost_usd, total_tokens, model, activity")
-                    .gte("created_at", aiWindowStart)
-                    .order("created_at", { ascending: true })
-                    .range(from, to)
-                    .overrideTypes<RawAiGenerationCostRow[], { merge: false }>(),
-                4,
-              ),
-              // Paged like ai_generations: a plain select would silently
-              // truncate past PostgREST's 1000-row window and undercount spend.
-              fetchAllRows<{
-                created_at: string;
-                cost_usd: number | null;
-                total_tokens: number | null;
-                model: string | null;
-                input_tokens: number | null;
-                output_tokens: number | null;
-              }>(
-                (from, to) =>
-                  supabase
-                    .from("booklet_generations")
-                    .select("created_at, cost_usd, total_tokens, model, input_tokens, output_tokens")
-                    .gte("created_at", aiWindowStart)
-                    .order("created_at", { ascending: true })
-                    .range(from, to),
-                4,
-              ),
-            ]);
-          })()
-        : null;
+    const adminReads = seesAdminView(actor.role)
+      ? (() => {
+          const aiWindowStart = aiSpendFetchStart(aiSpendNow).toISOString();
+          return Promise.all([
+            // F181's approval queues, counted in one place
+            // (src/lib/dashboard/admin-queue.ts).
+            fetchAdminQueueTally(supabase),
+            // Four pages a round: all time has no bound (see above), and a
+            // round per thousand rows would make the longest period the
+            // slowest thing on the page.
+            fetchAllRows<RawAiGenerationCostRow>(
+              (from, to) =>
+                supabase
+                  .from("ai_generations")
+                  .select("created_at, cost_usd, total_tokens, model, activity")
+                  .gte("created_at", aiWindowStart)
+                  .order("created_at", { ascending: true })
+                  .range(from, to)
+                  .overrideTypes<RawAiGenerationCostRow[], { merge: false }>(),
+              4,
+            ),
+            // Paged like ai_generations: a plain select would silently
+            // truncate past PostgREST's 1000-row window and undercount spend.
+            fetchAllRows<{
+              created_at: string;
+              cost_usd: number | null;
+              total_tokens: number | null;
+              model: string | null;
+              input_tokens: number | null;
+              output_tokens: number | null;
+            }>(
+              (from, to) =>
+                supabase
+                  .from("booklet_generations")
+                  .select("created_at, cost_usd, total_tokens, model, input_tokens, output_tokens")
+                  .gte("created_at", aiWindowStart)
+                  .order("created_at", { ascending: true })
+                  .range(from, to),
+              4,
+            ),
+          ]);
+        })()
+      : null;
 
     // Started here so they overlap every read below; awaited only inside the
     // Suspense boundary, so they never delay the page. Reuses the engine check
     // above instead of asking Gmail a second time.
     healthReads = seesAdminView(actor.role)
       ? Promise.all([readDataHealth(supabase), readSystemHealth(supabase, engineHealthPromise)])
+      : null;
+
+    // The incomplete-records tile links to /admin/incomplete-records, so its
+    // count uses that page's definition of a mission: register-filed purpose
+    // text first, hand-written enrichment second. Started here so it overlaps
+    // the reads below; awaited beside the count. Admin-side only, like the
+    // tile itself — viewers may read enrichment, and both roles see the tile.
+    const enrichmentMissionsRead = seesAdminView(actor.role)
+      ? fetchAllRows<EnrichmentMissionRow>((from, to) =>
+          supabase
+            .from("enrichment_results")
+            .select("organisation_id, mission_statement, enriched_at")
+            .not("mission_statement", "is", null)
+            .order("enriched_at", { ascending: false })
+            .order("organisation_id", { ascending: true })
+            .range(from, to)
+            .overrideTypes<EnrichmentMissionRow[], { merge: false }>(),
+        )
       : null;
 
     const [organisations, openSuppressions, replyTracking, rawActivity, rawUpdateNotes, rawUpdateMessages, rawUpdateReplies, rawUpdateAudit] =
@@ -915,8 +933,24 @@ export default async function DashboardPage({
         (row) => row.owner_id === null && scoreByOrg.get(row.id)?.band === "high",
       ).length;
 
-      // Incomplete records: clients missing a sector, a mission statement, or a website.
-      // Mission can come from charity_activities (Charity Commission) or cic_community_statement (Companies House).
+      // Incomplete records: the same set /admin/incomplete-records lists —
+      // missing a sector, a mission, a website, a contact email, or a city.
+      // Mission uses the shared resolution (register-filed purpose text, then
+      // hand-written enrichment), so a record fixed in the workspace drops out
+      // of this count on the next load instead of lingering. Fail-soft like
+      // every other section: a broken enrichment read falls back to the
+      // register texts rather than zeroing the tile.
+      const enrichmentMissionsRes = enrichmentMissionsRead
+        ? await enrichmentMissionsRead
+        : null;
+      if (enrichmentMissionsRes?.error) {
+        await reportError(enrichmentMissionsRes.error, {
+          operation: "dashboard.incomplete_records.enrichment",
+        });
+      }
+      const incompleteEnrichmentMissions = enrichmentMissionsRes?.data
+        ? newestMissionPerOrg(enrichmentMissionsRes.data)
+        : new Map<string, string>();
       const incompleteRecordsCount = rows.filter((row) => {
         const hasSector = Boolean(
           row.sector &&
@@ -925,10 +959,13 @@ export default async function DashboardPage({
         );
         const hasMission = Boolean(
           (row.charity_activities && row.charity_activities.trim().length > 0) ||
-          (row.cic_community_statement && row.cic_community_statement.trim().length > 0),
+          (row.cic_community_statement && row.cic_community_statement.trim().length > 0) ||
+          incompleteEnrichmentMissions.has(row.id),
         );
         const hasWebsite = Boolean(row.website && row.website.trim().length > 0);
-        return !hasSector || !hasMission || !hasWebsite;
+        const hasEmail = Boolean(row.contact_email && row.contact_email.trim().length > 0);
+        const hasCity = Boolean(row.city && row.city.trim().length > 0);
+        return !hasSector || !hasMission || !hasWebsite || !hasEmail || !hasCity;
       }).length;
 
       // "Your Priority Opportunities": this viewer's own book plus unclaimed
@@ -1651,7 +1688,7 @@ export default async function DashboardPage({
                 <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
                   {seesAdminView(actor.role) && aiSpend && (
                     <Rise className={`h-full ${myDesk ? "xl:col-span-2" : "xl:col-span-3"}`}>
-                      <AiSpendCard readings={aiSpend} />
+                      <AiSpendOverviewPreview readings={aiSpend} />
                     </Rise>
                   )}
                   {myDesk && (
@@ -1662,6 +1699,7 @@ export default async function DashboardPage({
                 </div>
               </Group>
             )}
+
 
             {/* F028/F029 — what changed on clients and what the team did, as one
                 feed. They were two cards that both reported pipeline and

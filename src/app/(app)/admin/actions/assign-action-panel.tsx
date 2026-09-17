@@ -7,6 +7,7 @@ import { DateRangeCalendar } from "@/components/ui/date-range-calendar";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { OriginButton } from "@/components/ui/origin-button";
+import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import {
   assigneeOwnerNote,
   formatDueDate,
@@ -361,7 +362,7 @@ export function AssignActionPanel({
 
   return (
     <div className="space-y-8">
-      {canAssign && (
+      {canAssign ? (
         <section
           aria-labelledby="assign-action-heading"
           className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm sm:p-6"
@@ -515,6 +516,23 @@ export function AssignActionPanel({
             )}
           </form>
           )}
+        </section>
+      ) : (
+        // Where the assign form would have been, the one voice the app uses for
+        // a control withheld from a viewer — the header above already says the
+        // page reads the same to them, but a silent gap here would read as a
+        // broken form, not a permission.
+        <section
+          aria-labelledby="assign-action-heading"
+          className="rounded-2xl border border-black/[0.06] bg-white p-5 shadow-sm sm:p-6"
+        >
+          <h2
+            id="assign-action-heading"
+            className="font-body text-[18px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink"
+          >
+            Assign a new action
+          </h2>
+          <p className="mt-2 text-sm text-foreground/55">{VIEW_ONLY_CONTROL_NOTE}</p>
         </section>
       )}
 

@@ -98,7 +98,8 @@ export type VisibleClient = ClientListRow & {
    * explicit state the filter and sort both surface, never a silent zero. */
   priorityScore: number | null;
   priorityBand: "high" | "medium" | "low" | null;
-  /** Whether the record lacks either a mission statement or a sector. */
+  /** Whether the record lacks a mission statement (register text or a
+   * hand-written enrichment mission) or a sector. */
   isIncomplete: boolean;
 };
 
@@ -162,10 +163,18 @@ export function grantCountOf(org: Pick<ClientListRow, "grant_total" | "grants">)
 
 /**
  * A client record is incomplete if it lacks either a mission statement or a sector.
- * Mission can come from charity_activities (Charity Commission) or cic_community_statement (Companies House).
+ *
+ * Mission is the shared resolution (lib/mission.ts): register-filed purpose text
+ * first — charity_activities (Charity Commission) or cic_community_statement
+ * (Companies House) — then a hand-written `enrichment_results.mission_statement`,
+ * which is where an admin's fix from /admin/incomplete-records lands. Passing
+ * that map in is what keeps this filter agreeing with the workspace and the
+ * dashboard's tile: without it, a record completed there still read as
+ * incomplete here.
  */
 export function isClientIncomplete(
   client: Pick<ClientListRow, "sector" | "charity_activities" | "cic_community_statement">,
+  enrichmentMission?: string | null,
 ): boolean {
   const hasSector = Boolean(
     client.sector &&
@@ -174,7 +183,8 @@ export function isClientIncomplete(
   );
   const hasMission = Boolean(
     (client.charity_activities && client.charity_activities.trim().length > 0) ||
-    (client.cic_community_statement && client.cic_community_statement.trim().length > 0),
+    (client.cic_community_statement && client.cic_community_statement.trim().length > 0) ||
+    (enrichmentMission && enrichmentMission.trim().length > 0),
   );
   return !hasSector || !hasMission;
 }
@@ -187,6 +197,12 @@ export function isClientIncomplete(
 export function visibleClients(
   organisations: ClientListRow[],
   suppressions: OpenSuppression[],
+  /**
+   * Newest hand-written enrichment mission per organisation id (see
+   * `newestMissionPerOrg` in lib/mission.ts). Optional so existing callers —
+   * and the tests — keep working; the incomplete filter is the only reader.
+   */
+  options: { enrichmentMissions?: ReadonlyMap<string, string> } = {},
 ): VisibleClient[] {
   const statusByOrg = new Map(suppressions.map((row) => [row.organisation_id, row.status]));
 
@@ -204,7 +220,10 @@ export function visibleClients(
       income_band: resolveClientIncomeBand(organisation),
       latest_income: resolveClientTotalIncome(organisation),
       has_grants: Boolean(organisation.has_grants || grantCountOf(organisation) > 0),
-      isIncomplete: isClientIncomplete(organisation),
+      isIncomplete: isClientIncomplete(
+        organisation,
+        options.enrichmentMissions?.get(organisation.id) ?? null,
+      ),
       ...latestScoreOf(organisation),
     }));
 }

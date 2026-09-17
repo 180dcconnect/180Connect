@@ -74,6 +74,17 @@ export async function deleteTag(tagId: string): Promise<DeleteTagResult> {
   const supabase = await createClient();
   const client: TagDeleteClient = {
     async deleteUnusedTag(id) {
+      // First try delete_tag_force which allows deleting tags even if they are
+      // in use on clients (cascading org_tags rows atomically).
+      const forceRes = await supabase.rpc("delete_tag_force", {
+        p_tag_id: id,
+      });
+
+      if (!forceRes.error) {
+        return outcomeFromRpc(forceRes.data);
+      }
+
+      // Fall back to delete_unused_tag if delete_tag_force is unavailable
       const { data, error } = await supabase.rpc("delete_unused_tag", {
         p_tag_id: id,
       });

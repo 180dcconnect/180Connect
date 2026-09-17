@@ -94,6 +94,10 @@ import { type SavedViewSummary } from "./saved-views-panel";
 import { SavedViewsPopover } from "./saved-views-popover";
 import { expandMissionQuery } from "@/lib/ai/mission-query";
 import {
+  newestMissionPerOrg,
+  type EnrichmentMissionRow,
+} from "@/lib/mission";
+import {
   describeInsufficientData,
   findSimilarClients,
   isSimilarityReference,
@@ -144,7 +148,9 @@ type SearchParams = Promise<{
   score?: string | string[];
   // Filter by presence of financial records (charity commission, 360giving, any, none)
   financials?: string | string[];
-  /** Filter to incomplete records (missing mission or sector). */
+  /** Filter to incomplete records (missing a mission — register text or a
+   *  hand-written enrichment one — or a sector). Same definition as
+   *  /admin/incomplete-records and the dashboard's tile. */
   incomplete?: string;
   /** Funnel stage the breakdown counts. */
   stage?: string;
@@ -371,9 +377,15 @@ export default async function ClientsPage({
   // All failure modes degrade to `keywords: []` (plain keyword matching).
   const missionExpansionPromise = missionTerm ? expandMissionQuery(missionTerm) : null;
 
-  const [organisations, openSuppressions, team, allTags, outreachPrefs, savedViews] = await Promise.all([
+  const [organisations, openSuppressions, team, allTags, outreachPrefs, savedViews, enrichmentMissionsRes] = await Promise.all([
     fetchAllOrganisations(),
     fetchAllOpenSuppressions(),
+    // Hand-written enrichment missions (the destination of an admin's fix in
+    // /admin/incomplete-records) so the incomplete filter counts a mission saved
+    // there. One narrow read of the two columns the map needs; the select policy
+    // opens the table to every active user, so this works for a CAM as well as
+    // an admin. Fails soft below — a broken read means the filter keeps its old
+    // definition, not an empty page.
     supabase
       .from("users")
       .select("id, full_name, role")
@@ -411,6 +423,18 @@ export default async function ClientsPage({
       .eq("user_id", authorization.actor.id)
       .order("created_at", { ascending: false })
       .overrideTypes<SavedViewRow[], { merge: false }>(),
+    // Paged: a plain select silently truncates past PostgREST's 1000-row
+    // window, understating missions and re-inflating the incomplete filter.
+    fetchPaged<EnrichmentMissionRow>((from, to) =>
+      supabase
+        .from("enrichment_results")
+        .select("organisation_id, mission_statement, enriched_at")
+        .not("mission_statement", "is", null)
+        .order("enriched_at", { ascending: false })
+        .order("organisation_id", { ascending: true })
+        .range(from, to)
+        .overrideTypes<EnrichmentMissionRow[], { merge: false }>(),
+    ),
   ]);
 
   if (organisations.error) {
@@ -427,6 +451,14 @@ export default async function ClientsPage({
   if (savedViews.error) {
     await reportError(savedViews.error, { operation: "clients.page_saved_views" });
   }
+  // Same fail-soft shape as every other read here: without the missions the
+  // incomplete filter falls back to the register-filed texts only, rather than
+  // taking the page down.
+  if (enrichmentMissionsRes.error) {
+    await reportError(enrichmentMissionsRes.error, {
+      operation: "clients.page_enrichment_missions",
+    });
+  }
 
   const availableTags = allTags.data ?? [];
   const tagNameById = new Map(availableTags.map((tag) => [tag.id, tag.name]));
@@ -434,7 +466,16 @@ export default async function ClientsPage({
   // colour, same as the chips on the profile and /admin/tags.
   const tagColourById = new Map(availableTags.map((tag) => [tag.id, tag.colour]));
 
-  const allVisibleClients = visibleClients(organisations.data ?? [], openSuppressions.data ?? []);
+  // The incomplete filter must agree with /admin/incomplete-records and the
+  // dashboard's tile, which both count a hand-written enrichment mission as a
+  // mission. Fold the rows into a newest-wins map; a failed read degrades to an
+  // empty map and the filter keeps its register-texts-only behaviour.
+  const enrichmentMissions = enrichmentMissionsRes.data
+    ? newestMissionPerOrg(enrichmentMissionsRes.data)
+    : new Map<string, string>();
+  const allVisibleClients = visibleClients(organisations.data ?? [], openSuppressions.data ?? [], {
+    enrichmentMissions,
+  });
   // Place options come from the data — there is no list of every city a charity
   // could be in, and one that nothing is in would be a dead end (F053 AC3's
   // reasoning, applied to places).

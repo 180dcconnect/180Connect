@@ -92,7 +92,8 @@ export default async function AdminPage() {
             Review fields where two sources disagree and choose which value to keep.
           </Tile>
           <Tile href="/admin/incomplete-records" title="Incomplete records">
-            Review client records missing mission statements, sectors, or websites and fill them in.
+            Review client records missing mission statements, sectors, websites, emails, or
+            locations and fill them in.
           </Tile>
         </Section>
 
@@ -140,7 +141,7 @@ export default async function AdminPage() {
             Every generated email draft, by model — compare performance and cost.
           </Tile>
           <Tile href="/admin/ml-readiness" title="Machine Learning">
-            How many labelled outcomes exist in the training dataset and how close that is to the training threshold.
+            See how many client outcomes are recorded in our database, and track progress toward training custom AI models.
           </Tile>
         </Section>
       </section>

@@ -4,6 +4,7 @@ import { formatOutreachStatus } from "./organisation-format.ts";
 import {
   TIMELINE_EVENT_LABEL,
   TIMELINE_EVENT_STYLE,
+  SYSTEM_ACTOR,
   UNKNOWN_ACTOR,
   buildEditSuggestionEntry,
   buildEmailSentEntry,
@@ -495,5 +496,39 @@ describe("buildTimeline", () => {
       timeline.map((entry) => entry.type),
       ["note_edited", "email_sent", "note_added"],
     );
+  });
+});
+
+describe("an event with no person behind it", () => {
+  it("names the platform, not a former team member, when a reply moves the status", () => {
+    const entry = buildStatusChangedEntry(
+      auditRow({
+        actor_user_id: null,
+        detail: { from: "initial_outreach_sent", to: "responded", trigger: "reply_detected" },
+      }),
+      NAMES,
+    );
+    assert.equal(entry.actorName, SYSTEM_ACTOR);
+  });
+
+  it("still says former team member for an actor who existed but is gone", () => {
+    const entry = buildStatusChangedEntry(
+      auditRow({ actor_user_id: "deleted-cam", detail: { from: "a", to: "b" } }),
+      NAMES,
+    );
+    assert.equal(entry.actorName, UNKNOWN_ACTOR);
+  });
+
+  it("keeps a missing ownership `from` as a person, not the platform", () => {
+    const entry = buildOwnershipReassignedEntry(
+      auditRow({
+        actor_user_id: null,
+        action: "ownership_reassigned",
+        detail: { from: "gone-user", to: CAM_A },
+      }),
+      NAMES,
+    );
+    assert.equal(entry.actorName, SYSTEM_ACTOR);
+    assert.ok(entry.summary.includes(UNKNOWN_ACTOR));
   });
 });

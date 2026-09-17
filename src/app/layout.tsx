@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { Geist, Geist_Mono, Lato, Source_Serif_4 } from "next/font/google";
-import { StagingBanner } from "@/components/staging-banner";
 import { AccessibilityProvider } from "@/components/accessibility-provider";
 import { accessibilityAttributes, readAccessibilityCookies } from "@/lib/accessibility";
 import "./globals.css";
@@ -60,7 +59,6 @@ export default async function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <AccessibilityProvider initialSettings={accessibility}>
-          <StagingBanner />
           {children}
         </AccessibilityProvider>
       </body>

@@ -18,6 +18,7 @@ import type {
 } from "@/lib/duplicates";
 import { reportError } from "@/lib/error-logging";
 import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
+import { MergeDialog, type FieldWinners } from "./merge-dialog";
 
 /**
  * F042's review queue — the pending pairs, and what has been decided.
@@ -38,9 +39,13 @@ import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
  *   import held it instead of adding it — and nothing said so. Each card opens by
  *   saying it, and the client it looks like is named and linked, so the pair can
  *   be read before it is answered rather than after.
- * - **What each answer does.** Keeping one record also runs the field-by-field
- *   conflict check; calling them different charities returns the record to the
- *   importer. Both are on the page's own line, once, in the words of the job.
+  * - **What each answer does.** Keeping one record opens the winning-details
+  *   dialog (`merge-dialog.tsx`) before anything saves: every detail the two
+  *   copies disagree on, each starting on what's already on the client record,
+  *   and confirming applies the picks with the decision — so "same charity"
+  *   never means "keep everything blindly". Calling them different charities
+  *   returns the record to the importer. A pick the save cannot apply falls
+  *   back to the Data discrepancies queue rather than being lost quietly.
  * - **The warning the route has always sent.** A confirmation whose conflict
  *   check fails still commits (correctly — the check is a follow-up, not part of
  *   the decision), and the API reports it as `{ ok: true, warning }`. The old
@@ -303,11 +308,26 @@ function PendingCard({
   busy: boolean;
   note: string;
   onNote: (value: string) => void;
-  onDecide: (confirmed: boolean) => void;
+  /**
+   * Answers a pair. Resolves to the failure text, or null when the decision
+   * saved — the merge dialog keeps the admin's picks on a failure so a retry
+   * costs nothing. `compared` is false when the dialog never managed to compare
+   * the two copies, so the success message must not claim they agreed.
+   */
+  onDecide: (
+    confirmed: boolean,
+    winners?: FieldWinners,
+    compared?: boolean,
+  ) => Promise<string | null>;
 }) {
   const { row, comparison } = flag;
   const clientId = row.candidate_organisation_id;
   const hasClient = Boolean(row.candidate_organisation?.legal_name?.trim());
+  // The merge dialog lives per card: opening it is the confirmation for
+  // "same charity", so there is no way to keep one record without seeing —
+  // and being able to change — which copy wins each disagreeing detail.
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   return (
     <SectionCard
@@ -331,7 +351,8 @@ function PendingCard({
       <p className="mt-3 font-body text-[12.5px] leading-[1.6] text-dim">
         The left column is what the register published on the record that was imported; the right is
         the client record today. Where the two disagree the row says so — ignoring capitalisation,
-        punctuation and the usual Ltd/Limited wording.
+        punctuation and the usual Ltd/Limited wording. Choosing “same charity” opens the winning
+        details for a final check, starting with what&apos;s already on the client record.
         {clientId && (
           <>
             {" "}
@@ -364,7 +385,10 @@ function PendingCard({
                 type="button"
                 className={PRIMARY_BUTTON}
                 disabled={busy}
-                onClick={() => onDecide(true)}
+                onClick={() => {
+                  setSaveError(null);
+                  setMergeOpen(true);
+                }}
               >
                 Same charity — keep one record
               </button>
@@ -372,7 +396,9 @@ function PendingCard({
                 type="button"
                 className={SECONDARY_BUTTON}
                 disabled={busy}
-                onClick={() => onDecide(false)}
+                onClick={() => {
+                  void onDecide(false);
+                }}
               >
                 Different charities — add as a separate client
               </button>
@@ -384,6 +410,21 @@ function PendingCard({
           </p>
         )}
       </div>
+      {mergeOpen && (
+        <MergeDialog
+          flag={flag}
+          saving={busy}
+          saveError={saveError}
+          onCancel={() => {
+            if (!busy) setMergeOpen(false);
+          }}
+          onSave={async (winners, compared) => {
+            const error = await onDecide(true, winners, compared);
+            setSaveError(error);
+            if (!error) setMergeOpen(false);
+          }}
+        />
+      )}
     </SectionCard>
   );
 }
@@ -445,7 +486,12 @@ export function DuplicatesPanel({
     setDecided(body.decided as QueueRecord[]);
   }
 
-  async function decide(row: EntityMatchCandidateRow, confirmed: boolean) {
+  async function decide(
+    row: EntityMatchCandidateRow,
+    confirmed: boolean,
+    winners?: FieldWinners,
+    compared = true,
+  ): Promise<string | null> {
     setBusy(true);
     setNotice(null);
     try {
@@ -456,23 +502,37 @@ export function DuplicatesPanel({
           entityMatchCandidateId: row.id,
           confirmed,
           note: notes[row.id] ?? "",
+          // Winners only mean something when one record survives.
+          ...(confirmed && winners ? { fieldChoices: winners } : {}),
         }),
       });
-      const body = await response.json();
+      const body = (await response.json()) as {
+        error?: string;
+        warning?: string;
+        appliedIncoming?: number;
+        appliedTotal?: number;
+      };
       if (!response.ok) {
-        setNotice({
-          tone: "error",
-          text: body.error ?? "The decision could not be saved.",
-        });
-        return;
+        const text = body.error ?? "The decision could not be saved.";
+        setNotice({ tone: "error", text });
+        return text;
       }
 
       // The decision is committed before the field-by-field conflict check runs,
       // so a check that fails comes back as a success with a warning attached
       // (the route has always sent this — see its own comment). It belongs on
       // screen: nothing was lost, but this pair now needs a person.
+      const appliedTotal = typeof body.appliedTotal === "number" ? body.appliedTotal : 0;
+      const appliedIncoming =
+        typeof body.appliedIncoming === "number" ? body.appliedIncoming : 0;
       const done = confirmed
-        ? "Kept as one record. The details the two disagree on, if any, are flagged under Data discrepancies."
+        ? appliedTotal === 0
+          ? compared
+            ? "Kept as one record. Both copies already agreed, so nothing about the client changed."
+            : "Kept as one record. The details the two disagree on, if any, are flagged under Data discrepancies."
+          : appliedIncoming === 0
+            ? "Kept as one record. The client record stays exactly as it was."
+            : `Kept as one record — took ${appliedIncoming === 1 ? "1 detail" : `${appliedIncoming} details`} from the register; everything else stays as it was.`
         : "Treated as two charities — the importer adds it as its own client next time it runs.";
       setNotice(
         body.warning
@@ -488,9 +548,11 @@ export function DuplicatesPanel({
         return next;
       });
       await refresh();
+      return null;
     } catch (err) {
       void reportError(err, { operation: "admin.duplicates.decide_client" });
       setNotice({ tone: "error", text: NETWORK_ERROR_MESSAGE });
+      return NETWORK_ERROR_MESSAGE;
     } finally {
       setBusy(false);
     }
@@ -532,7 +594,9 @@ export function DuplicatesPanel({
                 onNote={(value) =>
                   setNotes((current) => ({ ...current, [flag.row.id]: value }))
                 }
-                onDecide={(confirmed) => decide(flag.row, confirmed)}
+                onDecide={(confirmed, winners, compared) =>
+                  decide(flag.row, confirmed, winners, compared)
+                }
               />
             </li>
           ))}

@@ -36,7 +36,7 @@
 
 import { restrictedFieldLabel } from "./edit-suggestions.ts";
 import { formatOutreachStatus } from "./organisation-format.ts";
-import { UNKNOWN_ACTOR } from "./timeline.ts";
+import { SYSTEM_ACTOR, UNKNOWN_ACTOR } from "./timeline.ts";
 
 /** The audit_log action tokens this feed renders. The page queries `.in()` this list. */
 export const CHANGE_HISTORY_ACTIONS = [
@@ -101,6 +101,14 @@ function resolveName(id: string | null, names: ReadonlyMap<string, string | null
   return name && name.trim() ? name : UNKNOWN_ACTOR;
 }
 
+/** Same split as the timeline: a row with no actor is the platform itself. */
+function resolveActorName(
+  id: string | null,
+  names: ReadonlyMap<string, string | null>,
+): string {
+  return id ? resolveName(id, names) : SYSTEM_ACTOR;
+}
+
 /**
  * decide_edit_suggestion keys the changed column "field"; the discrepancy
  * resolvers key it "field_name". Both mean the same thing — normalise here so
@@ -127,7 +135,7 @@ function buildEditSuggestionEntry(
     to: approved ? detailString(row.detail, "to") : null,
     applied: approved,
     note: detailString(row.detail, "reason"),
-    actorName: resolveName(row.actor_user_id, names),
+    actorName: resolveActorName(row.actor_user_id, names),
     timestamp: row.created_at,
   };
 }
@@ -147,7 +155,7 @@ function buildStatusChangedEntry(
     to: to ? formatOutreachStatus(to) : null,
     applied: null,
     note: null,
-    actorName: resolveName(row.actor_user_id, names),
+    actorName: resolveActorName(row.actor_user_id, names),
     timestamp: row.created_at,
   };
 }
@@ -169,7 +177,7 @@ function buildOwnershipReassignedEntry(
     to: toName,
     applied: null,
     note: detailString(row.detail, "reason"),
-    actorName: resolveName(row.actor_user_id, names),
+    actorName: resolveActorName(row.actor_user_id, names),
     timestamp: row.created_at,
   };
 }
@@ -204,7 +212,7 @@ function buildDiscrepancyEntry(
     to: detailString(row.detail, "value"),
     applied: true,
     note,
-    actorName: resolveName(row.actor_user_id, names),
+    actorName: resolveActorName(row.actor_user_id, names),
     timestamp: row.created_at,
   };
 }

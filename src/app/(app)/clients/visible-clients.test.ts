@@ -1705,6 +1705,24 @@ describe("isClientIncomplete and filterByCompleteness", () => {
     assert.equal(isClientIncomplete(missingBoth), true);
   });
 
+  it("counts a hand-written enrichment mission as a mission", () => {
+    // This is where an admin's save in /admin/incomplete-records lands
+    // (enrichment_results.mission_statement, confidence 1), so the filter has
+    // to read it or the list and the workspace disagree about who is fixed.
+    const fixedInWorkspace = org({
+      sector: "health",
+      charity_activities: null,
+      cic_community_statement: null,
+    });
+    assert.equal(
+      isClientIncomplete(fixedInWorkspace, "We support carers across the county."),
+      false,
+    );
+    // Blank is absent, same convention as the register columns.
+    assert.equal(isClientIncomplete(fixedInWorkspace, "   "), true);
+    assert.equal(isClientIncomplete(fixedInWorkspace, null), true);
+  });
+
   it("filters visible clients to only incomplete ones when incomplete=true", () => {
     const complete = org({
       id: "c-1",
@@ -1735,6 +1753,25 @@ describe("isClientIncomplete and filterByCompleteness", () => {
 
     const unfiltered = filterByCompleteness(clients, undefined);
     assert.equal(unfiltered.length, 3);
+  });
+
+  it("visibleClients drops a record from the incomplete set once it has an enrichment mission", () => {
+    const noRegisterText = org({
+      id: "c-4",
+      legal_name: "Fixed By Admin",
+      sector: "education",
+      charity_activities: null,
+      cic_community_statement: null,
+    });
+
+    // Without the map the record reads incomplete — the old disagreement.
+    const before = visibleClients([noRegisterText], []);
+    assert.equal(before[0]?.isIncomplete, true);
+
+    const after = visibleClients([noRegisterText], [], {
+      enrichmentMissions: new Map([["c-4", "Mentoring for young people."]]),
+    });
+    assert.equal(after[0]?.isIncomplete, false);
   });
 
   it("provides informative emptyStateMessage when incomplete filter is active", () => {

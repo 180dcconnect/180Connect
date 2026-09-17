@@ -160,8 +160,8 @@ export default async function TagsPage() {
   const unused = counts.filter((count) => count === 0).length;
 
   return (
-    <div className="min-h-screen bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
-      <Stage className="w-full space-y-6">
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+      <Stage className="mx-auto w-full max-w-[1400px] space-y-6">
         <Rise>
           <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] leading-[1] font-semibold tracking-[-0.03em] text-ink">
             Tags

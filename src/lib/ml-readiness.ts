@@ -35,6 +35,6 @@ export function outcomeReadiness(labelledCount: number): Readiness {
   const remaining = Math.max(0, threshold - count);
   const met = count >= threshold;
   const percent = Math.min(100, Math.round((count / threshold) * 100));
-  const label = `${count} of ${threshold} minimum outcomes${met ? " — threshold met" : ""}`;
+  const label = `${count} of ${threshold} client outcomes${met ? " — target met" : ""}`;
   return { labelledCount: count, threshold, remaining, met, percent, label };
 }

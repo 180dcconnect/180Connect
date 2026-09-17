@@ -34,7 +34,7 @@ the one you're editing is how the old one keeps spreading. Copy these instead:
 | --- | --- | --- |
 | **Client record** | `src/app/(app)/clients/[id]/` | **The token reference.** Surfaces, borders, type scale, pills, tabs. When this doc and another screen disagree on *how a card looks*, this wins. |
 | **Data imports** | `src/app/(app)/admin/charity-commission/` | **The structure reference.** Page shell, the heading block and its tab row, the rail of facts under it, the two-view console, and stat cards (big numeral, hint, `HorizontalStickGauge`, action zone). Take the *skeleton* from here. |
-| **Dashboard** | `src/app/(app)/dashboard/page.tsx` | Page composition only — the `Stage`/`Group`/`Rise` structure, the display heading, cards floating on the ground rather than one box holding everything. Its *surfaces* are the old language; do not copy those. |
+| **Dashboard** | `src/app/(app)/dashboard/page.tsx` | Page composition and horizontal space reference — the `Stage`/`Group`/`Rise` structure, the `mx-auto w-full max-w-[1400px]` container, the display heading, cards floating on the ground rather than one box holding everything. Its *surfaces* are the old language; do not copy those. |
 
 Not references, for now:
 
@@ -190,26 +190,25 @@ Two traps, both already paid for:
 ### Page shell
 
 ```jsx
-<div className="min-h-screen bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
-  <div className="w-full space-y-6">
+<div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+  <div className="mx-auto w-full max-w-[1400px] space-y-6">
 ```
 
 Content on the ground with white cards on it — not one box holding everything.
 `space-y-6` between sections on a record, `space-y-10` on the dashboard where
 sections are heavier.
 
-### Width
+### Width and horizontal space
 
-**Never use `max-w-*`.** Not on the page container, not on a card, not on a
-hint or a paragraph (`max-w-[54ch]`, `max-w-2xl`, `max-w-sm` included). Content
-fills the column the shell gives it; the page's side padding is the only
-thing that sets where it stops. A capped hint under a full-width card title
-leaves a ragged hole on the right, and a capped page on a wide screen floats a
-narrow strip of cards in a sea of ground. Existing `max-w` in older screens is
-drift, not precedent — remove it when you convert a screen.
+**Horizontal space is whatever the dashboard page uses** (`src/app/(app)/dashboard/page.tsx`).
+The page container is bounded and centered at `mx-auto w-full max-w-[1400px]`,
+preventing content from stretching endlessly on wide monitors while keeping standard responsive padding
+(`px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12`) on the outer shell (`max-w-full overflow-x-hidden`).
 
-The one exception is something that genuinely floats — a dialog, popover or
-dropdown — whose width is the component's own, not the page's.
+Within that 1400px container:
+- Content fills the full width of the column the shell gives it.
+- **Do not use ad-hoc `max-w-*` on individual cards, hints, or paragraphs** (e.g. `max-w-[54ch]`, `max-w-2xl`, `max-w-sm`). A capped hint under a full-width card title leaves a ragged hole on the right.
+- The one exception is something that genuinely floats — a dialog, popover or dropdown — whose width is the component's own, not the page's.
 
 Routes under `AppShell` render a `div`, not a `main` — the shell already renders
 the `main` they slot into.
@@ -326,10 +325,13 @@ drawn for a one-column tile arrives stretched the moment its card takes two
   those mean state, and state comes from `Pill`. A category's five colours live
   with its labels (`lib/dashboard/ai-spend.ts`), so the instrument, its legend
   and the next screen that shows the same split agree.
-- **One category per mark.** A mark is 3px: five colours stacked inside a day's
-  column is a pattern, not a reading. Where a split matters, it gets a row of
-  its own (`AiSpendActivityGauge`), and the per-day detail is offered on hover,
-  one day at a time.
+- **One category per mark — except a date's own stick.** A mark is 3px, so a
+  split that matters gets a row of its own (`AiSpendActivityGauge`), and the
+  per-day detail used to live on hover alone. The spend-by-day chart is the
+  exception: each date is one vertical stick whose height is that date's spend
+  against the dollar axis, split bottom-up into one segment per kind of work in
+  the gauge's colours. A dot too small to split takes its busiest kind's colour
+  instead, and the full breakdown stays on hover.
 
 `origin-button`, `gooey-action-button`, `send-button`, `gooey-email-input` and
 the other gooey/animated variants are one-off brand pieces, not app defaults.

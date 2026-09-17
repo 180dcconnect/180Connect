@@ -71,7 +71,7 @@ export function TagsPanel({
   // tag changes it on every client carrying it, so that is an administrator's
   // job — and the screen says so rather than offering a button that refuses.
   const listHint = canRestructure
-    ? "Each tag shows how many clients carry it. Renaming or deleting a tag changes it on every client that already has it, and a tag on a client has to be taken off those clients before it can be deleted."
+    ? "Each tag shows how many clients carry it. Renaming or deleting a tag updates it across all clients that carry it."
     : canRecolour
       ? "Each tag shows how many clients carry it. Creating a tag and changing its colour are yours to do; renaming or deleting one changes it on every client that already has it, so an administrator does that."
       : "Each tag shows how many clients carry it. Any CAM can put one on a client, and the client list can be filtered by it.";

@@ -189,11 +189,15 @@ export function AiSpendCard({ readings }: { readings: AiSpendReading[] }) {
           </div>
           <div className="mt-2">
             <AiSpendDailyChart summary={summary} />
+            <p className="mt-1 font-body text-[12.5px] leading-[1.55] text-dim">
+              Each stick is a date, split by kind of work — the colours are the
+              ones in What it went on above.
+            </p>
           </div>
         </div>
       )}
 
-      <div className="mt-auto px-5 pt-4 pb-5 sm:px-6">
+      <div className="mt-auto flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 pt-4 pb-5 sm:px-6">
         {summary.generations > 0 && (
           <p className="font-body text-[13.5px] leading-[1.55] text-dim">
             {summary.totalTokens.toLocaleString()} tokens
@@ -202,7 +206,7 @@ export function AiSpendCard({ readings }: { readings: AiSpendReading[] }) {
         )}
 
         {summary.unpriced > 0 && (
-          <p className="mt-3 rounded-inset bg-paper px-3 py-2.5 font-body text-[12.5px] leading-[1.55] text-dim">
+          <p className="font-body text-[12.5px] leading-[1.55] text-dim">
             {summary.unpriced.toLocaleString()} generation
             {summary.unpriced === 1 ? "" : "s"} carried no cost — the provider
             reported no usage, or no pricing row covered the model. The figure

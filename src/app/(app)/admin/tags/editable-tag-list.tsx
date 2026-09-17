@@ -33,12 +33,15 @@
 //   chips too, so you choose by looking at the result.
 
 import { useTransition, useState } from "react";
+import Link from "next/link";
 
 import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import { TagChip } from "@/lib/tags/tag-chips";
 import { deleteTagAction } from "@/lib/tags/delete-tag-action.ts";
 import { editTagAction } from "@/lib/tags/edit-tag-action";
 import { setTagColourAction } from "@/lib/tags/set-tag-colour-action.ts";
+import { AnimateIcon } from "@/components/animate-ui/icons/icon";
+import { Trash2 } from "@/components/animate-ui/icons/trash-2";
 
 import { TagColourPicker } from "./colour-picker";
 import {
@@ -266,9 +269,21 @@ export function EditableTagList({
                 ) : (
                   <>
                     <TagChip label={tag.name} colour={tag.colour} />
-                    <span className="font-body text-[13px] text-dim">
-                      {usageLabel(usage)}
-                    </span>
+                    {usage !== null && usage > 0 ? (
+                      <Link
+                        href={`/clients?tags=${encodeURIComponent(tag.id)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-body text-[13px] font-medium text-lead underline underline-offset-2 transition-colors hover:text-lead-mid"
+                      >
+                        {usageLabel(usage)}
+                        <span className="sr-only"> (opens in a new tab)</span>
+                      </Link>
+                    ) : (
+                      <span className="font-body text-[13px] text-dim">
+                        {usageLabel(usage)}
+                      </span>
+                    )}
 
                     {canRestructure && !confirming && (
                       <button
@@ -296,33 +311,40 @@ export function EditableTagList({
                       </button>
                     )}
 
-                    {canRestructure && !confirming && usage === 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setConfirmingDeleteId(tag.id);
-                          setColourId(null);
-                          clearError(tag.id);
-                        }}
-                        className={ROW_ACTION_STOP}
-                      >
-                        Delete
-                      </button>
+                    {canRestructure && !confirming && (
+                      <AnimateIcon animateOnHover asChild>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfirmingDeleteId(tag.id);
+                            setColourId(null);
+                            clearError(tag.id);
+                          }}
+                          className={`inline-flex items-center gap-1.5 ${ROW_ACTION_STOP}`}
+                          aria-label={`Delete tag ${tag.name}`}
+                        >
+                          <Trash2 aria-hidden="true" size={14} />
+                          <span>Delete</span>
+                        </button>
+                      </AnimateIcon>
                     )}
 
                     {confirming && (
                       <span className="ml-auto flex flex-wrap items-center gap-x-2 gap-y-1">
                         <span className="font-body text-[13px] text-ink">
-                          Delete “{tag.name}”?
+                          Delete “{tag.name}”?{usage && usage > 0 ? ` (on ${usage} client${usage === 1 ? "" : "s"})` : ""}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => confirmDelete(tag.id)}
-                          disabled={pending}
-                          className={ROW_ACTION_STOP}
-                        >
-                          {pending ? "Deleting…" : "Yes, delete"}
-                        </button>
+                        <AnimateIcon animateOnHover asChild>
+                          <button
+                            type="button"
+                            onClick={() => confirmDelete(tag.id)}
+                            disabled={pending}
+                            className={`inline-flex items-center gap-1.5 ${ROW_ACTION_STOP}`}
+                          >
+                            <Trash2 aria-hidden="true" size={14} />
+                            <span>{pending ? "Deleting…" : "Yes, delete"}</span>
+                          </button>
+                        </AnimateIcon>
                         <button
                           type="button"
                           onClick={() => setConfirmingDeleteId(null)}
@@ -354,19 +376,15 @@ export function EditableTagList({
                   {errorByTagId[tag.id]}
                 </p>
               )}
-
-              {/* A tag that is on a client offers no Delete button at all; the
-                  card's hint says why once, rather than the row repeating it. */}
             </li>
           );
         })}
       </ul>
       )}
 
-      {countsIncomplete && canRestructure && (
+      {countsIncomplete && (
         <p className="mt-3 font-body text-[13px] leading-[1.6] text-dim">
-          How many clients carry a tag could not be read just now, so no tag can be
-          deleted until it can. Refresh the page to try again.
+          How many clients carry a tag could not be read just now. Refresh the page to try again.
         </p>
       )}
     </>

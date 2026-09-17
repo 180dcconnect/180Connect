@@ -32,6 +32,8 @@ export type DashboardOrgRow = {
   city?: string | null;
   country_code?: string | null;
   website?: string | null;
+  /** Read only by the dashboard's incomplete-records tile count. */
+  contact_email?: string | null;
   /**
    * Register-filed purpose texts, read only by the dashboard's Priority
    * Opportunities card (mission line). Same reason as the preview columns

@@ -4,31 +4,34 @@ import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
  * F021 AC — shown while the dashboard's reads run.
  *
  * Rebuilt against `page.tsx` as it now stands, section for section and in the
- * same order: header, the F206 work strip, Your actions beside Sending
+ * same order: header, the F206 work strip, the admin duty queue beside Sending
  * capacity, the pipeline group (growth curve beside the queue dial, then the
- * three stat tiles), Performance, the admin row, and the Recent updates feed.
+ * three stat tiles), Performance, Priority Opportunities, the AI spend preview
+ * beside Your actions, and the Recent updates feed.
  *
- * The previous version was a mirror of a dashboard that no longer exists — it
- * drew a client search field in the header (the header is the h1 and one button
- * now), a "Waiting on you" follow-up card and a "Needs attention" list (both
- * folded into the Action Center card), a Performance *bar* and a conversions
- * chart. Every one of those was a card that would not appear, and each pushed
- * everything below it down on swap.
+ * The previous version was a mirror of a dashboard one redesign behind: it
+ * drew the old `AiSpendCard` (window control, spend headline, daily chart) and
+ * a four-row list in its place, where the page now renders
+ * `AiSpendOverviewPreview` — headline, window pills, the "What it went on"
+ * split, the stick chart and the usage footer — beside `MyActionsCard`'s two
+ * lists. It also predated Priority Opportunities entirely.
  *
  * Geometry is taken from the components, not guessed:
- * `MyWorkStrip`'s `px-5 py-4` panel, the lg `ProgressMetricCard`'s
+ * `MyWorkStrip`'s borderless `rounded-panel bg-white px-5 py-4` tiles with a
+ * filled "View" pill beside the label, `AdminActionCenter`'s `p-6` header and
+ * hairline grid of six tiles, `ProgressMetricCard` lg's
  * `min-h-[320px] sm:min-h-[460px]` with its `text-[88px]` headline,
- * `StatCard`'s `p-5` card with a gauge under the number, `MyActionsCard`'s
- * `rounded-panel` with `px-5 py-3` rows, and `PerformanceSection`'s two
- * `rounded-[28px] border-border bg-card` cards — 28px, *not* the 16px the tiles
- * above them use, because those two keep `ProgressMetricCard`'s own radius while
- * the ones on this page pass `rounded-2xl`.
+ * `StatCard`'s `p-5` card, `PerformanceSection`'s two `rounded-[28px]
+ * border-border bg-card` cards, `PriorityOpportunitiesCard`'s grid of
+ * `rounded-panel` tiles with a dial and a full-width View, and
+ * `AiSpendOverviewPreview`'s headline/plot/footer rows.
  *
  * Two things it deliberately does not try to predict, because they are data: the
- * length of the lists (the Action Center is drawn at its usual four rows, the
- * feeds at their five) and whether a section renders at all (the engine-health
- * panel and the admin row are conditional). Those move the page by a card at
- * most, and no static skeleton can be right about them.
+ * length of the lists (Your actions is drawn at its five action rows, the feed
+ * at its five) and whether a section renders at all (the engine-health panel,
+ * the onboarding guide, the leaderboard and the health cards are conditional).
+ * Those move the page by a card at most, and no static skeleton can be right
+ * about them.
  */
 export default function Loading() {
   return (
@@ -43,54 +46,61 @@ export default function Loading() {
           <Skeleton className="h-11 w-40 shrink-0 rounded-full" />
         </div>
 
-        {/* F206 — My work: four tiles, label + View pill, count + share */}
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, index) => (
-              <div
-                key={index}
-                className="flex flex-col rounded-panel border border-rule bg-white px-5 py-4"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <Skeleton className="h-5 w-28 max-w-full" />
-                  <Skeleton className="h-6 w-14 shrink-0 rounded-full" />
-                </div>
-                <div className="mt-auto flex flex-wrap items-baseline gap-x-2 pt-6">
-                  <SkeletonLine
-                    text="text-[clamp(1.75rem,4vw,2.5rem)]"
-                    width="w-12"
-                  />
-                  <Skeleton className="h-5 w-20" />
-                </div>
+        {/* F206 — My work: four borderless tiles, label + View pill, count + book */}
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="flex flex-col rounded-panel bg-white px-5 py-4">
+              <p className="flex items-center justify-between gap-3">
+                <Skeleton className="h-5 w-28 max-w-full" />
+                <Skeleton className="h-[26px] w-14 shrink-0 rounded-lg" />
+              </p>
+              <div className="mt-auto flex flex-wrap items-baseline gap-x-2 pt-6">
+                <SkeletonLine
+                  text="text-[clamp(1.75rem,4vw,2.5rem)]"
+                  width="w-12"
+                />
+                <Skeleton className="h-5 w-20" />
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
 
-        {/* Your actions beside sending capacity */}
+        {/* Admin duty queue beside today's branch-wide sending limit */}
         <div className="grid grid-cols-1 items-stretch gap-4 xl:grid-cols-3">
-          <div className="flex flex-col overflow-hidden rounded-panel border border-rule bg-white xl:col-span-2">
-            <div className="px-5 pt-4 pb-3">
-              <Skeleton className="h-6 w-32" />
-              <Skeleton className="mt-1.5 h-4 w-72 max-w-full" />
+          {/* AdminActionCenter: p-6 header row, then the hairline grid of six
+              queue tiles (label + count pill on one line, caption below). */}
+          <div className="flex flex-col overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm xl:col-span-2">
+            <div className="flex items-baseline justify-between border-b border-black/[0.06] p-6">
+              <Skeleton className="h-7 w-44" />
+              <Skeleton className="h-3.5 w-32" />
             </div>
-            <ul className="divide-y divide-rule-soft border-t border-rule-soft">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <li key={index} className="flex items-center gap-3 px-5 py-3">
-                  <div className="min-w-0 flex-1">
-                    <Skeleton className="h-[18px] w-2/5 max-w-full" />
-                    <Skeleton className="mt-1 h-[15px] w-28" />
+            <div className="grid grow grid-cols-1 gap-px bg-black/[0.06] sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div key={index} className="flex flex-col bg-white p-6">
+                  <div className="mb-2 flex items-center justify-between">
+                    <Skeleton className="h-5 w-40 max-w-full" />
+                    <Skeleton className="h-6 w-8 shrink-0 rounded-full" />
                   </div>
-                  <Skeleton className="h-6 w-24 shrink-0 rounded-full" />
-                </li>
+                  <Skeleton className="mt-auto h-4 w-full max-w-[80%]" />
+                </div>
               ))}
-            </ul>
+            </div>
           </div>
+          {/* SendingCapacityCard: title, sub-line, the remaining reading, the
+              stick gauge and its caption. */}
           <div className="flex flex-col rounded-panel border border-rule bg-white px-5 py-4">
-            <Skeleton className="h-6 w-48 max-w-full" />
-            <Skeleton className="mt-1.5 h-4 w-full" />
-            <Skeleton className="mt-5 h-10 w-40" />
-            <Skeleton className="mt-4 h-5 w-full rounded-sm" />
+            <Skeleton className="h-[23px] w-44 max-w-full" />
+            <Skeleton className="mt-1 h-5 w-full" />
+            <SkeletonLine
+              className="mt-8"
+              text="text-[clamp(1.75rem,4vw,2.5rem)]"
+              width="w-24"
+            />
+            <div className="mt-4 space-y-[5.5px]">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <Skeleton key={index} className="h-4 w-full rounded-sm" />
+              ))}
+            </div>
             <Skeleton className="mt-2 h-4 w-44" />
           </div>
         </div>
@@ -124,9 +134,6 @@ export default function Loading() {
               </div>
             </div>
           </div>
-
-          {/* The suppression note, which only prints when something is suppressed */}
-          <Skeleton className="h-5 w-80 max-w-full" />
 
           {/* Contacted / responses / converted */}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -235,62 +242,129 @@ export default function Loading() {
           </div>
         </div>
 
-        {/* Admin row: the AI spend the queues generate, beside the work with a
-            date on it. Two columns for `AiSpendCard` and one for
-            `MyActionsCard` — the two used to be drawn the other way round here,
-            and the spend card in its old one-column shape. */}
+        {/* Priority Opportunities: heading row over a grid of ranked tiles */}
         <div className="space-y-4">
-          <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
-            <div className="xl:col-span-2">
-              <div className="flex flex-col rounded-panel border border-rule bg-white">
-                <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 px-5 pt-5 sm:px-6">
-                  <div>
-                    <Skeleton className="h-[23px] w-28" />
-                    <Skeleton className="mt-2.5 h-4 w-full" />
-                    <Skeleton className="mt-1.5 h-4 w-2/3" />
-                  </div>
-                  {/* The window control, then the link to the detail. */}
-                  <div className="flex flex-col items-end gap-2">
-                    <Skeleton className="h-[33px] w-32 rounded-inset" />
-                    <Skeleton className="h-4 w-44 max-w-full" />
-                  </div>
-                </div>
-                <div className="px-5 pt-4 sm:px-6">
-                  <SkeletonLine
-                    text="text-[clamp(1.75rem,4vw,2.5rem)]"
-                    width="w-32"
-                  />
-                  <Skeleton className="mt-2.5 h-4 w-56 max-w-full" />
-                  <Skeleton className="mt-5 h-[19px] w-32" />
-                  <Skeleton className="mt-3 h-[22px] w-full rounded-sm" />
-                  <Skeleton className="mt-3 h-3.5 w-full" />
-                </div>
-                <div className="mt-5 border-t border-rule-soft px-5 py-5 sm:px-6">
-                  <Skeleton className="h-[19px] w-32" />
-                  <Skeleton className="mt-2 h-[156px] w-full rounded-sm" />
-                </div>
-                <div className="px-5 pt-4 pb-5 sm:px-6">
-                  <Skeleton className="h-[18px] w-64 max-w-full" />
-                </div>
-              </div>
+          <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
+            <div>
+              <Skeleton className="h-5 w-52" />
+              <Skeleton className="mt-1 h-4 w-64 max-w-full" />
             </div>
-            <div className="flex flex-col rounded-panel border border-rule bg-white">
-              <div className="px-5 pt-4 pb-3">
-                <Skeleton className="h-[23px] w-32" />
-                <Skeleton className="mt-2.5 h-4 w-48 max-w-full" />
-              </div>
-              <ul className="divide-y divide-rule-soft border-t border-rule-soft">
-                {Array.from({ length: 4 }).map((_, index) => (
-                  <li key={index} className="flex items-center gap-3 px-5 py-3">
-                    <div className="min-w-0 flex-1">
-                      <Skeleton className="h-[18px] w-2/5 max-w-full" />
-                      <Skeleton className="mt-1 h-[15px] w-28" />
+            <Skeleton className="h-4 w-28" />
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div
+                key={index}
+                className="flex h-full flex-col rounded-panel border border-rule bg-white p-5"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <Skeleton className="mt-1 h-5 w-9 rounded-md" />
+                  {/* PriorityMiniDial: a w-[78px] instrument over its reading. */}
+                  <div className="flex flex-col items-center">
+                    <Skeleton className="h-8 w-[78px] rounded-md" />
+                    <Skeleton className="mt-0.5 h-5 w-10" />
+                    <Skeleton className="mt-1 h-3 w-12" />
+                  </div>
+                </div>
+                <Skeleton className="mt-3 h-5 w-3/4 max-w-full" />
+                <Skeleton className="mt-1 h-4 w-1/2 max-w-full" />
+                <Skeleton className="mt-2 h-4 w-full max-w-[90%]" />
+                <div className="mt-3.5 space-y-1.5">
+                  {Array.from({ length: 3 }).map((_, lineIndex) => (
+                    <div key={lineIndex} className="flex items-center gap-2">
+                      <Skeleton className="h-4 flex-1 max-w-[70%]" />
+                      <Skeleton className="h-1 w-9 shrink-0 rounded-full" />
+                      <Skeleton className="h-4 w-7 shrink-0" />
                     </div>
-                    <Skeleton className="h-6 w-24 shrink-0 rounded-full" />
-                  </li>
-                ))}
-              </ul>
+                  ))}
+                </div>
+                <div className="mt-auto pt-4">
+                  <Skeleton className="h-8 w-full rounded-lg" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* AI spend preview beside Your actions */}
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
+          {/* AiSpendOverviewPreview: header row, spend headline beside the
+              window pills, the "What it went on" split, the stick plot, and the
+              usage footer. */}
+          <div className="flex flex-col overflow-hidden rounded-panel border border-rule bg-white xl:col-span-2">
+            <div className="flex items-center justify-between gap-4 border-b border-rule-soft px-5 py-3.5 sm:px-6">
+              <Skeleton className="h-6 w-28" />
+              <Skeleton className="h-[30px] w-40 rounded-inset" />
             </div>
+            <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4 px-5 pt-4 sm:px-6">
+              <div>
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <Skeleton className="h-[30px] w-24" />
+                  <Skeleton className="h-5 w-40 max-w-full" />
+                </div>
+                <Skeleton className="mt-1.5 h-4 w-48 max-w-full" />
+              </div>
+              <Skeleton className="h-[34px] w-64 rounded-[10px]" />
+            </div>
+            <div className="px-5 pt-8 pb-6 sm:px-6 sm:pb-8">
+              <Skeleton className="h-[21px] w-32" />
+              <div className="mt-2.5 space-y-[5.5px]">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <Skeleton key={index} className="h-4 w-full rounded-sm" />
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div key={index} className="flex items-center gap-1.5">
+                    <Skeleton className="size-1.5 shrink-0 rounded-full" />
+                    <Skeleton className="h-4 w-28" />
+                    <Skeleton className="h-4 w-16" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <Skeleton className="mx-2 mt-2 h-[252px] rounded-lg sm:mx-4" />
+            <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 pt-4 pb-5 sm:px-6">
+              <Skeleton className="h-4 w-56 max-w-full" />
+              <Skeleton className="h-4 w-full max-w-md" />
+            </div>
+          </div>
+
+          {/* MyActionsCard: heading row, five action rows, the drafts
+              sub-heading, then three draft rows. */}
+          <div className="flex flex-col overflow-hidden rounded-panel border border-rule bg-white">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 pt-4 pb-3">
+              <div>
+                <Skeleton className="h-[23px] w-28" />
+                <Skeleton className="mt-1 h-4 w-44 max-w-full" />
+              </div>
+              <Skeleton className="h-4 w-32" />
+            </div>
+            <ul className="divide-y divide-rule-soft border-t border-rule-soft">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <li key={index} className="flex items-center gap-3 px-5 py-3">
+                  <div className="min-w-0 flex-1">
+                    <Skeleton className="h-[18px] w-2/5 max-w-full" />
+                    <Skeleton className="mt-0.5 h-4 w-28 max-w-full" />
+                  </div>
+                  <Skeleton className="h-6 w-24 shrink-0 rounded-full" />
+                </li>
+              ))}
+            </ul>
+            <div className="border-t border-rule px-5 pt-3 pb-2">
+              <Skeleton className="h-[19px] w-32" />
+            </div>
+            <ul className="divide-y divide-rule-soft">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <li key={index} className="flex items-center gap-3 px-5 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <Skeleton className="h-[18px] w-1/3 max-w-full" />
+                    <Skeleton className="mt-0.5 h-4 w-2/5 max-w-full" />
+                  </div>
+                  <Skeleton className="h-6 w-14 shrink-0 rounded-full" />
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
 

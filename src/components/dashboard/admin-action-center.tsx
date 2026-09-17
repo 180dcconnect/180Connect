@@ -36,10 +36,13 @@ export function AdminActionCenter({ counts }: { counts: AdminQueueCounts }) {
       urgent: counts.unassignedHighPriorityOrgs > 0,
     },
     {
+      // The count and the destination describe the same set: the fix-up
+      // workspace lists records missing a mission, a sector, or a website
+      // (a hand-written enrichment mission counts, same as the tile).
       title: "Incomplete Records",
       count: counts.incompleteRecords,
-      href: "/clients?incomplete=true",
-      description: "Missing mission statement or sector",
+      href: "/admin/incomplete-records",
+      description: "Missing mission, sector, website, email, or city — fix them inline",
       urgent: counts.incompleteRecords > 0,
     },
     {

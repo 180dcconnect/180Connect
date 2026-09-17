@@ -12,8 +12,8 @@ import { Skeleton, SkeletonLine, SkeletonSectionCard } from "@/components/ui/ske
  */
 export default function Loading() {
   return (
-    <div className="min-h-screen bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
-      <div className="w-full space-y-6">
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+      <div className="mx-auto w-full max-w-[1400px] space-y-6">
         <div>
           <SkeletonLine text="text-[clamp(2rem,4vw,2.75rem)]" width="w-32" />
           <Skeleton className="mt-3 h-5 w-3/4 max-w-full rounded-sm" />

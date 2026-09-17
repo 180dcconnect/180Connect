@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   AI_SPEND_PERIODS,
+  DEFAULT_AI_SPEND_PERIOD,
   aiSpendActivityRows,
   aiSpendChange,
   aiSpendFetchStart,
@@ -35,7 +36,7 @@ describe("aiSpendSummary", () => {
     assert.equal(summary.generations, 0);
     assert.equal(summary.unpriced, 0);
     assert.deepEqual(summary.models, []);
-    assert.equal(summary.periodFrom, "2026-09-01");
+    assert.equal(summary.periodFrom, "2026-08-12");
     assert.equal(summary.periodTo, "2026-09-10");
   });
 
@@ -68,10 +69,11 @@ describe("aiSpendSummary", () => {
     assert.equal(summary.unpriced, 1);
   });
 
-  it("puts rows before the month into the prior stretch of equal length", () => {
-    // 1-10 Sept is 10 days (less 12h), so the prior stretch reaches back to ~22 Aug.
+  it("puts rows before the window into the prior stretch of equal length", () => {
+    // 10 Sept is inside the last 30 days (from 12 Aug); 20 July sits in the
+    // equal-length stretch before it.
     const summary = aiSpendSummary(
-      [gen({ created_at: "2026-09-02T00:00:00Z", cost_usd: 1 }), gen({ created_at: "2026-08-25T00:00:00Z", cost_usd: 4 })],
+      [gen({ created_at: "2026-09-02T00:00:00Z", cost_usd: 1 }), gen({ created_at: "2026-07-20T00:00:00Z", cost_usd: 4 })],
       NOW,
     );
     assert.equal(summary.costUsd, 1);
@@ -197,29 +199,40 @@ describe("formatShare", () => {
   });
 });
 
-describe("the month window's comparison", () => {
-  it("reaches past the 1st of last month after a short month", () => {
-    // 31 days into March needs ~31 days before 1 March, i.e. late January —
-    // a window that started on 1 February would count those days as zero spend
-    // and report a rise that never happened.
-    const start = new Date(aiSpendPriorWindow(AI_SPEND_PERIODS[0], new Date("2026-03-31T12:00:00Z")).fromMs);
-    assert.ok(start < new Date("2026-02-01T00:00:00Z"));
-    assert.equal(start.toISOString(), "2026-01-29T12:00:00.000Z");
+describe("the window's comparison", () => {
+  it("measures a trailing window against the equal-length stretch before it", () => {
+    // Never "the previous calendar period": a 30-day window against a 31-day
+    // month would report a rise that is only the calendar's doing.
+    const window = aiSpendPeriodWindow(AI_SPEND_PERIODS[1], new Date("2026-03-31T12:00:00Z"));
+    const prior = aiSpendPriorWindow(AI_SPEND_PERIODS[1], new Date("2026-03-31T12:00:00Z"));
+    assert.equal(prior.toMs, window.fromMs);
+    assert.equal(prior.toMs - prior.fromMs, window.toMs - window.fromMs);
+    // Equal-length, not month-bounded: 31 March compares back past 1 March.
+    assert.ok(new Date(prior.fromMs) < new Date("2026-03-01T00:00:00Z"));
   });
 
-  it("counts prior-stretch rows from before last month's 1st", () => {
+  it("counts prior-stretch rows from before the window's start", () => {
     const now = new Date("2026-03-31T12:00:00Z");
-    const summary = aiSpendSummary([gen({ created_at: "2026-01-30T00:00:00Z", cost_usd: 3 })], now);
+    const summary = aiSpendSummary([gen({ created_at: "2026-02-15T00:00:00Z", cost_usd: 3 })], now, AI_SPEND_PERIODS[1]);
     assert.equal(summary.priorCostUsd, 3);
   });
 });
 
 describe("aiSpendPeriods", () => {
   const PERIOD_NOW = new Date("2026-09-16T12:00:00Z");
-  const MONTH = AI_SPEND_PERIODS[0];
+  const SEVEN = AI_SPEND_PERIODS[0];
   const THIRTY = AI_SPEND_PERIODS[1];
   const NINETY = AI_SPEND_PERIODS[2];
-  const YEAR = AI_SPEND_PERIODS[3];
+  const YTD = AI_SPEND_PERIODS[3];
+  const YEAR = AI_SPEND_PERIODS[4];
+  const ALL = AI_SPEND_PERIODS[5];
+
+  it("reads the last 7 calendar days, today included", () => {
+    const window = aiSpendPeriodWindow(SEVEN, PERIOD_NOW);
+    assert.equal(new Date(window.fromMs).toISOString(), "2026-09-10T00:00:00.000Z");
+    assert.equal(window.toMs, PERIOD_NOW.getTime());
+    assert.equal(aiSpendSummary([], PERIOD_NOW, SEVEN).periodFrom, "2026-09-10");
+  });
 
   it("reads the last 30 calendar days, today included", () => {
     const window = aiSpendPeriodWindow(THIRTY, PERIOD_NOW);
@@ -227,10 +240,21 @@ describe("aiSpendPeriods", () => {
     assert.equal(window.toMs, PERIOD_NOW.getTime());
   });
 
-  it("leaves month to date reading the 1st through today", () => {
-    const window = aiSpendPeriodWindow(MONTH, PERIOD_NOW);
-    assert.equal(new Date(window.fromMs).toISOString(), "2026-09-01T00:00:00.000Z");
-    assert.equal(aiSpendSummary([], PERIOD_NOW, MONTH).periodFrom, "2026-09-01");
+  it("reads year to date from 1 January through today", () => {
+    const window = aiSpendPeriodWindow(YTD, PERIOD_NOW);
+    assert.equal(new Date(window.fromMs).toISOString(), "2026-01-01T00:00:00.000Z");
+    assert.equal(window.toMs, PERIOD_NOW.getTime());
+    assert.equal(aiSpendSummary([], PERIOD_NOW, YTD).periodFrom, "2026-01-01");
+  });
+
+  it("measures year to date against the same length of time before New Year", () => {
+    // Never "last year": a part-year against a full one would always read as
+    // a collapse, whatever spending actually did.
+    const window = aiSpendPeriodWindow(YTD, PERIOD_NOW);
+    const prior = aiSpendPriorWindow(YTD, PERIOD_NOW);
+    assert.equal(prior.toMs, window.fromMs);
+    assert.equal(prior.toMs - prior.fromMs, window.toMs - window.fromMs);
+    assert.ok(new Date(prior.fromMs).getUTCFullYear() === 2025);
   });
 
   it("measures a window against the equal-length stretch before it", () => {
@@ -255,35 +279,64 @@ describe("aiSpendPeriods", () => {
     assert.equal(summary.periodFrom, "2026-06-19");
   });
 
-  it("fetches back far enough for the longest period's own comparison", () => {
+  it("fetches back far enough for every period's own comparison", () => {
     const longest = aiSpendPeriodWindow(YEAR, PERIOD_NOW);
     const start = aiSpendFetchStart(PERIOD_NOW);
     assert.ok(start.getTime() <= longest.fromMs - (longest.toMs - longest.fromMs));
-    // The widest requirement wins, so the month's own stretch is not the limit.
-    assert.ok(
-      start.getTime() < aiSpendPriorWindow(AI_SPEND_PERIODS[0], PERIOD_NOW).fromMs,
-    );
+    // All time needs everything: its requirement reaches back past the epoch,
+    // so the fetch is genuinely the whole table, not a bounded window.
+    assert.ok(start.getTime() <= 0);
   });
 
   it("builds one reading per offered period, in the control's order", () => {
     const readings = aiSpendReadings([], PERIOD_NOW);
     assert.deepEqual(
       readings.map((reading) => reading.period.id),
-      ["month", "30d", "90d", "365d"],
+      ["7d", "30d", "90d", "ytd", "365d", "all"],
     );
   });
 
+  it("opens on the last 30 days, which reads against a full comparison", () => {
+    assert.equal(DEFAULT_AI_SPEND_PERIOD.id, "30d");
+    // Bare calls (no explicit period) agree with the control's default.
+    assert.equal(aiSpendSummary([], PERIOD_NOW).periodId, "30d");
+  });
+
   it("counts the same rows differently at each length, as the windows widen", () => {
-    // 1 July sits outside both the month and the last 30 days, and inside the
+    // 1 July sits outside the last 7 and the last 30 days, and inside the
     // last 3 months — so the reading above the dropdown really does follow it.
     const rows = [
       gen({ created_at: "2026-07-01T00:00:00Z", cost_usd: 5 }),
       gen({ created_at: "2026-09-10T00:00:00Z", cost_usd: 1 }),
     ];
-    const [month, thirty, ninety] = aiSpendReadings(rows, PERIOD_NOW);
-    assert.equal(month.summary.costUsd, 1);
+    const [seven, thirty, ninety] = aiSpendReadings(rows, PERIOD_NOW);
+    assert.equal(seven.summary.costUsd, 1);
     assert.equal(thirty.summary.costUsd, 1);
     assert.equal(ninety.summary.costUsd, 6);
+  });
+
+  it("bounds all time by the earliest generation ever written", () => {
+    const rows = [
+      gen({ created_at: "2026-09-10T00:00:00Z", cost_usd: 1 }),
+      gen({ created_at: "2026-08-01T00:00:00Z", cost_usd: 2 }),
+    ];
+    const summary = aiSpendSummary(rows, PERIOD_NOW, ALL);
+    assert.equal(summary.periodFrom, "2026-08-01");
+    assert.equal(summary.periodTo, "2026-09-16");
+    assert.equal(summary.costUsd, 3);
+    assert.equal(summary.generations, 2);
+    // Nothing exists before the first generation, so there is honestly
+    // nothing to compare against.
+    assert.equal(summary.priorCostUsd, 0);
+    assert.equal(aiSpendChange(summary), null);
+  });
+
+  it("reads an empty all time as zeros ending today, not as a failure", () => {
+    const summary = aiSpendSummary([], PERIOD_NOW, ALL);
+    assert.equal(summary.periodFrom, "2026-09-16");
+    assert.equal(summary.periodTo, "2026-09-16");
+    assert.equal(summary.costUsd, 0);
+    assert.equal(aiSpendChange(summary), null);
   });
 });
 
@@ -297,7 +350,7 @@ describe("formatSpendDay", () => {
 describe("aiSpendChange", () => {
   it("reports the percentage move against the prior stretch", () => {
     const change = aiSpendChange(aiSpendSummary(
-      [gen({ created_at: "2026-09-02T00:00:00Z", cost_usd: 2 }), gen({ created_at: "2026-08-25T00:00:00Z", cost_usd: 1 })],
+      [gen({ created_at: "2026-09-02T00:00:00Z", cost_usd: 2 }), gen({ created_at: "2026-07-20T00:00:00Z", cost_usd: 1 })],
       NOW,
     ));
     assert.equal(change, 100);
@@ -309,9 +362,11 @@ describe("aiSpendChange", () => {
 });
 
 describe("formatUsd", () => {
-  it("formats to two decimals", () => {
+  it("formats to two decimals with thousands separators", () => {
     assert.equal(formatUsd(12.345), "$12.35");
     assert.equal(formatUsd(0), "$0.00");
+    assert.equal(formatUsd(29620), "$29,620.00");
+    assert.equal(formatUsd(1234567.89), "$1,234,567.89");
   });
 
   it("does not round a real sub-cent cost away to zero", () => {

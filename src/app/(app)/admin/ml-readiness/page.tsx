@@ -56,15 +56,14 @@ export default async function MlReadinessPage() {
       <Stage className="mx-auto w-full max-w-6xl space-y-8">
         <Rise>
           <AiHeader current="/admin/ml-readiness">
-            <p className="mt-3 text-sm leading-[1.7] text-dim">
-              How many labelled outcomes exist in the training dataset and how
-              close that is to the agreed minimum that makes training realistic.
+            <p className="mt-3 max-w-3xl text-sm leading-[1.7] text-dim">
+              To train machine learning models that can accurately predict which charities and social enterprises are most likely to partner with us, we need real historical results. This page tracks how many client outcomes (such as replies and conversions) are recorded in our database, and how close we are to having enough data to train custom models.
             </p>
             {error && (
               <div className="mt-4">
                 <InlineAlert
                   variant="page"
-                  message="The dataset could not be read. The count below reflects no data — verify access before treating it as a real measurement."
+                  message="Client outcome records could not be loaded from the database. The count below may not reflect recent activity — please refresh or try again shortly."
                 />
               </div>
             )}
@@ -75,11 +74,11 @@ export default async function MlReadinessPage() {
           <Rise>
             <SectionCard
               headingId="labelled-outcomes"
-              title="Labelled outcomes"
-              hint="Labelled replies and conversions, counted live from the training dataset."
+              title="Client outcomes in database"
+              hint="Recorded replies and conversions with clients, counted live from our database."
               action={
                 <Pill tone={readiness.met ? "go" : "hold"}>
-                  {readiness.met ? "Ready" : "Not yet"}
+                  {readiness.met ? "Ready to train" : "Collecting data"}
                 </Pill>
               }
             >
@@ -93,16 +92,16 @@ export default async function MlReadinessPage() {
                 <HorizontalStickGauge
                   checked={readiness.labelledCount}
                   total={readiness.threshold}
-                  ariaLabel="Labelled outcomes toward the training minimum"
+                  ariaLabel="Recorded client outcomes toward the training minimum"
                   activeColor={readiness.met ? "var(--go)" : "var(--lead)"}
-                  checkedLabel="Labelled outcomes"
+                  checkedLabel="Client outcomes"
                   remainingLabel="Still needed"
                 />
               </div>
               <p data-testid="readiness-detail" className="mt-3 text-[13px] leading-[1.55] text-dim">
                 {readiness.met
-                  ? "Threshold met — the dataset is large enough to start training experiments."
-                  : `${readiness.remaining} more labelled outcome${readiness.remaining === 1 ? "" : "s"} needed before training is realistic.`}
+                  ? "Target met — we have enough recorded client outcomes to begin training and testing machine learning models."
+                  : `${readiness.remaining} more client outcome${readiness.remaining === 1 ? "" : "s"} needed in our database before we can train reliable models.`}
               </p>
             </SectionCard>
           </Rise>
@@ -110,8 +109,8 @@ export default async function MlReadinessPage() {
           <Rise>
             <SectionCard
               headingId="readiness-by-outcome"
-              title="By outcome"
-              hint="How the labelled outcomes break down by result."
+              title="Outcomes by type"
+              hint="How recorded client responses and results break down in our database."
             >
               {labelCounts.size > 0 ? (
                 <ul data-testid="label-breakdown" className="mt-4 divide-y divide-rule-soft border-t border-rule-soft text-sm">
@@ -126,11 +125,47 @@ export default async function MlReadinessPage() {
                 </ul>
               ) : (
                 <p className="mt-4 text-sm leading-[1.65] text-dim">
-                  No labelled outcomes yet — every scored attempt still awaits an
-                  outcome. Once CAMs record replies and conversions, the breakdown
-                  appears here.
+                  No client outcomes recorded yet. As Client Account Managers (CAMs) record outreach replies and conversions with clients, the breakdown appears here.
                 </p>
               )}
+            </SectionCard>
+          </Rise>
+
+          <Rise>
+            <SectionCard
+              headingId="how-it-works"
+              title="How this works"
+              hint="Why 180Connect tracks client outcomes and how it helps consulting teams."
+            >
+              <div className="mt-4 grid gap-4 sm:grid-cols-3 text-sm leading-[1.6]">
+                <div className="rounded-lg border border-rule-soft bg-white p-4">
+                  <div className="flex items-center gap-2 font-semibold text-ink">
+                    <span className="flex size-6 items-center justify-center rounded-full bg-lead/10 text-xs font-bold text-lead">1</span>
+                    Reach out to clients
+                  </div>
+                  <p className="mt-2 text-[13px] text-dim">
+                    CAMs reach out to charities and social enterprises through personalized email outreach.
+                  </p>
+                </div>
+                <div className="rounded-lg border border-rule-soft bg-white p-4">
+                  <div className="flex items-center gap-2 font-semibold text-ink">
+                    <span className="flex size-6 items-center justify-center rounded-full bg-lead/10 text-xs font-bold text-lead">2</span>
+                    Record outcomes
+                  </div>
+                  <p className="mt-2 text-[13px] text-dim">
+                    Every reply, discovery call, and project conversion is recorded in our database as a real client outcome.
+                  </p>
+                </div>
+                <div className="rounded-lg border border-rule-soft bg-white p-4">
+                  <div className="flex items-center gap-2 font-semibold text-ink">
+                    <span className="flex size-6 items-center justify-center rounded-full bg-lead/10 text-xs font-bold text-lead">3</span>
+                    Train smarter AI
+                  </div>
+                  <p className="mt-2 text-[13px] text-dim">
+                    Once we reach 50 client outcomes, our machine learning models can learn which organizations are best suited for 180DC projects.
+                  </p>
+                </div>
+              </div>
             </SectionCard>
           </Rise>
         </Group>

@@ -13,10 +13,21 @@ export type IncompleteClientRecord = {
   hasSector: boolean;
   hasWebsite: boolean;
   hasEmail: boolean;
+  hasCity: boolean;
   isIncomplete: boolean;
+  /**
+   * The pipeline's own sector classification for a record that has none —
+   * review-and-apply only, never auto-filled. Null when the record already
+   * has a sector or nothing was ever classified.
+   */
+  suggested_sector: string | null;
+  suggested_sub_sector: string | null;
+  /** Register numbers behind the "check the source" links — null when unrecorded. */
+  charity_number: string | null;
+  company_number: string | null;
 };
 
-export type FilterTab = "all" | "mission" | "sector" | "website" | "email";
+export type FilterTab = "all" | "mission" | "sector" | "website" | "email" | "city";
 
 export type IncompleteSummaryCounts = {
   totalIncomplete: number;
@@ -24,4 +35,5 @@ export type IncompleteSummaryCounts = {
   missingSector: number;
   missingWebsite: number;
   missingEmail: number;
+  missingCity: number;
 };

@@ -120,7 +120,7 @@ export function RecentUpdatesFeed({ items }: { items: DashboardFeedItem[] }) {
             currentPage={safePage}
             onPageChange={setCurrentPage}
             onPageSizeChange={setPageSize}
-            pageSizeOptions={[5, 10]}
+            pageSizeOptions={[5, 10, 15, 20]}
           />
         </>
       )}

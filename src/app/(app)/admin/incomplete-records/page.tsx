@@ -1,11 +1,13 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { hasPermission, isViewOnly } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { fetchPaged } from "@/lib/supabase/fetch-paged";
 import { reportError } from "@/lib/error-logging";
-import { BackButton } from "@/components/ui/back-button";
+import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { IncompleteRecordsPanel } from "./incomplete-records-panel";
 import type { IncompleteClientRecord } from "./types";
 
@@ -32,7 +34,15 @@ type OpenSuppression = {
 type EnrichmentRow = {
   organisation_id: string;
   mission_statement: string | null;
+  sector: string | null;
+  sub_sector: string | null;
   enriched_at: string;
+};
+
+type IdentifierRow = {
+  organisation_id: string;
+  identifier_type: string;
+  identifier_value: string;
 };
 
 export default async function IncompleteRecordsPage() {
@@ -70,12 +80,22 @@ export default async function IncompleteRecordsPage() {
         .range(from, to)
         .overrideTypes<OpenSuppression[], { merge: false }>(),
     ),
-    supabase
-      .from("enrichment_results")
-      .select("organisation_id, mission_statement, enriched_at")
-      .not("mission_statement", "is", null)
-      .order("enriched_at", { ascending: false })
-      .overrideTypes<EnrichmentRow[], { merge: false }>(),
+    // Enrichment carries both fallback missions and the pipeline's own sector
+    // classifications. Unfiltered and paged like the organisations read: a
+    // sector suggestion can sit on a row with no mission, so filtering to
+    // mission rows would hide it — and an unpaged select would silently stop
+    // at PostgREST's row window.
+    fetchPaged<EnrichmentRow>(
+      (from, to) =>
+        supabase
+          .from("enrichment_results")
+          .select("organisation_id, mission_statement, sector, sub_sector, enriched_at")
+          .order("enriched_at", { ascending: false })
+          .order("organisation_id", { ascending: true })
+          .range(from, to)
+          .overrideTypes<EnrichmentRow[], { merge: false }>(),
+      { pagesPerRound: 3 },
+    ),
   ]);
 
   if (organisationsRes.error) {
@@ -101,9 +121,22 @@ export default async function IncompleteRecordsPage() {
   );
 
   const enrichmentMissionByOrg = new Map<string, string>();
+  // The pipeline's own sector classification per org, newest row first: the
+  // first non-blank sector wins, keeping its row's sub-sector so the pair
+  // stays consistent. Read for suggestion only — never written back here.
+  const enrichmentSectorByOrg = new Map<string, { sector: string; sub_sector: string | null }>();
   for (const row of enrichmentRes.data ?? []) {
     if (row.mission_statement?.trim() && !enrichmentMissionByOrg.has(row.organisation_id)) {
       enrichmentMissionByOrg.set(row.organisation_id, row.mission_statement.trim());
+    }
+    if (!enrichmentSectorByOrg.has(row.organisation_id)) {
+      const sector = row.sector?.trim();
+      if (sector) {
+        enrichmentSectorByOrg.set(row.organisation_id, {
+          sector,
+          sub_sector: row.sub_sector?.trim() || null,
+        });
+      }
     }
   }
 
@@ -129,9 +162,10 @@ export default async function IncompleteRecordsPage() {
     const hasMission = Boolean(storedMission && storedMission.length > 0);
     const hasWebsite = Boolean(org.website && org.website.trim().length > 0);
     const hasEmail = Boolean(org.contact_email && org.contact_email.trim().length > 0);
-    const isIncomplete = !hasSector || !hasMission || !hasWebsite;
+    const hasCity = Boolean(org.city && org.city.trim().length > 0);
+    const isIncomplete = !hasSector || !hasMission || !hasWebsite || !hasEmail || !hasCity;
 
-    if (isIncomplete || !hasEmail) {
+    if (isIncomplete) {
       incompleteRecords.push({
         id: org.id,
         legal_name: org.legal_name,
@@ -147,89 +181,126 @@ export default async function IncompleteRecordsPage() {
         hasSector,
         hasWebsite,
         hasEmail,
+        hasCity,
         isIncomplete,
+        suggested_sector: null,
+        suggested_sub_sector: null,
+        charity_number: null,
+        company_number: null,
       });
     }
   }
 
-  const primaryIncompleteCount = incompleteRecords.filter((r) => r.isIncomplete).length;
-  const missingMissionCount = incompleteRecords.filter((r) => !r.hasMission).length;
-  const missingSectorCount = incompleteRecords.filter((r) => !r.hasSector).length;
-  const missingWebsiteCount = incompleteRecords.filter((r) => !r.hasWebsite).length;
+  // Sector suggestions for records that have none: the pipeline may have
+  // classified the organisation even though nothing was ever written back to
+  // the record. Attached for review-and-apply on the card, never auto-filled.
+  for (const record of incompleteRecords) {
+    if (record.hasSector) continue;
+    const suggestion = enrichmentSectorByOrg.get(record.id);
+    if (suggestion) {
+      record.suggested_sector = suggestion.sector;
+      record.suggested_sub_sector = suggestion.sub_sector;
+    }
+  }
+
+  // Register numbers behind each card's "check the source" links — the only
+  // way to answer a missing sector or mission from its origin rather than
+  // memory. Chunked `.in()` rather than a whole-table read: only the
+  // incomplete set needs numbers, and a thousands-long id list would blow
+  // past URL limits. Fail-soft: without numbers the cards simply offer no
+  // register link.
+  if (incompleteRecords.length > 0) {
+    const charityNumberByOrg = new Map<string, string>();
+    const companyNumberByOrg = new Map<string, string>();
+    const ids = incompleteRecords.map((record) => record.id);
+    const CHUNK_SIZE = 200;
+    for (let start = 0; start < ids.length; start += CHUNK_SIZE) {
+      const { data, error } = await supabase
+        .from("organisation_identifiers")
+        .select("organisation_id, identifier_type, identifier_value")
+        .in("organisation_id", ids.slice(start, start + CHUNK_SIZE))
+        .in("identifier_type", ["uk_charity", "uk_company"])
+        .overrideTypes<IdentifierRow[], { merge: false }>();
+      if (error) {
+        await reportError(error, {
+          operation: "admin.incomplete_records.identifiers",
+        });
+        break;
+      }
+      for (const row of data ?? []) {
+        const value = row.identifier_value?.trim();
+        if (!value) continue;
+        if (row.identifier_type === "uk_charity" && !charityNumberByOrg.has(row.organisation_id)) {
+          charityNumberByOrg.set(row.organisation_id, value);
+        } else if (
+          row.identifier_type === "uk_company" &&
+          !companyNumberByOrg.has(row.organisation_id)
+        ) {
+          companyNumberByOrg.set(row.organisation_id, value);
+        }
+      }
+    }
+    for (const record of incompleteRecords) {
+      record.charity_number = charityNumberByOrg.get(record.id) ?? null;
+      record.company_number = companyNumberByOrg.get(record.id) ?? null;
+    }
+  }
+
+  const primaryIncompleteCount = incompleteRecords.length;
+  const totalActiveCount = activeOrgs.length;
 
   return (
-    <div className="min-h-screen p-6">
-      <div className="mx-auto max-w-5xl">
-        {/* Navigation back */}
-        <div className="mb-4">
-          <BackButton href="/admin" label="All admin tools" size="sm" />
-        </div>
-
-        {/* Header Block */}
-        <header className="rounded-panel border border-rule bg-white p-6">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-paper px-2.5 py-0.5 text-xs font-semibold text-dim">
-              Admin workspace · Data quality
-            </span>
-          </div>
-
-          <h1 className="mt-2 text-2xl font-bold text-ink">Incomplete client records</h1>
-          <p className="mt-2 text-sm text-dim leading-relaxed max-w-3xl">
-            Client records that lack vital outreach foundations — mission statements, sectors, or
-            websites. Complete records inline to ensure CAMs have the context needed to personalize
-            consultancy proposals and reach out effectively.
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+      <Stage className="mx-auto w-full max-w-[1400px] space-y-10">
+        <Rise>
+          <Link
+            href="/admin"
+            className="inline-flex items-center gap-1.5 text-[13px] font-medium text-lead hover:underline"
+          >
+            <ArrowLeft aria-hidden="true" className="size-[15px]" />
+            All admin tools
+          </Link>
+          <h1 className="mt-4 font-body text-[clamp(2rem,4vw,2.75rem)] font-semibold leading-[1] tracking-[-0.03em] text-ink">
+            Incomplete records
+          </h1>
+          <p className="mt-1.5 text-[13px] leading-[1.55] text-dim">
+            Records missing a mission, sector, website, email, or location. Work them here —
+            each card links to the registers the record came from, so a gap can be checked
+            at its source rather than guessed.
           </p>
-
-          {/* Queue Fact Rail */}
-          <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-rule-soft pt-4 text-xs font-medium text-dim">
-            <div className="flex items-center gap-1.5">
-              <span
-                aria-hidden="true"
-                className={`size-2 shrink-0 rounded-full ${
-                  primaryIncompleteCount > 0 ? "bg-hold" : "bg-go"
-                }`}
-              />
-              <span className="font-semibold tabular-nums text-ink">
-                {primaryIncompleteCount.toLocaleString()}
+          <p className="mt-5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-dim">
+            <span
+              aria-hidden="true"
+              className={`size-1.5 shrink-0 rounded-full ${
+                primaryIncompleteCount > 0 ? "bg-hold" : "bg-go"
+              }`}
+            />
+            {primaryIncompleteCount === 0 ? (
+              <span>Every active client record is complete.</span>
+            ) : (
+              <span>
+                <span className="font-semibold tabular-nums text-ink">
+                  {primaryIncompleteCount.toLocaleString()}
+                </span>{" "}
+                of{" "}
+                <span className="font-semibold tabular-nums text-ink">
+                  {totalActiveCount.toLocaleString()}
+                </span>{" "}
+                active client records {primaryIncompleteCount === 1 ? "needs" : "need"} work
               </span>
-              <span>{primaryIncompleteCount === 1 ? "record requires" : "records require"} completion</span>
-            </div>
+            )}
+          </p>
+        </Rise>
 
-            <span aria-hidden="true" className="text-rule">·</span>
-
-            <div className="flex items-center gap-1">
-              <span className="font-semibold tabular-nums text-ink">
-                {missingMissionCount.toLocaleString()}
-              </span>
-              <span>missing mission</span>
-            </div>
-
-            <span aria-hidden="true" className="text-rule">·</span>
-
-            <div className="flex items-center gap-1">
-              <span className="font-semibold tabular-nums text-ink">
-                {missingSectorCount.toLocaleString()}
-              </span>
-              <span>missing sector</span>
-            </div>
-
-            <span aria-hidden="true" className="text-rule">·</span>
-
-            <div className="flex items-center gap-1">
-              <span className="font-semibold tabular-nums text-ink">
-                {missingWebsiteCount.toLocaleString()}
-              </span>
-              <span>missing website</span>
-            </div>
-          </div>
-        </header>
-
-        {/* Cleaning Panel */}
-        <IncompleteRecordsPanel
-          initialRecords={incompleteRecords}
-          canEdit={canEdit}
-        />
-      </div>
+        <Group>
+          <Rise>
+            <IncompleteRecordsPanel
+              initialRecords={incompleteRecords}
+              canEdit={canEdit}
+            />
+          </Rise>
+        </Group>
+      </Stage>
     </div>
   );
 }

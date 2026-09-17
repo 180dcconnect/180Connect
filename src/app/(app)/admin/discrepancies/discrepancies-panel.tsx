@@ -3,19 +3,11 @@
 import { useState } from "react";
 import { OriginButton } from "@/components/ui/origin-button";
 import type { DiscrepancyChoice, FieldDiscrepancyRow } from "@/lib/discrepancies";
+import { discrepancyFieldLabel } from "@/lib/discrepancies";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
 import { reportError } from "@/lib/error-logging";
 import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
-
-const FIELD_LABEL: Record<string, string> = {
-  legal_name: "Legal name",
-  website: "Website",
-  contact_email: "Contact email",
-  address_line_1: "Address",
-  city: "City",
-  postcode: "Postcode",
-};
 
 const STATUS_STYLE: Record<FieldDiscrepancyRow["status"], string> = {
   pending: "bg-amber-50 text-amber-800",
@@ -28,7 +20,7 @@ function personLabel(person: { full_name: string | null; email: string } | null)
 }
 
 function fieldLabel(fieldName: string) {
-  return FIELD_LABEL[fieldName] ?? fieldName;
+  return discrepancyFieldLabel(fieldName);
 }
 
 export function DiscrepanciesPanel({

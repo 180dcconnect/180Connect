@@ -1,17 +1,17 @@
 /**
- * F213 — month-to-date AI spend, as a dashboard reading.
+ * F213 — AI spend as dashboard readings, one per offered window.
  *
  * `/admin/ai-generations` already lists every generation with its cost, which
  * answers "what did this email cost". It does not answer the question that
- * actually matters to whoever owns the budget: "what are we spending this
- * month, and is it accelerating". That is one number, and nobody was watching
+ * actually matters to whoever owns the budget: "what are we spending, and is
+ * it accelerating". That is one number per window, and nobody was watching
  * it — AI spend is the one line item on this platform that can quietly multiply
  * without anybody changing anything.
  *
  * NOT a duplicate of ../outreach/generation-history.ts, which owns the admin
  * page's per-model and per-day breakdowns over already-mapped camelCase records.
- * This is the single month-to-date reading, taken off raw DB rows, and it needs
- * the equal-length prior stretch that a day-series doesn't carry. If a third
+ * This is the set of windowed readings, taken off raw DB rows, each with the
+ * equal-length prior stretch its delta is measured against. If a third
  * caller ever wants both, the mapping is the thing to share, not the aggregate.
  *
  * NULL COST IS NOT ZERO COST. `AI_GENERATIONS.cost_usd` is null when the
@@ -21,6 +21,8 @@
  * would understate real spend, so they are counted separately and surfaced —
  * "£12.40 across 300 generations, 8 unpriced" is honest; "£12.40" alone is not.
  */
+
+import { PRIORITY_ZONE_COLOURS } from "../scoring/priority-scale.ts";
 
 export type AiGenerationActivity = "initial_email" | "follow_up_email" | "email_regeneration" | "client_booklet" | "other";
 
@@ -65,19 +67,30 @@ export function toAiGenerationActivity(value: string | null | undefined): AiGene
 
 const DAY_MS = 86_400_000;
 
-export type AiSpendPeriodId = "month" | "30d" | "90d" | "365d";
+export type AiSpendPeriodId = "7d" | "30d" | "90d" | "ytd" | "365d" | "all";
 
 export type AiSpendPeriod = {
   id: AiSpendPeriodId;
   /** What the control says. Plain words — this is a choice, not a config value. */
   label: string;
-  /** Length of the window in days, or `null` for month to date (the 1st → today). */
-  days: number | null;
+  /**
+  * How the window is bounded. Trailing windows read the last N calendar days;
+  * `ytd` reads 1 January through today; `all` reads everything ever written
+  * (bounded in practice by the earliest row — see `aiSpendSummary`).
+  */
+  scope: "trailing" | "ytd" | "all";
+  /** Length of a trailing window in days. Unread for `ytd` and `all`. */
+  days: number;
   /**
    * What the move is measured against, as the sentence's own words. It sits
    * after "on", so "on the same stretch of last month".
    */
   comparison: string;
+  /**
+   * What the badge says, after the figure: "+18.0% vs last 30 days". Shorter
+   * than `comparison` because it shares its row with the figure.
+   */
+  versus: string;
 };
 
 /**
@@ -85,34 +98,54 @@ export type AiSpendPeriod = {
  * family of choices as the dashboard's Total Organisations card, so two
  * controls on one screen do not teach two vocabularies.
  *
- * No "all time": the read behind the card is bounded by the widest period
- * here, and an unbounded window would mean fetching every generation ever
- * written on every dashboard load.
+ * "All time" is bounded by the earliest generation ever written, not by a
+ * calendar date: the fetch behind the card pages to exhaustion
+ * (`fetchPaged` stops at the first short page), so an unbounded window costs
+ * one read per thousand rows, not an unbounded query.
  */
 export const AI_SPEND_PERIODS: readonly AiSpendPeriod[] = [
+  { id: "7d", label: "Past 7 days", scope: "trailing", days: 7, comparison: "the 7 days before", versus: "vs last 7 days" },
+  { id: "30d", label: "Past 30 days", scope: "trailing", days: 30, comparison: "the 30 days before", versus: "vs last 30 days" },
+  { id: "90d", label: "Last 3 months", scope: "trailing", days: 90, comparison: "the 3 months before", versus: "vs last 90 days" },
   {
-    id: "month",
-    label: "This month",
-    days: null,
-    comparison: "the same stretch of last month",
+    id: "ytd",
+    label: "Year to date",
+    scope: "ytd",
+    days: 0,
+    comparison: "the same length of time before",
+    versus: "vs prior stretch",
   },
-  { id: "30d", label: "Past 30 days", days: 30, comparison: "the 30 days before" },
-  { id: "90d", label: "Last 3 months", days: 90, comparison: "the 3 months before" },
-  { id: "365d", label: "Last 12 months", days: 365, comparison: "the 12 months before" },
+  { id: "365d", label: "Last 12 months", scope: "trailing", days: 365, comparison: "the 12 months before", versus: "vs last 12 months" },
+  {
+    id: "all",
+    label: "All time",
+    scope: "all",
+    days: 0,
+    comparison: "the same length of time before",
+    versus: "vs prior stretch",
+  },
 ];
 
-export const DEFAULT_AI_SPEND_PERIOD = AI_SPEND_PERIODS[0];
+export const DEFAULT_AI_SPEND_PERIOD = AI_SPEND_PERIODS[1];
 
 export type SpendWindow = { fromMs: number; toMs: number };
 
-/** The window a period reads: month to date, or the last N calendar days. */
+/**
+ * The window a period reads: the last N calendar days, 1 January through
+ * today, or — for `all` — the epoch through today. The epoch bound is a fetch
+ * convenience, not the reading: `aiSpendSummary` re-bounds `all` to the
+ * earliest row it actually sees, so the chart never iterates empty decades.
+ */
 export function aiSpendPeriodWindow(
   period: AiSpendPeriod = DEFAULT_AI_SPEND_PERIOD,
   now: Date = new Date(),
 ): SpendWindow {
   const toMs = now.getTime();
-  if (period.days === null) {
-    return { fromMs: Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1), toMs };
+  if (period.scope === "ytd") {
+    return { fromMs: Date.UTC(now.getUTCFullYear(), 0, 1), toMs };
+  }
+  if (period.scope === "all") {
+    return { fromMs: 0, toMs };
   }
   const startOfToday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   return { fromMs: startOfToday - (period.days - 1) * DAY_MS, toMs };
@@ -121,12 +154,14 @@ export function aiSpendPeriodWindow(
 /**
  * The equal-length stretch immediately before a window, which the delta is
  * measured against. Equal-length rather than "the whole of the previous
- * period": half a month of spend against a full one would read as a halving
- * every month, and 30 days against a 31-day month as a rise.
+ * period": 30 days against a 31-day month would report a rise that is only
+ * the calendar's doing.
  *
- * Reaches back past the 1st of the previous month after a short one — 31 March
- * compares against a stretch running to 29 January — because fetching from the
- * 1st would count days that really are missing as zero spend and inflate the %.
+ * Year to date compares against the same length of time reaching back past
+ * New Year, for the same reason — never "last year", which is longer than any
+ * part-year. All time compares against the equal-length stretch before the
+ * first generation ever written, which is empty by construction, so its delta
+ * is honestly "nothing to compare with" (see `aiSpendChange`).
  */
 export function aiSpendPriorWindow(
   period: AiSpendPeriod = DEFAULT_AI_SPEND_PERIOD,
@@ -140,7 +175,8 @@ export function aiSpendPriorWindow(
  * Earliest instant **any** offered period needs — every period's own prior
  * stretch, whichever reaches back furthest. This is what the dashboard fetches
  * from; a shorter fetch silently understates the longest window and reports no
- * comparison for it, because the rows simply are not there to count.
+ * comparison for it, because the rows simply are not there to count. All time
+ * contributes a pre-epoch requirement, so the fetch is genuinely everything.
  */
 export function aiSpendFetchStart(now: Date = new Date()): Date {
   return new Date(
@@ -207,8 +243,24 @@ export function aiSpendSummary(
   now: Date = new Date(),
   period: AiSpendPeriod = DEFAULT_AI_SPEND_PERIOD,
 ): AiSpendSummary {
-  const { fromMs: monthStartMs, toMs: nowMs } = aiSpendPeriodWindow(period, now);
-  const priorFromMs = aiSpendPriorWindow(period, now).fromMs;
+  const toMs = now.getTime();
+  // All time starts at the earliest generation actually seen, not the epoch
+  // the fetch bound uses — otherwise the chart would iterate empty decades
+  // and the headline would claim a window nobody spent in. No rows at all
+  // means an empty window ending today, which reads as zeros with nothing to
+  // compare against rather than as a failure.
+  let fromMs = aiSpendPeriodWindow(period, now).fromMs;
+  if (period.scope === "all") {
+    fromMs = toMs;
+    for (const row of rows) {
+      const at = Date.parse(row.created_at);
+      // Future-dated rows do not stretch the window; like every other period,
+      // `all` ends now and a future row simply is not counted yet.
+      if (!Number.isNaN(at) && at <= toMs && at < fromMs) fromMs = at;
+    }
+  }
+  const priorFromMs = fromMs - (toMs - fromMs);
+  const nowMs = toMs;
 
   let costUsd = 0;
   let priorCostUsd = 0;
@@ -237,7 +289,7 @@ export function aiSpendSummary(
     if (Number.isNaN(at)) continue;
     const cost = parseCost(row.cost_usd);
 
-    if (at >= monthStartMs && at <= nowMs) {
+    if (at >= fromMs && at <= nowMs) {
       generations += 1;
       const activity = row.activity ?? "other";
       const activityTotal = activityTotals[activity];
@@ -268,7 +320,7 @@ export function aiSpendSummary(
       continue;
     }
 
-    if (at >= priorFromMs && at < monthStartMs && cost !== null) {
+    if (at >= priorFromMs && at < fromMs && cost !== null) {
       priorCostUsd += cost;
     }
   }
@@ -280,7 +332,7 @@ export function aiSpendSummary(
     unpriced,
     totalTokens,
     models: Array.from(models).sort((a, b) => a.localeCompare(b)),
-    periodFrom: new Date(monthStartMs).toISOString().slice(0, 10),
+    periodFrom: new Date(fromMs).toISOString().slice(0, 10),
     periodTo: new Date(nowMs).toISOString().slice(0, 10),
     periodId: period.id,
     spendByDay: Array.from(spendByDay.values()).sort((a, b) => a.key.localeCompare(b.key)),
@@ -298,13 +350,18 @@ export function aiSpendChange(summary: AiSpendSummary): number | null {
   return ((summary.costUsd - summary.priorCostUsd) / summary.priorCostUsd) * 100;
 }
 
+const USD_FORMATTER = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
 /**
- * USD to 2dp for anything a person reads, except sub-cent totals, where 2dp
- * rounds a real cost to "$0.00" and makes the tile look broken.
+ * USD to 2dp with thousands separators for anything a person reads, except
+ * sub-cent totals, where 2dp rounds a real cost to "$0.00" and makes the tile look broken.
  */
 export function formatUsd(value: number): string {
   if (value > 0 && value < 0.01) return "<$0.01";
-  return `$${value.toFixed(2)}`;
+  return `$${USD_FORMATTER.format(value)}`;
 }
 
 /**
@@ -320,11 +377,16 @@ export function formatUsd(value: number): string {
  *
  * These five are the chart's existing colours, moved here from the card so the
  * gauge, the legend and any future split all read the same month the same way.
+ *
+ * Follow-up email borrows the priority gauge's top-zone emerald rather than
+ * `--brand`: at 3px the brand violet read as decoration next to the other
+ * four, while the deep emerald holds its own as a data colour. Imported from
+ * the scale module (not copied as hex) so the two cannot drift apart.
  */
 export const AI_GENERATION_ACTIVITY_COLOURS: Record<AiGenerationActivity, string> = {
   initial_email: "var(--lead)",
   email_regeneration: "var(--hold)",
-  follow_up_email: "var(--brand)",
+  follow_up_email: PRIORITY_ZONE_COLOURS.extremely_high,
   client_booklet: "var(--scored)",
   other: "var(--faint)",
 };

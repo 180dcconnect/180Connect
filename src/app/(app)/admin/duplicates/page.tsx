@@ -178,7 +178,9 @@ export default async function DuplicatesPage() {
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <Stage className="mx-auto w-full max-w-6xl space-y-8">
+      {/* No max-w-*: content fills the column and the page's side padding sets
+          where it stops (docs/app-design-system.md §Width). */}
+      <Stage className="w-full space-y-8">
         <Rise>
           <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] leading-[1] font-semibold tracking-[-0.03em] text-ink">
             Possible duplicate charities
@@ -192,8 +194,9 @@ export default async function DuplicatesPage() {
                 pair shows the register&rsquo;s copy of the record beside the
                 client&rsquo;s, with the fields the two disagree on marked, so the answer comes
                 from the two records rather than from the name alone. Keeping one
-                record also compares the two sets of details and flags any that
-                disagree for a separate review; calling them different charities
+                record asks you to pick the winning value for every detail the two
+                disagree on — starting with what&rsquo;s already on the client — and saves
+                your picks with the decision; calling them different charities
                 adds the new one as its own client when the importer next runs.
               </>
             ) : (

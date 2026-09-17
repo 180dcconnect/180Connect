@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
+import { Loader2 } from "lucide-react";
+import { Pill } from "@/app/(app)/clients/[id]/section-card";
 import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import { adminDirectEditsAction } from "@/app/(app)/clients/[id]/admin-actions";
 import { readMissionFromWebsiteAction } from "@/app/(app)/clients/[id]/mission-actions";
@@ -19,6 +21,46 @@ const CANONICAL_SECTORS = [
   "Justice & enterprise",
 ] as const;
 
+/**
+ * Filed Record voice (`docs/app-design-system.md`), following the settings
+ * screens: the card and its action zone follow
+ * `admin/charity-commission/annual-return-card.tsx`, controls follow
+ * `app/settings/styles.ts`. Class strings are repeated here rather than
+ * imported from settings so this workspace stays self-contained.
+ */
+const INPUT =
+  "h-10 w-full rounded-inset border border-rule bg-white px-3 text-sm text-ink outline-none placeholder:text-faint focus-visible:border-lead focus-visible:ring-2 focus-visible:ring-lead/20 disabled:opacity-50";
+
+const TEXTAREA =
+  "min-h-24 w-full rounded-inset border border-rule bg-white px-3 py-2.5 text-sm leading-[1.65] text-ink outline-none placeholder:text-faint focus-visible:border-lead focus-visible:ring-2 focus-visible:ring-lead/20 disabled:opacity-50";
+
+const PRIMARY_BUTTON =
+  "inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-inset border border-lead bg-lead px-2.5 py-1 text-[13px] font-medium text-white transition-colors hover:bg-lead-mid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30 disabled:pointer-events-none disabled:opacity-50";
+
+const QUIET_BUTTON =
+  "inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-inset px-2.5 py-1 text-[13px] font-medium text-dim transition-colors hover:bg-paper hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30 disabled:pointer-events-none disabled:opacity-50";
+
+const OUTLINED_BUTTON =
+  "inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-inset border border-rule bg-white px-2.5 py-1 text-[13px] font-medium text-ink transition-colors hover:bg-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30 disabled:pointer-events-none disabled:opacity-50";
+
+/** The in-row "Edit" / "Change" link — lead, because it is a link-weight action. */
+const ROW_ACTION =
+  "cursor-pointer rounded-inset px-2 py-0.5 text-[13px] font-medium text-lead transition-colors hover:bg-lead-wash focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30";
+
+const SAVED_NOTE = "text-[13px] font-medium text-go";
+const ERROR_NOTE = "text-[13px] font-medium text-stop";
+const FOOTNOTE = "text-[13px] leading-[1.55] text-dim";
+const READ_ONLY_NOTE = "text-[13px] text-dim";
+
+const TABS: { value: FilterTab; label: string; missing: string }[] = [
+  { value: "all", label: "All", missing: "all incomplete records" },
+  { value: "mission", label: "Mission", missing: "records missing a mission statement" },
+  { value: "sector", label: "Sector", missing: "records missing a sector" },
+  { value: "website", label: "Website", missing: "records missing a website" },
+  { value: "email", label: "Email", missing: "records missing a contact email" },
+  { value: "city", label: "Location", missing: "records missing a location" },
+];
+
 export function IncompleteRecordsPanel({
   initialRecords,
   canEdit,
@@ -30,12 +72,13 @@ export function IncompleteRecordsPanel({
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-  const counts = {
+  const counts: Record<FilterTab, number> = {
     all: records.filter((r) => r.isIncomplete).length,
     mission: records.filter((r) => !r.hasMission).length,
     sector: records.filter((r) => !r.hasSector).length,
     website: records.filter((r) => !r.hasWebsite).length,
     email: records.filter((r) => !r.hasEmail).length,
+    city: records.filter((r) => !r.hasCity).length,
   };
 
   const filteredRecords = records.filter((record) => {
@@ -57,6 +100,8 @@ export function IncompleteRecordsPanel({
         return !record.hasWebsite;
       case "email":
         return !record.hasEmail;
+      case "city":
+        return !record.hasCity;
       default:
         return true;
     }
@@ -67,139 +112,71 @@ export function IncompleteRecordsPanel({
       prev.map((item) => {
         if (item.id !== updated.id) return item;
         const merged = { ...item, ...updated };
-        const isIncomplete = !merged.hasSector || !merged.hasMission || !merged.hasWebsite;
+        const isIncomplete =
+          !merged.hasSector ||
+          !merged.hasMission ||
+          !merged.hasWebsite ||
+          !merged.hasEmail ||
+          !merged.hasCity;
         return { ...merged, isIncomplete };
       }),
     );
   };
 
   return (
-    <div className="mt-6 space-y-6">
-      {/* Controls & Filter Tabs */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <nav aria-label="Incomplete records filters" className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setActiveTab("all")}
-            className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-              activeTab === "all"
-                ? "bg-lead text-paper"
-                : "bg-white text-ink border border-rule hover:bg-paper"
-            }`}
-          >
-            <span>All Incomplete</span>
-            <span
-              className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
-                activeTab === "all" ? "bg-white/20 text-white" : "bg-paper text-dim"
-              }`}
-            >
-              {counts.all.toLocaleString()}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab("mission")}
-            className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-              activeTab === "mission"
-                ? "bg-lead text-paper"
-                : "bg-white text-ink border border-rule hover:bg-paper"
-            }`}
-          >
-            <span>Missing Mission</span>
-            <span
-              className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
-                activeTab === "mission" ? "bg-white/20 text-white" : "bg-paper text-dim"
-              }`}
-            >
-              {counts.mission.toLocaleString()}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab("sector")}
-            className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-              activeTab === "sector"
-                ? "bg-lead text-paper"
-                : "bg-white text-ink border border-rule hover:bg-paper"
-            }`}
-          >
-            <span>Missing Sector</span>
-            <span
-              className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
-                activeTab === "sector" ? "bg-white/20 text-white" : "bg-paper text-dim"
-              }`}
-            >
-              {counts.sector.toLocaleString()}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab("website")}
-            className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-              activeTab === "website"
-                ? "bg-lead text-paper"
-                : "bg-white text-ink border border-rule hover:bg-paper"
-            }`}
-          >
-            <span>Missing Website</span>
-            <span
-              className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
-                activeTab === "website" ? "bg-white/20 text-white" : "bg-paper text-dim"
-              }`}
-            >
-              {counts.website.toLocaleString()}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab("email")}
-            className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-              activeTab === "email"
-                ? "bg-lead text-paper"
-                : "bg-white text-ink border border-rule hover:bg-paper"
-            }`}
-          >
-            <span>Missing Email</span>
-            <span
-              className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
-                activeTab === "email" ? "bg-white/20 text-white" : "bg-paper text-dim"
-              }`}
-            >
-              {counts.email.toLocaleString()}
-            </span>
-          </button>
+          {TABS.map((tab) => {
+            const active = activeTab === tab.value;
+            return (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => setActiveTab(tab.value)}
+                aria-pressed={active}
+                aria-label={`Show ${tab.missing}`}
+                className={`rounded-full px-3.5 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30 ${
+                  active
+                    ? "bg-lead font-semibold text-white"
+                    : "font-semibold text-dim hover:bg-paper hover:text-ink"
+                }`}
+              >
+                {tab.label}{" "}
+                <span className={`tabular-nums ${active ? "text-white/75" : "text-faint"}`}>
+                  {counts[tab.value].toLocaleString()}
+                </span>
+              </button>
+            );
+          })}
         </nav>
 
-        {/* Search input */}
-        <div className="w-full sm:w-64">
+        <div className="w-full lg:w-72">
           <label htmlFor="incomplete-search" className="sr-only">
             Search incomplete clients
           </label>
           <input
             id="incomplete-search"
             type="search"
-            placeholder="Search by client name or city..."
+            placeholder="Search by client name or city…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-inset border border-rule bg-white px-3 py-1.5 text-xs text-ink placeholder:text-dim/60 focus:border-lead focus:outline-none focus:ring-1 focus:ring-lead"
+            className={INPUT}
           />
         </div>
       </div>
 
-      {/* Record cards list */}
       {filteredRecords.length === 0 ? (
-        <div className="rounded-panel border border-rule bg-white p-12 text-center">
-          <p className="text-base font-semibold text-ink">All records up to date</p>
-          <p className="mt-1 text-sm text-dim">
+        <div className="rounded-panel border border-rule bg-white px-5 py-10 text-center sm:px-6">
+          <p className="font-body text-[19px] leading-[1.3] font-normal tracking-[-0.01em] text-ink">
+            All records complete
+          </p>
+          <p className="mt-1.5 text-[13px] leading-[1.55] text-dim">
             {searchQuery
               ? "No client records matched your search."
               : activeTab === "all"
-                ? "No client records are currently missing a mission statement, sector, or website."
-                : `No client records are currently missing ${activeTab === "email" ? "a contact email" : activeTab === "website" ? "a website" : activeTab === "sector" ? "a sector" : "a mission statement"}.`}
+                ? "No client records are currently missing a mission statement, sector, website, email, or location."
+                : `No client records are currently ${TABS.find((tab) => tab.value === activeTab)?.missing ?? "incomplete"}.`}
           </p>
         </div>
       ) : (
@@ -220,6 +197,39 @@ export function IncompleteRecordsPanel({
           )}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * One field inside a card: the settings row shape — label and action on a
+ * shared baseline, content underneath — with the label wired to the editor's
+ * input wherever one is open.
+ */
+function FieldRow({
+  label,
+  labelHtmlFor,
+  action,
+  children,
+}: {
+  label: string;
+  labelHtmlFor?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border-t border-rule-soft py-3.5">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-1">
+        {labelHtmlFor ? (
+          <label htmlFor={labelHtmlFor} className="text-[13px] font-medium text-dim">
+            {label}
+          </label>
+        ) : (
+          <span className="text-[13px] font-medium text-dim">{label}</span>
+        )}
+        {action}
+      </div>
+      <div className="mt-2.5">{children}</div>
     </div>
   );
 }
@@ -260,6 +270,12 @@ function ClientCleaningCard({
   const [isEditingEmail, setIsEditingEmail] = useState(!record.hasEmail);
   const [isSavingEmail, startEmailTransition] = useTransition();
   const [emailMessage, setEmailMessage] = useState<string | null>(null);
+
+  // City state
+  const [cityInput, setCityInput] = useState(record.city ?? "");
+  const [isEditingCity, setIsEditingCity] = useState(!record.hasCity);
+  const [isSavingCity, startCityTransition] = useTransition();
+  const [cityMessage, setCityMessage] = useState<string | null>(null);
 
   // Save Sector
   const handleSaveSector = () => {
@@ -378,6 +394,26 @@ function ClientCleaningCard({
     });
   };
 
+  // Save City — also refreshes the priority score, since geography is a
+  // scoring factor (handled inside adminDirectEditsAction).
+  const handleSaveCity = () => {
+    if (!cityInput.trim()) return;
+    setCityMessage(null);
+    startCityTransition(async () => {
+      const res = await adminDirectEditsAction({
+        organisationId: record.id,
+        changes: [{ fieldName: "city", value: cityInput.trim() }],
+      });
+      if (res.kind === "success") {
+        setCityMessage("Saved");
+        setIsEditingCity(false);
+        onUpdate({ id: record.id, city: cityInput.trim(), hasCity: true });
+      } else {
+        setCityMessage(res.message || "Failed to save location");
+      }
+    });
+  };
+
   const activeWebsite = (websiteInput.trim() || record.website?.trim()) ?? "";
   const websiteHref = activeWebsite
     ? activeWebsite.startsWith("http://") || activeWebsite.startsWith("https://")
@@ -385,385 +421,511 @@ function ClientCleaningCard({
       : `https://${activeWebsite}`
     : null;
 
-  return (
-    <article className="rounded-panel border border-rule bg-white p-5">
-      {/* Header */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href={`/clients/${record.id}`}
-              className="font-bold text-ink hover:text-lead hover:underline text-base"
-            >
-              {record.legal_name}
-            </Link>
-            <span className="rounded-full bg-paper px-2 py-0.5 text-[11px] font-medium text-dim">
-              {formatOrganisationType(record.organisation_type)}
-            </span>
-          </div>
+  // Where this record came from, for checking a gap at its origin rather than
+  // guessing. Links only — readings, so viewers see them too.
+  const charityDigits = record.charity_number?.replace(/\D/g, "") || null;
+  const charityRegisterHref = charityDigits
+    ? `https://register-of-charities.charitycommission.gov.uk/en/charity-search/-/charity-details/${charityDigits}`
+    : null;
+  const companyNumber = record.company_number?.trim() || null;
+  const companiesHouseHref = companyNumber
+    ? `https://find-and-update.company-information.service.gov.uk/company/${companyNumber}`
+    : null;
+  const sourceLinks = [
+    charityRegisterHref && { href: charityRegisterHref, label: "Charity Commission register" },
+    companiesHouseHref && { href: companiesHouseHref, label: "Companies House" },
+    websiteHref && { href: websiteHref, label: "Website" },
+  ].filter((link): link is { href: string; label: string } => Boolean(link));
 
-          <p className="mt-1 text-xs text-dim">
-            Location: <span className="text-ink font-medium">{formatLocation(record)}</span>
+  const sectorId = `incomplete-sector-${record.id}`;
+  const websiteId = `incomplete-website-${record.id}`;
+  const missionId = `incomplete-mission-${record.id}`;
+  const emailId = `incomplete-email-${record.id}`;
+  const cityId = `incomplete-city-${record.id}`;
+
+  return (
+    <article className="rounded-panel border border-rule bg-white px-5 py-5 sm:px-6">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <Link
+            href={`/clients/${record.id}`}
+            className="font-body text-[18px] font-semibold leading-[1.3] tracking-[-0.01em] text-ink hover:text-lead hover:underline"
+          >
+            {record.legal_name}
+          </Link>
+          <p className="mt-1 text-[13.5px] text-dim">
+            {formatOrganisationType(record.organisation_type)} · {formatLocation(record)}
           </p>
+          {sourceLinks.length > 0 && (
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-dim">
+              <span>Check the source:</span>
+              {sourceLinks.map((link, index) => (
+                <span key={link.href} className="flex items-center gap-x-2">
+                  {index > 0 && (
+                    <span aria-hidden="true" className="text-faint">
+                      ·
+                    </span>
+                  )}
+                  <a
+                    href={link.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-lead hover:underline"
+                  >
+                    {link.label}
+                    <span className="sr-only"> (opens in a new tab)</span>
+                  </a>
+                </span>
+              ))}
+            </p>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
-          {!record.hasMission && (
-            <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
-              Missing mission
-            </span>
-          )}
-          {!record.hasSector && (
-            <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
-              Missing sector
-            </span>
-          )}
-          {!record.hasWebsite && (
-            <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
-              Missing website
-            </span>
-          )}
-          {!record.hasEmail && (
-            <span className="inline-flex items-center rounded-full bg-paper-sunk px-2 py-0.5 text-[11px] font-medium text-dim">
-              No email
-            </span>
-          )}
-          {!record.isIncomplete && record.hasEmail && (
-            <span className="inline-flex items-center rounded-full bg-go-wash px-2 py-0.5 text-[11px] font-semibold text-go">
-              Complete ✓
-            </span>
-          )}
-
+          {!record.hasMission && <Pill tone="hold">Missing mission</Pill>}
+          {!record.hasSector && <Pill tone="hold">Missing sector</Pill>}
+          {!record.hasWebsite && <Pill tone="hold">Missing website</Pill>}
+          {!record.hasEmail && <Pill tone="hold">Missing email</Pill>}
+          {!record.hasCity && <Pill tone="hold">Missing location</Pill>}
+          {!record.isIncomplete && <Pill tone="go">Complete</Pill>}
           <Link
             href={`/clients/${record.id}`}
-            className="ml-2 text-xs font-semibold text-lead hover:underline"
+            className="ml-1 text-[13px] font-medium text-lead hover:underline"
           >
-            Open profile →
+            Open profile
           </Link>
         </div>
       </div>
 
-      {/* Cleaning Workstation Grid */}
-      <div className="mt-4 grid gap-4 border-t border-rule-soft pt-4 sm:grid-cols-2">
-        {/* Sector Column */}
-        <div className="rounded-inset bg-paper p-3.5 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-dim">
-                Sector
-              </span>
-              {canEdit && !isEditingSector && (
-                <button
-                  type="button"
-                  onClick={() => setIsEditingSector(true)}
-                  className="text-xs font-semibold text-lead hover:underline"
-                >
-                  Change
-                </button>
+      <div className="mt-2">
+        <FieldRow
+          label="Mission statement"
+          labelHtmlFor={isEditingMission && canEdit ? missionId : undefined}
+          action={
+            canEdit && !isEditingMission ? (
+              <button type="button" onClick={() => setIsEditingMission(true)} className={ROW_ACTION}>
+                Edit
+              </button>
+            ) : undefined
+          }
+        >
+          {!isEditingMission && record.hasMission ? (
+            <div className="space-y-1.5">
+              <p className="rounded-inset bg-paper px-3.5 py-3 text-sm leading-[1.65] text-ink">
+                {record.mission}
+              </p>
+              {missionMessage && (
+                <p role="status" className={SAVED_NOTE}>
+                  {missionMessage}
+                </p>
               )}
             </div>
+          ) : canEdit ? (
+            <div className="space-y-2.5">
+              <textarea
+                id={missionId}
+                rows={3}
+                placeholder="Enter or paste the organisation's mission statement…"
+                value={missionInput}
+                onChange={(e) => setMissionInput(e.target.value)}
+                disabled={isSavingMission}
+                className={TEXTAREA}
+              />
 
-            <div className="mt-2">
-              {!isEditingSector && record.hasSector ? (
-                <div className="flex items-center gap-2">
-                  <span className="inline-block rounded-inset border border-rule bg-white px-2.5 py-1 text-xs font-semibold text-ink">
-                    {record.sector}
-                  </span>
-                  {sectorMessage && (
-                    <span className="text-xs font-semibold text-go">{sectorMessage}</span>
-                  )}
-                </div>
-              ) : canEdit ? (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={sectorInput}
-                      onChange={(e) => setSectorInput(e.target.value)}
-                      className="w-full rounded-inset border border-rule bg-white px-2.5 py-1.5 text-xs text-ink focus:border-lead focus:outline-none focus:ring-1 focus:ring-lead"
-                    >
-                      <option value="">Select a sector...</option>
-                      {CANONICAL_SECTORS.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
+              {missionMessage &&
+                (missionStatus === "idle" ? (
+                  <p role="status" className={SAVED_NOTE}>
+                    {missionMessage}
+                  </p>
+                ) : (
+                  <p
+                    role="status"
+                    className={`rounded-inset px-3 py-2.5 text-[13px] leading-[1.55] ${
+                      missionStatus === "error" ? "bg-stop-wash text-stop" : "bg-lead-wash text-ink"
+                    }`}
+                  >
+                    {missionMessage}
+                  </p>
+                ))}
 
-                    <button
-                      type="button"
-                      disabled={isSavingSector || !sectorInput.trim()}
-                      onClick={handleSaveSector}
-                      className="shrink-0 rounded-inset bg-lead px-3 py-1.5 text-xs font-semibold text-paper hover:bg-lead-mid disabled:opacity-50"
-                    >
-                      {isSavingSector ? "Saving..." : "Save sector"}
-                    </button>
-                  </div>
-
-                  {sectorMessage && (
-                    <p className="text-xs font-medium text-dim">{sectorMessage}</p>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  <span className="text-xs text-faint italic">No sector recorded</span>
-                  <p className="text-[11px] text-dim italic">{VIEW_ONLY_CONTROL_NOTE}</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Website Column */}
-        <div className="rounded-inset bg-paper p-3.5 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-dim">
-                Website
-              </span>
-              {canEdit && !isEditingWebsite && (
-                <button
-                  type="button"
-                  onClick={() => setIsEditingWebsite(true)}
-                  className="text-xs font-semibold text-lead hover:underline"
-                >
-                  Change
-                </button>
-              )}
-            </div>
-
-            <div className="mt-2">
-              {!isEditingWebsite && record.hasWebsite ? (
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isFetchingMission || isSavingMission}
+                    onClick={handleFetchMission}
+                    title={
+                      activeWebsite ? `Fetch mission from ${activeWebsite}` : "Add website first"
+                    }
+                    className={OUTLINED_BUTTON}
+                  >
+                    {isFetchingMission && <Loader2 className="size-3.5 animate-spin" />}
+                    {isFetchingMission ? "Reading website…" : "Fetch from website"}
+                  </button>
+
                   {websiteHref && (
                     <a
                       href={websiteHref}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-1 rounded-inset border border-rule bg-white px-2.5 py-1 text-xs font-semibold text-lead hover:underline"
+                      className="text-[13px] font-medium text-lead hover:underline"
                     >
-                      <span>{record.website}</span>
-                      <span aria-hidden="true">↗</span>
+                      Visit website
+                      <span className="sr-only"> (opens in a new tab)</span>
                     </a>
                   )}
-                  {websiteMessage && (
-                    <span className="text-xs font-semibold text-go">{websiteMessage}</span>
-                  )}
                 </div>
-              ) : canEdit ? (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="url"
-                      placeholder="https://example.org"
-                      value={websiteInput}
-                      onChange={(e) => setWebsiteInput(e.target.value)}
-                      className="w-full rounded-inset border border-rule bg-white px-2.5 py-1.5 text-xs text-ink placeholder:text-dim/60 focus:border-lead focus:outline-none focus:ring-1 focus:ring-lead"
-                    />
 
+                <div className="flex items-center gap-2">
+                  {record.hasMission && (
                     <button
                       type="button"
-                      disabled={isSavingWebsite || !websiteInput.trim()}
-                      onClick={handleSaveWebsite}
-                      className="shrink-0 rounded-inset bg-lead px-3 py-1.5 text-xs font-semibold text-paper hover:bg-lead-mid disabled:opacity-50"
+                      onClick={() => {
+                        setMissionInput(record.mission ?? "");
+                        setIsEditingMission(false);
+                        setMissionMessage(null);
+                      }}
+                      className={QUIET_BUTTON}
                     >
-                      {isSavingWebsite ? "Saving..." : "Save website"}
+                      Cancel
                     </button>
-                  </div>
-
-                  {websiteMessage && (
-                    <p className="text-xs font-medium text-dim">{websiteMessage}</p>
                   )}
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  <span className="text-xs text-faint italic">No website recorded</span>
-                  <p className="text-[11px] text-dim italic">{VIEW_ONLY_CONTROL_NOTE}</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Mission Statement (Full Width) */}
-        <div className="sm:col-span-2 rounded-inset bg-paper p-3.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-dim">
-                Mission Statement
-              </span>
-              {!record.hasMission && (
-                <span className="text-[11px] text-amber-700 font-medium">(Missing)</span>
-              )}
-            </div>
-
-            {canEdit && !isEditingMission && (
-              <button
-                type="button"
-                onClick={() => setIsEditingMission(true)}
-                className="text-xs font-semibold text-lead hover:underline"
-              >
-                Edit mission
-              </button>
-            )}
-          </div>
-
-          <div className="mt-2">
-            {!isEditingMission && record.hasMission ? (
-              <div className="space-y-1.5">
-                <p className="text-xs leading-relaxed text-ink bg-white p-3 rounded-inset border border-rule">
-                  {record.mission}
-                </p>
-                {missionMessage && (
-                  <span className="text-xs font-semibold text-go">{missionMessage}</span>
-                )}
-              </div>
-            ) : canEdit ? (
-              <div className="space-y-2">
-                <textarea
-                  rows={3}
-                  placeholder="Enter or paste the organisation's mission statement..."
-                  value={missionInput}
-                  onChange={(e) => setMissionInput(e.target.value)}
-                  className="w-full rounded-inset border border-rule bg-white p-2.5 text-xs text-ink placeholder:text-dim/60 focus:border-lead focus:outline-none focus:ring-1 focus:ring-lead leading-relaxed"
-                />
-
-                {missionMessage && (
-                  <div
-                    className={`rounded-inset p-2 text-xs font-medium ${
-                      missionStatus === "error"
-                        ? "bg-stop-wash text-stop border border-stop/20"
-                        : missionStatus === "proposed"
-                          ? "bg-lead-wash text-lead border border-lead/20"
-                          : "bg-go-wash text-go border border-go/20"
-                    }`}
+                  <button
+                    type="button"
+                    disabled={isSavingMission || !missionInput.trim()}
+                    aria-busy={isSavingMission || undefined}
+                    onClick={handleSaveMission}
+                    className={PRIMARY_BUTTON}
                   >
-                    {missionMessage}
-                  </div>
-                )}
-
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={isFetchingMission}
-                      onClick={handleFetchMission}
-                      className="inline-flex items-center gap-1.5 rounded-inset border border-rule bg-white px-2.5 py-1.5 text-xs font-semibold text-ink hover:bg-paper-sunk disabled:opacity-50"
-                      title={activeWebsite ? `Fetch mission from ${activeWebsite}` : "Add website first"}
-                    >
-                      <span>⚡</span>
-                      <span>{isFetchingMission ? "Reading website..." : "Fetch from website"}</span>
-                    </button>
-
-                    {websiteHref && (
-                      <a
-                        href={websiteHref}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 rounded-inset border border-rule bg-white px-2.5 py-1.5 text-xs font-semibold text-lead hover:underline"
-                      >
-                        <span>Visit website</span>
-                        <span aria-hidden="true">↗</span>
-                      </a>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {record.hasMission && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMissionInput(record.mission ?? "");
-                          setIsEditingMission(false);
-                          setMissionMessage(null);
-                        }}
-                        className="rounded-inset px-2.5 py-1.5 text-xs font-medium text-dim hover:text-ink"
-                      >
-                        Cancel
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      disabled={isSavingMission || !missionInput.trim()}
-                      onClick={handleSaveMission}
-                      className="rounded-inset bg-lead px-3.5 py-1.5 text-xs font-semibold text-paper hover:bg-lead-mid disabled:opacity-50"
-                    >
-                      {isSavingMission ? "Saving..." : "Save mission"}
-                    </button>
-                  </div>
+                    {isSavingMission && <Loader2 className="size-3.5 animate-spin" />}
+                    {isSavingMission ? "Saving…" : "Save mission"}
+                  </button>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-1">
-                <span className="text-xs text-faint italic">No mission statement on file</span>
-                <p className="text-[11px] text-dim italic">{VIEW_ONLY_CONTROL_NOTE}</p>
-              </div>
-            )}
-          </div>
-        </div>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <p className={READ_ONLY_NOTE}>No mission statement on file.</p>
+              <p className={READ_ONLY_NOTE}>{VIEW_ONLY_CONTROL_NOTE}</p>
+            </div>
+          )}
+        </FieldRow>
 
-        {/* Contact Email Column */}
-        <div className="sm:col-span-2 rounded-inset bg-paper p-3.5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-dim">
-              Contact Email
-            </span>
-            {canEdit && !isEditingEmail && (
+        <FieldRow
+          label="Sector"
+          labelHtmlFor={isEditingSector && canEdit ? sectorId : undefined}
+          action={
+            canEdit && !isEditingSector ? (
+              <button type="button" onClick={() => setIsEditingSector(true)} className={ROW_ACTION}>
+                Change
+              </button>
+            ) : undefined
+          }
+        >
+          {!isEditingSector && record.hasSector ? (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <p className="text-sm text-ink">
+                {record.sector}
+                {record.sub_sector?.trim() && (
+                  <span className="text-dim"> · {record.sub_sector.trim()}</span>
+                )}
+              </p>
+              {sectorMessage && (
+                <p role="status" className={SAVED_NOTE}>
+                  {sectorMessage}
+                </p>
+              )}
+            </div>
+          ) : canEdit ? (
+            <div className="space-y-2.5">
+              {record.suggested_sector && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-inset bg-lead-wash px-3 py-2.5">
+                  <p className="text-[13px] leading-[1.55] text-ink">
+                    Suggested from this record&apos;s details:{" "}
+                    <span className="font-semibold">{record.suggested_sector}</span>
+                    {record.suggested_sub_sector && (
+                      <span className="text-dim"> · {record.suggested_sub_sector}</span>
+                    )}
+                    . Check it before applying.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setSectorInput(record.suggested_sector ?? "")}
+                    className={OUTLINED_BUTTON}
+                  >
+                    Use suggestion
+                  </button>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <select
+                  id={sectorId}
+                  value={sectorInput}
+                  onChange={(e) => setSectorInput(e.target.value)}
+                  disabled={isSavingSector}
+                  className={`${INPUT} cursor-pointer`}
+                >
+                  <option value="">Select a sector…</option>
+                  {CANONICAL_SECTORS.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                  {/* A suggestion (or an older free-text sector) may sit outside
+                      the seven common picks. Render it so the select can show
+                      what is actually chosen rather than going blank. */}
+                  {sectorInput &&
+                    !(CANONICAL_SECTORS as readonly string[]).includes(sectorInput) && (
+                      <option value={sectorInput}>{sectorInput}</option>
+                    )}
+                </select>
+
+                <button
+                  type="button"
+                  disabled={isSavingSector || !sectorInput.trim()}
+                  aria-busy={isSavingSector || undefined}
+                  onClick={handleSaveSector}
+                  className={PRIMARY_BUTTON}
+                >
+                  {isSavingSector && <Loader2 className="size-3.5 animate-spin" />}
+                  {isSavingSector ? "Saving…" : "Save sector"}
+                </button>
+              </div>
+
+              <p className={FOOTNOTE}>
+                Not sure which fits? Check the sources above — what the organisation filed
+                usually makes the closest sector obvious. A wrong guess misplaces the client
+                in scoring and filters, so leave it blank rather than force one.
+              </p>
+
+              {sectorMessage && (
+                <p role="status" className={ERROR_NOTE}>
+                  {sectorMessage}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <p className={READ_ONLY_NOTE}>No sector recorded.</p>
+              {record.suggested_sector && (
+                <p className={READ_ONLY_NOTE}>
+                  Pipeline suggestion: {record.suggested_sector}
+                  {record.suggested_sub_sector && ` · ${record.suggested_sub_sector}`}.
+                </p>
+              )}
+              <p className={READ_ONLY_NOTE}>{VIEW_ONLY_CONTROL_NOTE}</p>
+            </div>
+          )}
+        </FieldRow>
+
+        <FieldRow
+          label="Website"
+          labelHtmlFor={isEditingWebsite && canEdit ? websiteId : undefined}
+          action={
+            canEdit && !isEditingWebsite ? (
               <button
                 type="button"
-                onClick={() => setIsEditingEmail(true)}
-                className="text-xs font-semibold text-lead hover:underline"
+                onClick={() => setIsEditingWebsite(true)}
+                className={ROW_ACTION}
               >
                 Change
               </button>
-            )}
-          </div>
-
-          <div className="mt-2">
-            {!isEditingEmail && record.hasEmail ? (
-              <div className="flex items-center gap-2">
+            ) : undefined
+          }
+        >
+          {!isEditingWebsite && record.hasWebsite ? (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              {websiteHref ? (
                 <a
-                  href={`mailto:${record.contact_email}`}
-                  className="inline-flex items-center gap-1 rounded-inset border border-rule bg-white px-2.5 py-1 text-xs font-semibold text-lead hover:underline"
+                  href={websiteHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="break-all text-sm font-medium text-lead hover:underline"
                 >
-                  <span>{record.contact_email}</span>
+                  {record.website}
+                  <span className="sr-only"> (opens in a new tab)</span>
                 </a>
-                {emailMessage && (
-                  <span className="text-xs font-semibold text-go">{emailMessage}</span>
-                )}
-              </div>
-            ) : canEdit ? (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="email"
-                    placeholder="contact@example.org"
-                    value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                    className="w-full max-w-md rounded-inset border border-rule bg-white px-2.5 py-1.5 text-xs text-ink placeholder:text-dim/60 focus:border-lead focus:outline-none focus:ring-1 focus:ring-lead"
-                  />
+              ) : (
+                <p className="text-sm text-ink">{record.website}</p>
+              )}
+              {websiteMessage && (
+                <p role="status" className={SAVED_NOTE}>
+                  {websiteMessage}
+                </p>
+              )}
+            </div>
+          ) : canEdit ? (
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2">
+                <input
+                  id={websiteId}
+                  type="url"
+                  placeholder="https://example.org"
+                  value={websiteInput}
+                  onChange={(e) => setWebsiteInput(e.target.value)}
+                  disabled={isSavingWebsite}
+                  className={INPUT}
+                />
 
-                  <button
-                    type="button"
-                    disabled={isSavingEmail || !emailInput.trim()}
-                    onClick={handleSaveEmail}
-                    className="shrink-0 rounded-inset bg-lead px-3 py-1.5 text-xs font-semibold text-paper hover:bg-lead-mid disabled:opacity-50"
-                  >
-                    {isSavingEmail ? "Saving..." : "Save email"}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  disabled={isSavingWebsite || !websiteInput.trim()}
+                  aria-busy={isSavingWebsite || undefined}
+                  onClick={handleSaveWebsite}
+                  className={PRIMARY_BUTTON}
+                >
+                  {isSavingWebsite && <Loader2 className="size-3.5 animate-spin" />}
+                  {isSavingWebsite ? "Saving…" : "Save website"}
+                </button>
+              </div>
 
-                {emailMessage && (
-                  <p className="text-xs font-medium text-dim">{emailMessage}</p>
-                )}
+              {websiteMessage && (
+                <p role="status" className={ERROR_NOTE}>
+                  {websiteMessage}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <p className={READ_ONLY_NOTE}>No website recorded.</p>
+              <p className={READ_ONLY_NOTE}>{VIEW_ONLY_CONTROL_NOTE}</p>
+            </div>
+          )}
+        </FieldRow>
+
+        <FieldRow
+          label="Contact email"
+          labelHtmlFor={isEditingEmail && canEdit ? emailId : undefined}
+          action={
+            canEdit && !isEditingEmail ? (
+              <button type="button" onClick={() => setIsEditingEmail(true)} className={ROW_ACTION}>
+                Change
+              </button>
+            ) : undefined
+          }
+        >
+          {!isEditingEmail && record.hasEmail ? (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <a
+                href={`mailto:${record.contact_email}`}
+                className="break-all text-sm font-medium text-lead hover:underline"
+              >
+                {record.contact_email}
+              </a>
+              {emailMessage && (
+                <p role="status" className={SAVED_NOTE}>
+                  {emailMessage}
+                </p>
+              )}
+            </div>
+          ) : canEdit ? (
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2">
+                <input
+                  id={emailId}
+                  type="email"
+                  placeholder="contact@example.org"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  disabled={isSavingEmail}
+                  className={INPUT}
+                />
+
+                <button
+                  type="button"
+                  disabled={isSavingEmail || !emailInput.trim()}
+                  aria-busy={isSavingEmail || undefined}
+                  onClick={handleSaveEmail}
+                  className={PRIMARY_BUTTON}
+                >
+                  {isSavingEmail && <Loader2 className="size-3.5 animate-spin" />}
+                  {isSavingEmail ? "Saving…" : "Save email"}
+                </button>
               </div>
-            ) : (
-              <div className="space-y-1">
-                <span className="text-xs text-faint italic">No contact email recorded</span>
-                <p className="text-[11px] text-dim italic">{VIEW_ONLY_CONTROL_NOTE}</p>
+
+              <p className={FOOTNOTE}>
+                Without an email nothing can be sent to this client — this is the address
+                outreach goes to.
+              </p>
+
+              {emailMessage && (
+                <p role="status" className={ERROR_NOTE}>
+                  {emailMessage}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <p className={READ_ONLY_NOTE}>No contact email recorded.</p>
+              <p className={READ_ONLY_NOTE}>{VIEW_ONLY_CONTROL_NOTE}</p>
+            </div>
+          )}
+        </FieldRow>
+
+        <FieldRow
+          label="Location"
+          labelHtmlFor={isEditingCity && canEdit ? cityId : undefined}
+          action={
+            canEdit && !isEditingCity ? (
+              <button type="button" onClick={() => setIsEditingCity(true)} className={ROW_ACTION}>
+                Change
+              </button>
+            ) : undefined
+          }
+        >
+          {!isEditingCity && record.hasCity ? (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <p className="text-sm text-ink">{record.city}</p>
+              {cityMessage && (
+                <p role="status" className={SAVED_NOTE}>
+                  {cityMessage}
+                </p>
+              )}
+            </div>
+          ) : canEdit ? (
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2">
+                <input
+                  id={cityId}
+                  type="text"
+                  placeholder="Sheffield"
+                  value={cityInput}
+                  onChange={(e) => setCityInput(e.target.value)}
+                  disabled={isSavingCity}
+                  className={INPUT}
+                />
+
+                <button
+                  type="button"
+                  disabled={isSavingCity || !cityInput.trim()}
+                  aria-busy={isSavingCity || undefined}
+                  onClick={handleSaveCity}
+                  className={PRIMARY_BUTTON}
+                >
+                  {isSavingCity && <Loader2 className="size-3.5 animate-spin" />}
+                  {isSavingCity ? "Saving…" : "Save location"}
+                </button>
               </div>
-            )}
-          </div>
-        </div>
+
+              <p className={FOOTNOTE}>
+                The city feeds priority scoring and the city filters — without it the client
+                sits at neutral and CAMs filtering by place never see it.
+              </p>
+
+              {cityMessage && (
+                <p role="status" className={ERROR_NOTE}>
+                  {cityMessage}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <p className={READ_ONLY_NOTE}>No location recorded.</p>
+              <p className={READ_ONLY_NOTE}>{VIEW_ONLY_CONTROL_NOTE}</p>
+            </div>
+          )}
+        </FieldRow>
       </div>
     </article>
   );

@@ -4,6 +4,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { charityByRegisteredNumber } from "./sqlite.ts";
 import { companyNumberForRegisteredCharity, type CharityCompanyLookup } from "./company-identifier.ts";
+import {
+  chunkIds,
+  loadCharityIdentifiers,
+  mapPool,
+  type CharityIdentifierRow,
+} from "./coverage-reads.ts";
 
 /**
  * Filling in the second registration number for charity clients that predate it.
@@ -187,9 +193,10 @@ export async function companyNumberHolderIds(
 ): Promise<Set<string>> {
   const holders = new Set<string>();
 
-  for (let i = 0; i < organisationIds.length; i += ID_FILTER_CHUNK) {
-    const slice = organisationIds.slice(i, i + ID_FILTER_CHUNK);
-    const rows = await readAll<{ organisation_id: string }>((from, to) =>
+  // The chunks are independent. Keep the database-friendly cap from the other
+  // finders instead of turning a long list into a serial chain of round trips.
+  const pages = await mapPool(chunkIds(organisationIds, ID_FILTER_CHUNK), (slice) =>
+    readAll<{ organisation_id: string }>((from, to) =>
       supabase
         .from("organisation_identifiers")
         .select("organisation_id")
@@ -201,7 +208,9 @@ export async function companyNumberHolderIds(
         .order("organisation_id", { ascending: true })
         .range(from, to)
         .returns<{ organisation_id: string }[]>(),
-    );
+    ),
+  );
+  for (const rows of pages) {
     for (const row of rows) holders.add(row.organisation_id);
   }
 
@@ -221,19 +230,13 @@ export async function findCompanyNumberTargets(
   /** Narrow to these organisations. */
   only?: ReadonlySet<string>,
   lookup?: CharityCompanyLookup,
+  /** A scan the caller already ran. The coverage cards share one across all
+   *  four finders rather than each scanning the same table. */
+  sharedIdentifiers?: readonly CharityIdentifierRow[],
 ): Promise<{ targets: CompanyNumberTarget[]; coverage: CompanyNumberCoverage }> {
-  const identifiers = await readAll<{ organisation_id: string; identifier_value: string }>(
-    (from, to) =>
-      supabase
-        .from("organisation_identifiers")
-        .select("organisation_id, identifier_value")
-        .eq("identifier_type", "uk_charity")
-        .order("organisation_id", { ascending: true })
-        .range(from, to)
-        .returns<{ organisation_id: string; identifier_value: string }[]>(),
-  );
+  const identifiers = sharedIdentifiers ?? (await loadCharityIdentifiers(supabase));
 
-  const charityNumbers = (identifiers ?? []).filter(
+  const charityNumbers = identifiers.filter(
     (row) => row.organisation_id && row.identifier_value?.trim(),
   );
   if (charityNumbers.length === 0) {

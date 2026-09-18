@@ -1725,6 +1725,35 @@ whether the newest event is an unanswered reply: a thread the server calls
 unread that the CAM has read must stay read, and one they marked unread on
 purpose must not be flipped back on the next load. NULL means "no override".
 
+### 3.26 Charity register coverage — shared read, service-only refresh
+
+Backs the four coverage cards on the Charity Commission screen
+(`20261018130000_create_charity_register_coverage.sql`). The table always has
+exactly four rows: one persisted reading for filed years, register profile,
+geographic reach, and company number. This replaces four whole-client-list scans
+on every page view with one four-row read.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `CHARITY_REGISTER_COVERAGE` | any active user | **none** | **none** | **none** |
+
+CAMs, admins and viewers all read the complete figures because all three roles
+can read the Charity Commission screen. A deactivated user reads no rows. No
+interactive role writes derived counts directly: the three refresh RPCs are
+`SECURITY INVOKER`, granted only to `service_role`, and use a timestamp lease so
+two page views cannot overwrite one another's work.
+
+Relevant changes to `ORGANISATIONS`, `FINANCIAL_PERIODS`, and
+`ORGANISATION_IDENTIFIERS` mark the affected reading stale through statement-level
+triggers. The page still serves the last calculated figures immediately and asks
+the after-response worker to recalculate them. If a write races that worker, the
+worker leaves the row stale and the next visit recalculates it again; it never
+declares a reading fresh across a change it did not include.
+
+**No audit log entries** (`§1` of `docs/audit-log-pattern.md`): these rows are
+derived operational state. Refreshing or invalidating them changes no ownership,
+status, role, approval state, or user-authored business record.
+
 
 ## 4. Denial behaviour and feedback
 

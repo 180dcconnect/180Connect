@@ -623,3 +623,16 @@
 | 04 Entities | ORGANISATIONS | website_absent_at | timestamptz |  | When someone confirmed this client has no website |
 | 04 Entities | ORGANISATIONS | website_absent_by | uuid | USERS | Who confirmed the client has no website |
 | 04 Entities | EDIT_SUGGESTIONS | proposed_absent | boolean |  | Proposal that the field should hold nothing at all, rather than a replacement value |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | id | uuid |  | Primary key |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | coverage_kind | text |  | Coverage card represented by this row; one of annual_return, profile, reach or company_number |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | charities | integer |  | Charity clients included in the last completed calculation |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | covered | integer |  | Charity clients needing nothing from this coverage job |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | pending | integer |  | Charity clients the register can still add information to |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | pending_items | integer |  | Filed years or profile fields still missing, where the card counts them |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | register_built_on | date |  | Register-file build date used for this calculation |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | calculated_at | timestamptz |  | When this row was last calculated successfully |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | stale_at | timestamptz |  | When a relevant record change made this figure out of date |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | refresh_started_at | timestamptz |  | When a worker claimed this row for refresh |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | refresh_failed_at | timestamptz |  | When the latest refresh attempt failed |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | created_at | timestamptz |  | Row creation timestamp |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | updated_at | timestamptz |  | Last updated timestamp |

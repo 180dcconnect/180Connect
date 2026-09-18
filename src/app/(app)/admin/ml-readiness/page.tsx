@@ -3,12 +3,19 @@ import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
-import { outcomeReadiness } from "@/lib/ml-readiness";
+import {
+  groupOutcomes,
+  outcomeReadiness,
+  type OutcomeGroup,
+  type OutcomeGrouping,
+  type OutcomeRow,
+} from "@/lib/ml-readiness";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { HorizontalStickGauge } from "@/components/ui/horizontal-stick-gauge";
 import { Pill, SectionCard } from "@/app/(app)/clients/[id]/section-card";
 import { AiHeader } from "../ai-header";
+import { OutcomesBreakdownCard } from "./outcomes-breakdown-card";
 
 /**
  * F099 — Minimum Outcome Threshold Tracking (#98).
@@ -19,6 +26,13 @@ import { AiHeader } from "../ai-header";
  * how close that is to the agreed minimum that makes ML training realistic.
  * Gated like every other admin analytics surface: the admin permission is
  * re-checked in the page itself, not just at the nav layer.
+ *
+ * ONE READ, FOUR READINGS. The same rows behind the count are grouped four ways
+ * (type, client, sector, month) so the breakdown card can be switched without a
+ * second query — and so the count and every breakdown are guaranteed to be the
+ * same data, read once. The client names ride along on a second read only
+ * because a bucket labelled with a uuid is exactly the internal name this
+ * screen must never show.
  *
  * The root element is a `div`, not a `main`: the admin layout's AppShell already
  * renders the `main` this is slotted into.
@@ -32,24 +46,42 @@ export default async function MlReadinessPage() {
   const supabase = await createClient();
   const { data: rows, error } = await supabase
     .from("training_examples")
-    .select("outcome_label")
+    .select("outcome_label, organisation_id, organisation_sector, outcome_recorded_at")
     .not("outcome_label", "is", null)
-    .overrideTypes<{ outcome_label: string }[], { merge: false }>();
+    .overrideTypes<OutcomeRow[], { merge: false }>();
 
   if (error) {
     await reportError(error, { operation: "admin.ml_readiness.count" });
   }
 
   // A live count on every page load is the "no manual report" requirement —
-  // no scheduler, no separate generation step. Single query drives both the
-  // progress bar and the breakdown, so they cannot disagree.
-  const count = error ? 0 : (rows?.length ?? 0);
+  // no scheduler, no separate generation step. Single query drives the
+  // progress bar and every breakdown, so they cannot disagree.
+  const outcomes = rows ?? [];
+  const count = error ? 0 : outcomes.length;
   const readiness = outcomeReadiness(count);
 
-  const labelCounts = new Map<string, number>();
-  for (const row of rows ?? []) {
-    labelCounts.set(row.outcome_label, (labelCounts.get(row.outcome_label) ?? 0) + 1);
-  }
+  // Names for the clients the outcomes are with. Only the ones that actually
+  // appear — a bucket with no name on file reads as "Client not on file", which
+  // is a gap in the data worth seeing rather than a row to hide.
+  const clientIds = [...new Set(outcomes.map((row) => row.organisation_id))];
+  const { data: clientRows } = clientIds.length
+    ? await supabase
+        .from("organisations")
+        .select("id, legal_name")
+        .in("id", clientIds)
+        .overrideTypes<{ id: string; legal_name: string }[], { merge: false }>()
+    : { data: [] as { id: string; legal_name: string }[] };
+  const clientNames = new Map(
+    (clientRows ?? []).map((client) => [client.id, client.legal_name?.trim() || "Client not on file"]),
+  );
+
+  const groups: Record<OutcomeGrouping, OutcomeGroup[]> = {
+    type: groupOutcomes(outcomes, "type"),
+    client: groupOutcomes(outcomes, "client", clientNames),
+    sector: groupOutcomes(outcomes, "sector"),
+    month: groupOutcomes(outcomes, "month"),
+  };
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -107,28 +139,7 @@ export default async function MlReadinessPage() {
           </Rise>
 
           <Rise>
-            <SectionCard
-              headingId="readiness-by-outcome"
-              title="Outcomes by type"
-              hint="How recorded client responses and results break down in our database."
-            >
-              {labelCounts.size > 0 ? (
-                <ul data-testid="label-breakdown" className="mt-4 divide-y divide-rule-soft border-t border-rule-soft text-sm">
-                  {[...labelCounts.entries()]
-                    .sort(([a], [b]) => a.localeCompare(b))
-                    .map(([label, n]) => (
-                      <li key={label} className="flex justify-between gap-4 py-2 tabular-nums">
-                        <span className="capitalize text-dim">{label.replaceAll("_", " ")}</span>
-                        <span className="font-semibold text-ink">{n}</span>
-                      </li>
-                    ))}
-                </ul>
-              ) : (
-                <p className="mt-4 text-sm leading-[1.65] text-dim">
-                  No client outcomes recorded yet. As Client Account Managers (CAMs) record outreach replies and conversions with clients, the breakdown appears here.
-                </p>
-              )}
-            </SectionCard>
+            <OutcomesBreakdownCard groups={groups} />
           </Rise>
 
           <Rise>

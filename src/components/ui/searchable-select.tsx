@@ -59,6 +59,7 @@ export function SearchableSelect({
   disabled = false,
   ariaLabel,
   className = "",
+  popoverClassName = "",
 }: {
   id: string;
   value: string;
@@ -94,6 +95,7 @@ export function SearchableSelect({
   disabled?: boolean;
   ariaLabel?: string;
   className?: string;
+  popoverClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -307,7 +309,7 @@ export function SearchableSelect({
       </button>
 
       {open && (
-        <div className="absolute z-30 mt-1 w-full overflow-hidden rounded-inset border border-rule bg-white shadow-lg">
+        <div className={`absolute z-30 mt-1 w-full overflow-hidden rounded-inset border border-rule bg-white shadow-lg ${popoverClassName}`}>
           <div className="flex items-center gap-2 border-b border-rule-soft px-3">
             <Search aria-hidden="true" className="size-3.5 shrink-0 text-faint" />
             <input

@@ -393,7 +393,7 @@ export async function proposeSectorFromWebsite(
     return {
       status: "skipped",
       reason:
-        "That page does not describe what this organisation does, so there is nothing to read a sector from. Pick one below instead.",
+        "That page does not describe what this organisation does, so there is nothing to read a sector from. Pick one above instead.",
     };
   }
 
@@ -407,7 +407,7 @@ export async function proposeSectorFromWebsite(
     return {
       status: "skipped",
       reason:
-        "What that page says about itself does not point clearly at one sector. Pick one below instead.",
+        "What that page says about itself does not point clearly at one sector. Pick one above instead.",
     };
   }
 

@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { formatDueDate, groupMyActionsByDueDate, type MyAction } from "@/lib/actions";
-import { EmptyState } from "@/components/ui/empty-state";
 import { Pill } from "@/app/(app)/clients/[id]/section-card";
 import { CompleteActionButton } from "./complete-action-button";
 
@@ -17,23 +16,23 @@ const ORIGIN_LABEL: Record<MyAction["origin"], (assignedByName: string | null) =
  */
 function ActionRow({ action }: { action: MyAction }) {
   return (
-    <li className="flex flex-wrap items-start gap-x-4 gap-y-2 px-5 py-4 transition-colors hover:bg-black/[0.02]">
+    <li className="flex flex-wrap items-start gap-x-4 gap-y-3 px-5 py-4 transition-colors hover:bg-paper/70">
       <Link
         href={`/clients/${action.organisationId}`}
-        className="group min-w-0 flex-1 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand"
+        className="group min-w-0 flex-1 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
       >
-        <p className="text-[15px] font-bold text-foreground">{action.title}</p>
-        <p className="mt-0.5 truncate text-sm font-bold text-brand-hover">
-          {action.organisationName}
+      <p className="font-body text-[15px] font-semibold text-ink">{action.title}</p>
+      <p className="mt-0.5 truncate font-body text-sm font-semibold text-lead group-hover:underline">
+        {action.organisationName}
+      </p>
+      {action.description && (
+        <p className="mt-1 line-clamp-2 font-body text-[13px] leading-[1.6] text-dim">
+          {action.description}
         </p>
-        {action.description && (
-          <p className="mt-1 line-clamp-2 text-[13px] leading-[1.6] text-foreground/50">
-            {action.description}
-          </p>
-        )}
-        <p className="mt-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/35">
-          {ORIGIN_LABEL[action.origin](action.assignedByName)}
-        </p>
+      )}
+      <p className="mt-1.5 font-body text-[12px] text-faint">
+        {ORIGIN_LABEL[action.origin](action.assignedByName)}
+      </p>
       </Link>
 
       <div className="flex shrink-0 flex-col items-end gap-2">
@@ -41,16 +40,10 @@ function ActionRow({ action }: { action: MyAction }) {
           {action.priority === "high" ? "High" : action.priority === "normal" ? "Normal" : "Low"}
         </Pill>
         {action.dueDate && (
-          <span
-            className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.08em] tabular-nums ${
-              action.isOverdue
-                ? "bg-destructive/10 text-destructive"
-                : "bg-black/[0.05] text-foreground/55"
-            }`}
-          >
+          <Pill tone={action.isOverdue ? "stop" : "neutral"}>
             {action.isOverdue ? "Overdue · " : "Due "}
             {formatDueDate(action.dueDate)}
-          </span>
+          </Pill>
         )}
         <CompleteActionButton actionId={action.id} />
       </div>
@@ -59,15 +52,21 @@ function ActionRow({ action }: { action: MyAction }) {
 }
 
 /** A labelled section, omitted entirely when empty rather than shown with "none". */
-function ActionGroup({ heading, actions }: { heading: string; actions: readonly MyAction[] }) {
+function ActionGroup({
+  heading,
+  actions,
+}: {
+  heading: string;
+  actions: readonly MyAction[];
+}) {
   if (actions.length === 0) return null;
   return (
     <div>
-      <h2 className="px-1 text-[11px] font-bold uppercase tracking-[0.1em] text-foreground/40">
-        {heading} ({actions.length})
+      <h2 className="px-1 font-body text-[18px] font-semibold tracking-[-0.01em] text-ink">
+        {heading} <span className="font-normal tabular-nums text-dim">({actions.length})</span>
       </h2>
-      <div className="mt-2 overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">
-        <ul className="divide-y divide-black/[0.06]">
+      <div className="mt-2 overflow-hidden rounded-panel border border-rule bg-white">
+        <ul className="divide-y divide-rule-soft">
           {actions.map((action) => (
             <ActionRow key={action.id} action={action} />
           ))}
@@ -87,7 +86,13 @@ function ActionGroup({ heading, actions }: { heading: string; actions: readonly 
  */
 export function ActionsList({ actions }: { actions: readonly MyAction[] }) {
   if (actions.length === 0) {
-    return <EmptyState message="Nothing outstanding — your task list is clear." />;
+    return (
+      <div className="rounded-panel border border-dashed border-rule bg-white px-6 py-12 text-center">
+        <p className="font-body text-[15px] font-semibold text-ink">
+          Nothing outstanding — your task list is clear.
+        </p>
+      </div>
+    );
   }
 
   const groups = groupMyActionsByDueDate(actions);

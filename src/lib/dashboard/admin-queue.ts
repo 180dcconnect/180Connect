@@ -12,6 +12,13 @@
  * acknowledged yet. Only admins can read those rows, so a view-only account
  * counts none.
  *
+ * `duplicates` is the import pipeline's held pairs: register records that look
+ * like a client already on the list (`entity_match_candidates` still pending).
+ * Same filter as Data health's "Possible duplicates to review" and the
+ * /admin/duplicates queue, so the duty tile and both screens agree. RLS keeps
+ * this table admin-only, so a view-only account counts none — the tile reads
+ * zero for them rather than failing the whole tally.
+ *
  * `unassignedHighPriorityOrgs` is deliberately not counted here. Both callers
  * already hold the organisation rows and the score bands that number comes
  * from, and a fifth round trip to count what is already in memory is the
@@ -26,6 +33,8 @@ export type AdminQueueTally = {
   discrepancies: number;
   /** Register status changes no admin has acknowledged yet. */
   statusChanges: number;
+  /** Imported records held as possible duplicates of an existing client. */
+  duplicates: number;
   /** Every queue added up — the "N actions needed" figure. */
   total: number;
 };
@@ -39,7 +48,7 @@ export type AdminQueueTally = {
 export async function fetchAdminQueueTally(
   supabase: SupabaseClient,
 ): Promise<{ tally: AdminQueueTally | null; error: { message: string } | null }> {
-  const [ownershipRequests, suppressions, edits, discrepancies, statusFlags] = await Promise.all([
+  const [ownershipRequests, suppressions, edits, discrepancies, statusFlags, duplicateFlags] = await Promise.all([
     supabase
       .from("ownership_requests")
       .select("id", { count: "exact", head: true })
@@ -60,9 +69,13 @@ export async function fetchAdminQueueTally(
       .from("organisation_status_flags")
       .select("id", { count: "exact", head: true })
       .eq("resolved", false),
+    supabase
+      .from("entity_match_candidates")
+      .select("id", { count: "exact", head: true })
+      .eq("match_status", "pending"),
   ]);
 
-  const failed = [ownershipRequests, suppressions, edits, discrepancies, statusFlags].find(
+  const failed = [ownershipRequests, suppressions, edits, discrepancies, statusFlags, duplicateFlags].find(
     (result) => result.error,
   );
   if (failed?.error) return { tally: null, error: failed.error };
@@ -73,6 +86,7 @@ export async function fetchAdminQueueTally(
     suggestedEdits: edits.count ?? 0,
     discrepancies: discrepancies.count ?? 0,
     statusChanges: statusFlags.count ?? 0,
+    duplicates: duplicateFlags.count ?? 0,
   };
 
   return {
@@ -83,7 +97,8 @@ export async function fetchAdminQueueTally(
         counts.pendingSuppressions +
         counts.suggestedEdits +
         counts.discrepancies +
-        counts.statusChanges,
+        counts.statusChanges +
+        counts.duplicates,
     },
     error: null,
   };

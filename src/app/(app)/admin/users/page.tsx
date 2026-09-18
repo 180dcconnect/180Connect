@@ -190,6 +190,7 @@ export default async function AdminUsersPage({
         }
         bar={
           <BrandSearchBar
+            tone="light"
             placeholder="Search team members for"
             subjects={["team members", "roles", "CAMs", "admins"]}
             defaultQuery={query}

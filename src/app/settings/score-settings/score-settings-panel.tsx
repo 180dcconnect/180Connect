@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Check, ChevronDown, Loader2, Search, X } from "lucide-react";
 import { Group, Rise } from "@/components/dashboard-stage";
 import { HorizontalStickGauge } from "@/components/ui/horizontal-stick-gauge";
@@ -113,6 +113,26 @@ function formatChangedSections(sections: string[]): string {
   return `Unsaved changes in ${sections.slice(0, -1).join(", ")} & ${sections[sections.length - 1]}`;
 }
 
+/**
+ * Priority tone for a sector row, by rank. Token washes only
+ * (`docs/app-design-system.md` — never a Tailwind ramp or a copied hex):
+ * the top of the ranking reads as go, the middle as hold, the bottom as
+ * stop. Each badge also carries a dot and a word, so the order survives
+ * greyscale and red-green colour deficiency — the same contract as `Pill`.
+ */
+function sectorRankTone(index: number, total: number): {
+  badge: string;
+  dot: string;
+  label: string;
+} {
+  const third = total / 3;
+  if (index < third)
+    return { badge: "bg-go-wash text-go", dot: "bg-go", label: "Higher priority" };
+  if (index < third * 2)
+    return { badge: "bg-hold-wash text-hold", dot: "bg-hold", label: "Middle priority" };
+  return { badge: "bg-stop-wash text-stop", dot: "bg-stop", label: "Lower priority" };
+}
+
 type Rescore =
   | { status: "idle" }
   | {
@@ -214,6 +234,54 @@ export function ScoreSettingsPanel({
   const [zone, setZone] = useState<RegionalZone>("All");
   const [councilSearch, setCouncilSearch] = useState("");
   const councilSearchId = useId();
+  // Which sector row just moved, and which way — drives the flash highlight
+  // and the screen-reader announcement. Cleared on a short timer.
+  const [movedSector, setMovedSector] = useState<{
+    category: string;
+    direction: -1 | 1;
+    position: number;
+  } | null>(null);
+  // FLIP animation bookkeeping: row tops captured before a reorder, then each
+  // row animates from its old position to its new one on the next paint.
+  const rowRefs = useRef(new Map<string, HTMLLIElement>());
+  const prevTopsRef = useRef<Map<string, number> | null>(null);
+  const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
+    },
+    [],
+  );
+  // FLIP bookkeeping for the council chip grid: rects captured before the
+  // visible list changes (a keystroke, a region tap), then each surviving
+  // chip glides from where it was to where it lands and new chips fade in —
+  // so filtering reads as rearranging, not snapping.
+  const chipRefs = useRef(new Map<string, HTMLButtonElement>());
+  const prevChipRectsRef = useRef<Map<string, { left: number; top: number }> | null>(null);
+
+  function snapshotChips() {
+    const rects = new Map<string, { left: number; top: number }>();
+    chipRefs.current.forEach((element, authority) => {
+      // Cancel first so the rect is the chip's true layout spot, not a
+      // mid-flight position from the previous keystroke's glide. No paint
+      // happens between here and the re-render, so nothing visibly jumps.
+      element.getAnimations().forEach((animation) => animation.cancel());
+      const rect = element.getBoundingClientRect();
+      rects.set(authority, { left: rect.left, top: rect.top });
+    });
+    prevChipRectsRef.current = rects;
+  }
+
+  function setCouncilSearchAnimated(value: string) {
+    snapshotChips();
+    setCouncilSearch(value);
+  }
+
+  function setZoneAnimated(next: RegionalZone) {
+    snapshotChips();
+    setZone(next);
+  }
 
   const [openSections, setOpenSections] = useState({
     weights: true,
@@ -263,9 +331,42 @@ export function ScoreSettingsPanel({
     const order = [...values.sectorOrder];
     const target = index + direction;
     if (target < 0 || target >= order.length) return;
+    // Snapshot row positions before the reorder so the effect below can
+    // animate each row from where it was to where it lands (FLIP).
+    const tops = new Map<string, number>();
+    rowRefs.current.forEach((element, category) => {
+      tops.set(category, element.getBoundingClientRect().top);
+    });
+    prevTopsRef.current = tops;
+    const movedCategory = order[index];
     [order[index], order[target]] = [order[target], order[index]];
     update({ sectorOrder: order });
+    setMovedSector({ category: movedCategory, direction, position: target + 1 });
+    if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
+    flashTimeoutRef.current = setTimeout(() => setMovedSector(null), 1200);
   }
+
+  // After a reorder, slide each row from its captured position to its new one.
+  // Skipped under reduced motion — the order change alone is the update.
+  useEffect(() => {
+    const previous = prevTopsRef.current;
+    prevTopsRef.current = null;
+    if (!previous) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    rowRefs.current.forEach((element, category) => {
+      const oldTop = previous.get(category);
+      if (oldTop === undefined) return;
+      const delta = oldTop - element.getBoundingClientRect().top;
+      if (delta === 0) return;
+      element.animate(
+        [
+          { transform: `translateY(${delta}px)` },
+          { transform: "translateY(0)" },
+        ],
+        { duration: 280, easing: "cubic-bezier(0.4, 0, 0.2, 1)" },
+      );
+    });
+  }, [values.sectorOrder]);
 
   // Council matching helper: compares by normalized name and lowercase.
   const sameAuthority = (a: string, b: string) =>
@@ -294,6 +395,46 @@ export function ScoreSettingsPanel({
     }
     return ALL_LOCAL_AUTHORITIES;
   }, [councilSearch, zone]);
+
+  // Progressive disclosure for the 174-council picker: showing every council
+  // before the admin has narrowed the list is a wall of pills nobody reads.
+  // The individual councils appear once the admin searches or picks a region;
+  // the regional groups above are always visible as the way in.
+  const councilBrowseActive = councilSearch.trim().length > 0 || zone !== "All";
+
+  // After the visible council list changes, glide surviving chips to their
+  // new spots and fade newcomers in with a short stagger. Skipped under
+  // reduced motion — the new list alone is the update.
+  useEffect(() => {
+    const previous = prevChipRectsRef.current;
+    prevChipRectsRef.current = null;
+    if (!previous) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let entered = 0;
+    chipRefs.current.forEach((element, authority) => {
+      const old = previous.get(authority);
+      if (!old) {
+        const delay = Math.min(entered * 12, 120);
+        entered += 1;
+        element.animate(
+          [
+            { opacity: 0, transform: "translateY(6px) scale(0.92)" },
+            { opacity: 1, transform: "translateY(0) scale(1)" },
+          ],
+          { duration: 200, delay, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" },
+        );
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      const dx = old.left - rect.left;
+      const dy = old.top - rect.top;
+      if (dx === 0 && dy === 0) return;
+      element.animate(
+        [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0, 0)" }],
+        { duration: 240, easing: "cubic-bezier(0.4, 0, 0.2, 1)" },
+      );
+    });
+  }, [visibleAuthorities]);
 
   function toggleAuthority(authority: string) {
     const isSelected = hasAuthority(values.priorityTowns, authority);
@@ -746,50 +887,78 @@ export function ScoreSettingsPanel({
             <div className="mt-2">
               <p className={CARD_HINT}>
                 Put the kinds of work the branch most wants to help at the top. Move a sector with the
-                arrows. A client with no sector recorded scores 50, in the middle.
+                arrows — the row slides to its new place and flashes so you can follow it. A client
+                with no sector recorded scores 50, in the middle.
+              </p>
+              <p className="mt-2 rounded-inset bg-paper px-3 py-2.5 text-[13px] leading-[1.55] text-dim">
+                Some charities don&rsquo;t fit these six — for example places of worship, armed-forces
+                charities, and general-purpose funds. They arrive without a sector and score 50, in the
+                middle, rather than being guessed into the wrong place.
+              </p>
+              <p aria-live="polite" className="sr-only">
+                {movedSector
+                  ? `${movedSector.category} moved ${movedSector.direction === -1 ? "up" : "down"} to position ${movedSector.position} of ${values.sectorOrder.length}`
+                  : ""}
               </p>
               <ol className="mt-4">
-                {values.sectorOrder.map((category, index) => (
-                  <li
-                    key={category}
-                    className="flex items-start gap-4 border-t border-rule-soft py-3.5"
-                  >
-                    <span className="w-7 shrink-0 font-body text-[22px] leading-none font-light text-faint tabular-nums">
-                      {index + 1}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-ink">{category}</p>
-                      <p className="mt-0.5 text-[13px] leading-[1.55] text-dim">
-                        {SECTOR_TAXONOMY[category].join(", ")}
-                      </p>
-                    </div>
-                    <span className="shrink-0 pt-0.5 text-[13px] text-dim tabular-nums">
-                      Scores {Math.round((SECTOR_RANK_LADDER[index] ?? 0) * 100)}
-                    </span>
-                    {!readOnly && (
-                      <span className="flex shrink-0 gap-1">
-                        <button
-                          type="button"
-                          onClick={() => moveSector(index, -1)}
-                          disabled={busy || index === 0}
-                          aria-label={`Move ${category} up`}
-                          className="rounded-inset p-1.5 text-dim transition-colors hover:bg-paper hover:text-ink disabled:pointer-events-none disabled:opacity-30"
-                        >
-                          <ArrowUp className="size-4" aria-hidden="true" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => moveSector(index, 1)}
-                          disabled={busy || index === values.sectorOrder.length - 1}
-                          aria-label={`Move ${category} down`}
-                          className="rounded-inset p-1.5 text-dim transition-colors hover:bg-paper hover:text-ink disabled:pointer-events-none disabled:opacity-30"
-                        >
-                          <ArrowDown className="size-4" aria-hidden="true" />
-                        </button>
+                {values.sectorOrder.map((category, index) => {
+                  const tone = sectorRankTone(index, values.sectorOrder.length);
+                  const isFlashing = movedSector?.category === category;
+                  return (
+                    <li
+                      key={category}
+                      ref={(element) => {
+                        if (element) rowRefs.current.set(category, element);
+                        else rowRefs.current.delete(category);
+                      }}
+                      className={`flex items-start gap-4 border-t border-rule-soft py-3.5 motion-reduce:transition-none ${
+                        isFlashing ? "rounded-inset bg-lead-wash/60 transition-colors duration-500" : ""
+                      }`}
+                    >
+                      <span className="w-7 shrink-0 font-body text-[22px] leading-none font-light text-faint tabular-nums">
+                        {index + 1}
                       </span>
-                    )}
-                  </li>
-                ))}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-ink">{category}</p>
+                        <p className="mt-0.5 text-[13px] leading-[1.55] text-dim">
+                          {SECTOR_TAXONOMY[category].join(", ")}
+                        </p>
+                      </div>
+                      <span
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] font-medium tabular-nums ${tone.badge}`}
+                        title={`${tone.label} — position ${index + 1} of ${values.sectorOrder.length}`}
+                      >
+                        <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${tone.dot}`} />
+                        Scores {Math.round((SECTOR_RANK_LADDER[index] ?? 0) * 100)} ·{" "}
+                        {tone.label.replace(" priority", "")}
+                      </span>
+                      {!readOnly && (
+                        <span className="flex shrink-0 gap-1">
+                          <button
+                            type="button"
+                            onClick={() => moveSector(index, -1)}
+                            disabled={busy || index === 0}
+                            aria-label={`Move ${category} up`}
+                            title="Move towards higher priority"
+                            className="rounded-inset p-1.5 text-dim transition-colors hover:bg-go-wash hover:text-go disabled:pointer-events-none disabled:opacity-30"
+                          >
+                            <ArrowUp className="size-4" aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveSector(index, 1)}
+                            disabled={busy || index === values.sectorOrder.length - 1}
+                            aria-label={`Move ${category} down`}
+                            title="Move towards lower priority"
+                            className="rounded-inset p-1.5 text-dim transition-colors hover:bg-stop-wash hover:text-stop disabled:pointer-events-none disabled:opacity-30"
+                          >
+                            <ArrowDown className="size-4" aria-hidden="true" />
+                          </button>
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
               </ol>
             </div>
           )}
@@ -892,7 +1061,7 @@ export function ScoreSettingsPanel({
                           key={option}
                           type="button"
                           aria-pressed={zone === option}
-                          onClick={() => setZone(option)}
+                          onClick={() => setZoneAnimated(option)}
                           disabled={busy}
                           className={`cursor-pointer rounded-full px-2.5 py-1 text-[12px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-lead/30 focus-visible:outline-none ${
                             zone === option
@@ -951,15 +1120,18 @@ export function ScoreSettingsPanel({
                           id={councilSearchId}
                           type="search"
                           value={councilSearch}
-                          onChange={(event) => setCouncilSearch(event.target.value)}
+                          onChange={(event) => setCouncilSearchAnimated(event.target.value)}
                           placeholder={`Search all ${ALL_LOCAL_AUTHORITIES.length} local councils…`}
                           disabled={busy}
-                          className={`${INPUT} pr-8 pl-8 placeholder:text-faint`}
+                          // The field has its own clear button below; without
+                          // this the browser draws a second, native X inside
+                          // the same input.
+                          className={`${INPUT} pr-8 pl-8 placeholder:text-faint [&::-webkit-search-cancel-button]:hidden`}
                         />
                         {councilSearch && (
                           <button
                             type="button"
-                            onClick={() => setCouncilSearch("")}
+                            onClick={() => setCouncilSearchAnimated("")}
                             disabled={busy}
                             aria-label="Clear search"
                             className="absolute top-1/2 right-2.5 -translate-y-1/2 cursor-pointer rounded-full p-0.5 text-dim hover:text-ink"
@@ -969,43 +1141,71 @@ export function ScoreSettingsPanel({
                         )}
                       </div>
 
-                      <div className="mt-2.5 flex flex-wrap gap-1.5 pt-1 pr-1 pb-1">
-                        {visibleAuthorities.map((authority) => {
-                          const selected = hasAuthority(values.priorityTowns, authority);
-                          const atCapacity =
-                            !selected && values.priorityTowns.length >= MAX_PRIORITY_TOWNS;
-                          return (
-                            <button
-                              key={authority}
-                              type="button"
-                              onClick={() => toggleAuthority(authority)}
-                              disabled={busy || atCapacity}
-                              className={`inline-flex cursor-pointer items-center gap-1 rounded-inset px-2.5 py-1 text-[12px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-40 ${
-                                selected
-                                  ? "bg-lead text-white hover:bg-lead-mid"
-                                  : "bg-paper text-dim hover:bg-paper-sunk hover:text-ink"
-                              }`}
-                            >
-                              {selected && (
-                                <Check aria-hidden="true" className="size-3" strokeWidth={2.5} />
-                              )}
-                              {authority}
-                            </button>
-                          );
-                        })}
-                        {visibleAuthorities.length === 0 && (
-                          <p className="py-2 text-[13px] text-dim">
-                            No council matches &ldquo;{councilSearch.trim()}&rdquo;.{" "}
-                            <button
-                              type="button"
-                              onClick={() => setCouncilSearch("")}
-                              className="cursor-pointer font-medium text-lead hover:underline"
-                            >
-                              Clear search
-                            </button>
+                      {!councilBrowseActive ? (
+                        <p className="mt-2.5 rounded-inset bg-paper px-3 py-2.5 text-[13px] leading-[1.55] text-dim">
+                          Search above or choose a region to see its councils — showing all{" "}
+                          {ALL_LOCAL_AUTHORITIES.length} at once is a wall nobody reads.
+                        </p>
+                      ) : (
+                        <>
+                          <p
+                            aria-live="polite"
+                            className="mt-2.5 text-[13px] text-dim"
+                          >
+                            Showing{" "}
+                            <span className="font-semibold text-ink tabular-nums">
+                              {visibleAuthorities.length}
+                            </span>{" "}
+                            of {ALL_LOCAL_AUTHORITIES.length} councils
+                            {councilSearch.trim() && (
+                              <> matching &ldquo;{councilSearch.trim()}&rdquo;</>
+                            )}
+                            {zone !== "All" && <> in {zone}</>}.
                           </p>
-                        )}
-                      </div>
+                          <div className="mt-2.5 flex max-h-64 flex-wrap gap-1.5 overflow-y-auto pt-1 pr-1 pb-1">
+                            {visibleAuthorities.map((authority) => {
+                              const selected = hasAuthority(values.priorityTowns, authority);
+                              const atCapacity =
+                                !selected && values.priorityTowns.length >= MAX_PRIORITY_TOWNS;
+                              return (
+                                <button
+                                  key={authority}
+                                  ref={(element) => {
+                                    if (element) chipRefs.current.set(authority, element);
+                                    else chipRefs.current.delete(authority);
+                                  }}
+                                  type="button"
+                                  onClick={() => toggleAuthority(authority)}
+                                  disabled={busy || atCapacity}
+                                  aria-pressed={selected}
+                                  className={`inline-flex cursor-pointer items-center gap-1 rounded-inset px-2.5 py-1 text-[12px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-40 ${
+                                    selected
+                                      ? "bg-lead text-white hover:bg-lead-mid"
+                                      : "bg-paper text-dim hover:bg-paper-sunk hover:text-ink"
+                                  }`}
+                                >
+                                  {selected && (
+                                    <Check aria-hidden="true" className="size-3" strokeWidth={2.5} />
+                                  )}
+                                  {authority}
+                                </button>
+                              );
+                            })}
+                            {visibleAuthorities.length === 0 && (
+                              <p className="py-2 text-[13px] text-dim">
+                                No council matches &ldquo;{councilSearch.trim()}&rdquo;.{" "}
+                                <button
+                                  type="button"
+                              onClick={() => setCouncilSearchAnimated("")}
+                              className="cursor-pointer font-medium text-lead hover:underline"
+                                >
+                                  Clear search
+                                </button>
+                              </p>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}

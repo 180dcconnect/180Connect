@@ -335,7 +335,7 @@ export function AiSpendOverviewPreview({ readings }: { readings: AiSpendReading[
         </h2>
         <Link
           href="/admin/ai-generations"
-          className="shrink-0 rounded-inset bg-lead px-3 py-1.5 font-body text-[13px] font-semibold text-white transition-colors hover:bg-stop/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stop"
+          className="shrink-0 rounded-inset bg-lead px-3 py-1.5 font-body text-[13px] font-semibold text-white transition-colors hover:bg-lead/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stop"
         >
           View all generations
         </Link>

@@ -10,7 +10,13 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
-const PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
+/**
+ * The sizes offered when a caller does not choose. Kept as the default so every
+ * existing host renders byte-identical output; a caller passes `pageSizeOptions`
+ * when its list is measured in something else (five suppressions per page is a
+ * different reading from five timeline entries).
+ */
+const DEFAULT_PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
 
 /**
  * Generic paginated list wrapper. Renders its children (the full list) and
@@ -21,12 +27,15 @@ const PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
 export function PaginatedList<T>({
   items,
   initialPageSize = 10,
+  pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
   className,
   render,
 }: {
   items: T[];
   /** Default page size. User can override via the dropdown. */
   initialPageSize?: number;
+  /** Sizes offered in the dropdown, smallest first. */
+  pageSizeOptions?: number[];
   className?: string;
   /** Render function receiving the visible slice of items. */
   render: (visibleItems: T[]) => React.ReactNode;
@@ -44,7 +53,7 @@ export function PaginatedList<T>({
     <div className={cn("space-y-3", className)}>
       {render(visible)}
 
-      {items.length > PAGE_SIZE_OPTIONS[0] && (
+      {items.length > Math.min(...pageSizeOptions) && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-rule-soft pt-3 text-[12.5px]">
           <div className="flex items-center gap-2 text-dim">
             <span>Showing {visible.length} of {items.length}</span>
@@ -62,7 +71,7 @@ export function PaginatedList<T>({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {PAGE_SIZE_OPTIONS.map((n) => (
+                  {pageSizeOptions.map((n) => (
                     <SelectItem key={n} value={String(n)}>
                       {n} per page
                     </SelectItem>

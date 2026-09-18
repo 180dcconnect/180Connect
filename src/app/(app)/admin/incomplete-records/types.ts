@@ -3,6 +3,7 @@ export type IncompleteClientRecord = {
   legal_name: string;
   organisation_type: string;
   city: string | null;
+  postcode: string | null;
   country_code: string;
   sector: string | null;
   sub_sector: string | null;
@@ -12,8 +13,19 @@ export type IncompleteClientRecord = {
   hasMission: boolean;
   hasSector: boolean;
   hasWebsite: boolean;
+  /**
+   * When someone recorded that this client genuinely has no website, or null.
+   * Set from this screen; cleared by the database the moment a website is on
+   * file. `hasWebsite` is already true for a marked record — this says *why* it
+   * counts as complete, so the card can say so instead of showing a blank.
+   */
+  websiteAbsentAt: string | null;
   hasEmail: boolean;
   hasCity: boolean;
+  /** True when any field holds a redaction placeholder that needs replacing. */
+  hasRedacted: boolean;
+  /** Names of the fields that are currently redacted (e.g. "email", "mission"). */
+  redactedFields: string[];
   isIncomplete: boolean;
   /**
    * The pipeline's own sector classification for a record that has none —
@@ -27,7 +39,15 @@ export type IncompleteClientRecord = {
   company_number: string | null;
 };
 
-export type FilterTab = "all" | "mission" | "sector" | "website" | "email" | "city";
+export type FilterTab =
+  | "all"
+  | "redacted"
+  | "mission"
+  | "sector"
+  | "website"
+  | "email"
+  | "city"
+  | "audit";
 
 export type IncompleteSummaryCounts = {
   totalIncomplete: number;

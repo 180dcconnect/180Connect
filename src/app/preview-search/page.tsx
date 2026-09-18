@@ -38,7 +38,7 @@ export default function PreviewSearchPage() {
         </div>
 
         <div className="relative z-10 flex w-full justify-center">
-          <BrandSearchBar />
+          <BrandSearchBar tone="dark" />
         </div>
       </main>
     </MotionConfig>

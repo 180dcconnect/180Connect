@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { ExternalLink, Globe, Mail, Search } from "lucide-react";
+import { ExternalLink, Globe, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { hasPermission, isViewOnly } from "@/lib/auth/permissions";
@@ -11,11 +10,11 @@ import {
   restrictedFieldLabel,
 } from "@/lib/edit-suggestions";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
-import { isSimilarityReference } from "@/lib/similar-clients";
 
 import { BasicInfoPanel } from "./basic-info-panel";
 import { OperatingAreasCard } from "./operating-areas-card";
 import { ScoreBreakdownCard } from "./score-breakdown";
+import { SimilarClientsCard } from "./similar-clients-card";
 import { Pill, SectionCard } from "./section-card";
 import { FinancialScaleCard } from "./financial-scale-card";
 import { SuggestEditSection } from "./suggest-edit-section";
@@ -113,10 +112,6 @@ export default async function ClientOverviewPage({
   }
 
   const { sources, error: sourcesError } = sourcesResult;
-  // F216 — "past successful client" is a pipeline state (F150/F151), so the
-  // action is offered exactly when the record qualifies, using the module's
-  // one definition of the rule.
-  const isConverted = isSimilarityReference(client.outreach_status);
   const operatingGeography = loadOperatingGeography(
     client,
     identifiers,
@@ -259,28 +254,13 @@ export default async function ClientOverviewPage({
             />
           </Rise>
 
-          {/* F216 — the Search-by-Similarity entry point. A CAM standing on a
-              client that worked out asks "who else looks like this?"; the
-              answer lives on the list page, where every other search does. */}
-          {isConverted && (
-            <Rise>
-              <SectionCard
-                headingId="find-similar-heading"
-                title="Find similar clients"
-                hint="Ranked by shared sector, location, size, grant history and outcome — the same dimensions the priority score reads."
-              >
-                <div className="mt-3.5 flex flex-col items-start gap-2">
-                  <Link
-                    href={`/clients?similar=${client.id}`}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-1.5 text-sm font-bold text-white transition-colors hover:bg-brand/85"
-                  >
-                    <Search aria-hidden="true" className="size-3.5" />
-                    Find similar clients
-                  </Link>
-                </div>
-              </SectionCard>
-            </Rise>
-          )}
+          {/* F216 — the Search-by-Similarity entry point, on every client. A
+              CAM standing on any record asks "who else looks like this?"; the
+              trigger previews the top few inline and hands the full shortlist
+              to the list page, where every other search lives. */}
+          <Rise>
+            <SimilarClientsCard organisationId={client.id} />
+          </Rise>
 
           {/* The Tags card's picker has to paint over the cards after it, and
               each Rise is a `filter` animation — its own stacking context — so

@@ -7,6 +7,7 @@ import { Accessibility } from "@/components/animate-ui/icons/accessibility";
 import { LogOut } from "@/components/animate-ui/icons/log-out";
 import { Settings } from "@/components/animate-ui/icons/settings";
 import { User } from "@/components/animate-ui/icons/user";
+import { InitialsAvatar } from "@/components/ui/initials-avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,29 +16,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/animate-ui/components/radix/dropdown-menu";
-
-/**
- * Initials for the avatar: first name + last name, which is what a reader
- * recognises themselves by. Falls back through the single-word name to the
- * email, so the circle is never empty for an account with no profile name.
- */
-function initialsOf(name: string | null, email: string | null): string {
-  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (email ?? "?").slice(0, 1).toUpperCase();
-}
-
-function Avatar({ initials }: { initials: string }) {
-  return (
-    <span
-      aria-hidden="true"
-      className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand/15 text-xs font-bold tracking-wide text-brand-hover"
-    >
-      {initials}
-    </span>
-  );
-}
 
 /**
  * The rail's account block. The row itself carries name and role — the two
@@ -63,7 +41,6 @@ export function SidebarAccountMenu({
 }) {
   const router = useRouter();
   const displayName = name ?? email ?? "Account";
-  const initials = initialsOf(name, email);
 
   return (
     <DropdownMenu>
@@ -75,7 +52,7 @@ export function SidebarAccountMenu({
             collapsed ? "md:pr-1.5" : ""
           }`}
         >
-          <Avatar initials={initials} />
+          <InitialsAvatar name={name} email={email} />
           {/* Hidden by class rather than unmounted: `collapsed` is a desktop-only
               state (see Sidebar), and below `md` this block always shows. */}
           <span className={`min-w-0 flex-1 ${collapsed ? "md:hidden" : ""}`}>
@@ -105,7 +82,7 @@ export function SidebarAccountMenu({
         className="w-60 border-black/10 bg-white/85 backdrop-blur-xl"
       >
         <DropdownMenuLabel className="flex items-center gap-3 px-2 py-2 font-normal">
-          <Avatar initials={initials} />
+          <InitialsAvatar name={name} email={email} />
           <span className="min-w-0">
             <span className="block truncate text-sm font-bold text-black">{displayName}</span>
             {email && <span className="block truncate text-xs text-black/55">{email}</span>}

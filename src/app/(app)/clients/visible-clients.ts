@@ -76,6 +76,28 @@ export type ClientListRow = {
 
 export type OpenSuppression = { organisation_id: string; status: "pending" | "active" };
 
+/**
+ * What the client list reads for every client — and what the record page's
+ * similar-clients preview reads too, so the two can never disagree about a
+ * client's sector, size or grant history. Every column is paid for on every
+ * visit, so this carries only what a filter, sort, count, row — or the
+ * similarity comparison — actually uses:
+ *
+ * - `grant_total:grants(count)` — only the count (the "360Giving" filter and
+ *   the similarity factor). Selecting every grant row made grants the largest
+ *   part of the payload.
+ * - `financial_periods` — capped at the 3 most recent periods. Income
+ *   resolution only ever reads the newest period carrying a figure.
+ */
+export const LIST_COLUMNS = [
+  "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, charity_activities, cic_community_statement",
+  "owner:users!organisations_owner_id_fkey(full_name)",
+  "org_tags(tag_id)",
+  "financial_periods(income_band, total_income, period_end)",
+  "grant_total:grants(count)",
+  "latest_scores(priority_score, priority_band, scored_at)",
+].join(", ");
+
 export type VisibleClient = ClientListRow & {
   location: string;
   outreachStatusLabel: string;

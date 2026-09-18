@@ -43,7 +43,8 @@ export default async function RestrictedFieldsPage() {
     supabase
       .from("restricted_edit_fields")
       .select("field_name, reason, active")
-      .order("active", { ascending: false })
+      // No active-first ordering: a field that is unlocked must stay where it
+      // is in the list, so the order cannot depend on the toggle.
       .order("field_name")
       .overrideTypes<RestrictedFieldRow[], { merge: false }>(),
     supabase.rpc("list_restrictable_edit_fields"),

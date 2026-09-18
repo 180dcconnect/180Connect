@@ -13,11 +13,17 @@ export function ModelFilterSelect({
   activeModel,
   basePath,
   clientFilter,
+  carryQuery = "",
 }: {
   models: readonly string[];
   activeModel: string | null;
   basePath: string;
   clientFilter?: string | null;
+  /**
+   * The page's other filters and view state, as a query string — picking a model
+   * here changes the model and nothing else. See ModelBreakdown's note.
+   */
+  carryQuery?: string;
 }) {
   const router = useRouter();
 
@@ -30,8 +36,11 @@ export function ModelFilterSelect({
         className="rounded-inset border border-rule bg-white px-3 py-1.5 text-sm font-semibold text-ink outline-none focus:border-lead focus:ring-1 focus:ring-lead"
         onChange={(event) => {
           const value = event.target.value;
-          const params = new URLSearchParams();
-          if (value) params.set("model", value);
+          const params = new URLSearchParams(carryQuery);
+          params.delete("model");
+          // A different filter is a different list, so it starts at page one.
+          params.delete("page");
+          if (value) params.append("model", value);
           if (clientFilter) params.set("client", clientFilter);
           const qs = params.toString();
           router.push(qs ? `${basePath}?${qs}` : basePath);

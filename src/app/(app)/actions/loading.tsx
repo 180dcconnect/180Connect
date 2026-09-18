@@ -3,7 +3,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ActionsHeader } from "./actions-header";
 
 /**
- * Mirrors page.tsx: bone ground, the `max-w-3xl` column, the real Actions
+ * Mirrors page.tsx: bone ground, the standard app shell, the real Actions
  * header (title and tab row are static, so drawn once and never guessed at),
  * then the task list.
  *
@@ -13,8 +13,8 @@ import { ActionsHeader } from "./actions-header";
  */
 export default function Loading() {
   return (
-    <div className="min-h-screen bg-paper px-6 py-10 sm:px-10 sm:py-12">
-      <div className="mx-auto w-full max-w-3xl space-y-6">
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+      <div className="mx-auto w-full max-w-[1400px] space-y-6">
         <div>
           <ActionsHeader current="/actions">
             <p className="mt-3 font-body text-sm leading-[1.7] text-dim">
@@ -24,19 +24,24 @@ export default function Loading() {
           </ActionsHeader>
         </div>
 
-        <div aria-hidden="true" className="space-y-3">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <div
-              key={index}
-              className="flex items-center justify-between gap-4 rounded-2xl border border-black/[0.06] bg-white px-5 py-4 shadow-sm"
-            >
-              <div className="min-w-0 flex-1">
-                <Skeleton className="h-5 w-56 max-w-full" />
-                <Skeleton className="mt-1.5 h-4 w-40 max-w-full" />
-              </div>
-              <Skeleton className="h-9 w-28 shrink-0 rounded-full" />
+        <div aria-hidden="true" className="space-y-6">
+          <div>
+            <Skeleton className="h-6 w-28" />
+            <div className="mt-2 overflow-hidden rounded-panel border border-rule bg-white">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="flex items-center justify-between gap-4 border-b border-rule-soft px-5 py-4 last:border-b-0"
+                >
+                  <div className="min-w-0 flex-1">
+                    <Skeleton className="h-5 w-56 max-w-full" />
+                    <Skeleton className="mt-1.5 h-4 w-40 max-w-full" />
+                  </div>
+                  <Skeleton className="h-8.5 w-28 shrink-0 rounded-full" />
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
         </div>
       </div>
     </div>

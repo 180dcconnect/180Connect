@@ -3,7 +3,7 @@ import { ActionsHeader } from "../../actions/actions-header";
 
 export default function Loading() {
   return (
-    <div className="min-h-screen max-w-full overflow-x-hidden bg-paper px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
       <div className="mx-auto w-full max-w-[1400px] space-y-6">
         <ActionsHeader current="/admin/actions">
           <Skeleton className="mt-3 h-4 w-full max-w-3xl" />

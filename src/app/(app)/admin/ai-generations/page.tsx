@@ -11,18 +11,57 @@ import {
   type GenerationMetric,
   type GenerationRecord,
 } from "@/lib/outreach/generation-history";
-import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import {
+  DEFAULT_GENERATION_PAGE_SIZE,
+  GENERATION_CLIENT_MATCH_LIMIT,
+  GENERATION_MESSAGE_MATCH_LIMIT,
+  GENERATION_PAGE_SIZES,
+  cleanSearchTerm,
+  describeGenerationFilters,
+  generationSearchOrExpression,
+  generationSearchPattern,
+  parseEdited,
+  parseGenerationPage,
+  parseModels,
+} from "@/lib/outreach/generation-search";
+import { pagingIsUseful } from "@/lib/pagination";
+import { Group, Rise } from "@/components/dashboard-stage";
+import { SearchRail } from "@/components/search-rail";
+import { BrandSearchBar } from "@/components/brand/search-bar";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Key, Pill, SectionCard } from "@/app/(app)/clients/[id]/section-card";
 import { AiHeader } from "../ai-header";
 import { ModelBreakdown } from "./model-breakdown";
 import { ModelFilterSelect } from "./model-filter-select";
 import { SpendOverTime } from "./spend-over-time";
+import { HistoryPageSize, HistoryPagingSummary } from "./history-pager";
 
 // Next.js 16: searchParams is a Promise on App Router pages — same pattern as
 // src/app/(app)/clients/page.tsx.
-type SearchParams = Promise<{ model?: string; metric?: string; client?: string }>;
+type SearchParams = Promise<{
+  model?: string | string[];
+  metric?: string;
+  client?: string;
+  q?: string;
+  edited?: string;
+  sentBy?: string;
+  page?: string;
+  pageSize?: string;
+}>;
 
+/**
+ * The columns the charts read. Deliberately not the prompt/output text: the
+ * charts need every row in scope, and every row in scope used to mean every
+ * prompt ever written, downloaded on each visit.
+ */
+type ChartRow = {
+  model: string;
+  created_at: string;
+  total_tokens: number | null;
+  cost_usd: number | null;
+};
+
+/** One row of the visible page — the heavy text is fetched only for these. */
 type GenerationRow = {
   id: string;
   model: string;
@@ -40,6 +79,9 @@ type GenerationRow = {
     sent_by: { full_name: string | null } | null;
   } | null;
 };
+
+const GENERATION_ROW_COLUMNS =
+  "id, model, generated_subject, generated_body, prompt_system, prompt_user, cam_edited, created_at, total_tokens, cost_usd, outreach_message:outreach_messages(organisation_id, organisation:organisations(legal_name), sent_by:users(full_name))";
 
 const METRICS: readonly GenerationMetric[] = ["count", "tokens", "cost"];
 const METRIC_LABEL: Record<GenerationMetric, string> = {
@@ -81,22 +123,29 @@ function formatCostCell(costUsd: number | null): string {
  * behind a <details> disclosure in the history list — full text, not a preview,
  * since AC1 is specifically about the *exact* prompt and output.
  *
+ * TWO READS, ON PURPOSE. The charts need every generation in scope and the
+ * history list needs one page of them; those are different shapes of the same
+ * data, so they are two queries. The chart read takes the light columns only
+ * (model, day, tokens, cost) so it stays cheap however long the table gets; the
+ * history read takes the prompt and output text, and only for the rows on the
+ * page being looked at. A search reaches the database — the filters below are
+ * query parameters, not a filter over whatever happened to be loaded.
+ *
  * The two charts answer different questions on purpose. The model breakdown
  * always reflects every generation — it is "the whole picture" that shows what
  * each model accounts for, and clicking a bar is how you set the filter in the
  * first place, so pre-narrowing it would be circular. The spend-over-time chart
- * is the one the active `?model=` filter reshapes: once you have picked a model,
- * its trend line shows that model's day-by-day history (clearing the filter via
- * the dropdown's "all models" option returns it to everything). `?metric=`
+ * is the one an active model filter reshapes: once you have picked a model, its
+ * trend line shows that model's day-by-day history (clearing the filter via the
+ * dropdown's "all models" option returns it to everything). `?metric=`
  * (count/tokens/cost) governs both charts at once, from one control, so they
  * can't show two different metrics at the same time.
  *
- * `?client=<organisation id>` is different from `?model=`: it's a hard scope, not
- * a lens, so it's applied before the charts/breakdown are computed rather than
- * only narrowing the history table — arriving here from a specific client (via
- * the shortcut on that client's page) means "show me this client's generations",
- * not "explore everything, narrowed by client". `?model=` still applies on top
- * of it as a further lens within that scope.
+ * `?client=<organisation id>` is different from the search and the model filter:
+ * it's a hard scope, not a lens, so it's applied before the charts/breakdown are
+ * computed rather than only narrowing the history table — arriving here from a
+ * specific client (via the shortcut on that client's page) means "show me this
+ * client's generations", not "explore everything, narrowed by client".
  *
  * The root element is a `div`, not a `main`: the admin layout's AppShell already
  * renders the `main` this is slotted into.
@@ -111,24 +160,89 @@ export default async function AiGenerationsPage({
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
 
-  const { model: modelFilter, metric: metricParam, client: clientParam } = await searchParams;
-  const metric: GenerationMetric = isMetric(metricParam) ? metricParam : "count";
-  const clientFilter = clientParam && z.uuid().safeParse(clientParam).success ? clientParam : undefined;
+  const params = await searchParams;
+  const metric: GenerationMetric = isMetric(params.metric) ? params.metric : "count";
+  const clientFilter =
+    params.client && z.uuid().safeParse(params.client).success ? params.client : undefined;
+  const models = parseModels(params.model);
+  const search = cleanSearchTerm(params.q);
+  const edited = parseEdited(params.edited);
+  const sentBy = params.sentBy && z.uuid().safeParse(params.sentBy).success ? params.sentBy : undefined;
+  const { page, pageSize } = parseGenerationPage(params.page, params.pageSize);
 
   const supabase = await createClient();
-  let query = supabase.from("ai_generations").select(
-    "id, model, generated_subject, generated_body, prompt_system, prompt_user, cam_edited, created_at, total_tokens, cost_usd, outreach_message:outreach_messages(organisation_id, organisation:organisations(legal_name), sent_by:users(full_name))",
-  );
-  // The client scope is a PostgREST filter on the embedded outreach message, not
-  // an in-JS pass over everything: rows carry full prompt/output text, so
-  // filtering after fetch would pull every other client's prompts only to throw
-  // them away. Same semantics as a JS filter — rows with no outreach message
-  // never match an organisation id either way.
-  if (clientFilter) {
-    query = query.eq("outreach_messages.organisation_id", clientFilter);
+
+  // ---------------------------------------------------------------------------
+  // The charts: every row in the client's scope, light columns only.
+  // ---------------------------------------------------------------------------
+  // The embedded message rides along even though nothing reads it here: an
+  // embedded filter (the client scope) needs its resource in the select, and
+  // `organisation_id` is one uuid per row.
+  let chartQuery = supabase
+    .from("ai_generations")
+    .select("model, created_at, total_tokens, cost_usd, outreach_message:outreach_messages(organisation_id)");
+  if (clientFilter) chartQuery = chartQuery.eq("outreach_messages.organisation_id", clientFilter);
+  const chartRead = await chartQuery.overrideTypes<ChartRow[], { merge: false }>();
+
+  // ---------------------------------------------------------------------------
+  // The search term, as ids the generations table can be asked about.
+  // ---------------------------------------------------------------------------
+  // The free text matches a client name *or* what the model was asked to write.
+  // Both halves have to be columns of `ai_generations` for one `or` expression to
+  // carry them, so the client half is resolved to the clients' message ids here
+  // rather than filtered through the embedded table.
+  let clientMessageIds: string[] = [];
+  let clientMatchesTruncated = false;
+  if (search) {
+    const { data: clientMatches, error: clientMatchError } = await supabase
+      .from("organisations")
+      .select("id")
+      .ilike("legal_name", generationSearchPattern(search))
+      .order("legal_name", { ascending: true })
+      .limit(GENERATION_CLIENT_MATCH_LIMIT + 1);
+    if (clientMatchError) {
+      await reportError(clientMatchError, { operation: "admin.ai_generations.search_clients" });
+    }
+
+    const matchedOrgs = (clientMatches ?? []).map((row) => row.id);
+    clientMatchesTruncated = matchedOrgs.length > GENERATION_CLIENT_MATCH_LIMIT;
+    const orgIds = matchedOrgs.slice(0, GENERATION_CLIENT_MATCH_LIMIT);
+
+    if (orgIds.length > 0) {
+      const { data: messages, error: messageError } = await supabase
+        .from("outreach_messages")
+        .select("id")
+        .in("organisation_id", orgIds)
+        .limit(GENERATION_MESSAGE_MATCH_LIMIT);
+      if (messageError) {
+        await reportError(messageError, { operation: "admin.ai_generations.search_messages" });
+      }
+      clientMessageIds = (messages ?? []).map((row) => row.id);
+    }
   }
-  const { data, error } = await query
+
+  // ---------------------------------------------------------------------------
+  // The history: one page, with everything the reader asked to see.
+  // ---------------------------------------------------------------------------
+  let historyQuery = supabase
+    .from("ai_generations")
+    .select(GENERATION_ROW_COLUMNS, { count: "exact" });
+  if (clientFilter) historyQuery = historyQuery.eq("outreach_messages.organisation_id", clientFilter);
+  if (models.length > 0) historyQuery = historyQuery.in("model", models);
+  if (edited === "yes") historyQuery = historyQuery.eq("cam_edited", true);
+  if (edited === "no") historyQuery = historyQuery.eq("cam_edited", false);
+  if (sentBy) historyQuery = historyQuery.eq("outreach_messages.sent_by_user_id", sentBy);
+  if (search) {
+    const expression = generationSearchOrExpression(search, clientMessageIds);
+    historyQuery = expression
+      ? historyQuery.or(expression)
+      : historyQuery.ilike("generated_subject", generationSearchPattern(search));
+  }
+
+  const from = (page - 1) * pageSize;
+  const { data, count, error } = await historyQuery
     .order("created_at", { ascending: false })
+    .range(from, from + pageSize - 1)
     .overrideTypes<GenerationRow[], { merge: false }>();
 
   if (error) {
@@ -148,9 +262,26 @@ export default async function AiGenerationsPage({
     clientName = clientOrg?.legal_name ?? null;
   }
 
+  // The team, for the "generated by" filter and for naming whoever a row
+  // attributes. Bounded by headcount, so it is read whole — the same list the
+  // analytics page filters by.
+  const { data: teamRows } = await supabase
+    .from("users")
+    .select("id, full_name, role")
+    .in("role", ["cam", "admin"])
+    .eq("is_active", true)
+    .order("full_name", { ascending: true })
+    .overrideTypes<{ id: string; full_name: string | null; role: string }[], { merge: false }>();
+
+  const team = teamRows ?? [];
+  const teamName = new Map(team.map((member) => [member.id, member.full_name?.trim() || null]));
+  const sentByName = sentBy ? (teamName.get(sentBy) ?? null) : null;
+
   // Already scoped in the query above when `?client=` is set.
-  const generations = data ?? [];
-  const records: GenerationRecord[] = generations.map((row) => ({
+  const chartRows = chartRead.data ?? [];
+  const rows = data ?? [];
+  const total = count ?? rows.length;
+  const records: GenerationRecord[] = chartRows.map((row) => ({
     model: row.model,
     createdAt: row.created_at,
     totalTokens: row.total_tokens,
@@ -158,32 +289,145 @@ export default async function AiGenerationsPage({
   }));
   const breakdown = groupByModel(records, metric);
   const dayPoints = groupByDay(
-    modelFilter ? records.filter((row) => row.model === modelFilter) : records,
+    models.length > 0 ? records.filter((row) => models.includes(row.model)) : records,
     metric,
   );
-  const rows = modelFilter ? generations.filter((row) => row.model === modelFilter) : generations;
-  const models = breakdown.map((entry) => entry.model);
+  const modelOptions = breakdown.map((entry) => ({ label: entry.model, value: entry.model }));
+  const modelLabel = models.length > 0 ? models.join(", ") : null;
+  // One picked model is "the active bar"; several are a narrowed list, which no
+  // single bar can be shown as.
+  const activeModel = models.length === 1 ? models[0] : null;
+
+  const filtersInWords = describeGenerationFilters(
+    { search, models, edited, sentBy: sentBy ?? null },
+    sentByName,
+  );
+  const chartError = chartRead.error;
+  const pageError = error;
 
   const basePath = "/admin/ai-generations";
+
+  /**
+   * Whether the pager is worth drawing. A handful of generations is one page at
+   * every size on offer, so the card gets its count line and nothing to adjust.
+   */
+  const paged = pagingIsUseful(total, GENERATION_PAGE_SIZES);
+  /**
+   * Everything the reader has narrowed by, as a query string. One source for
+   * both this page's own links and the two model controls inside the breakdown
+   * card — without it, clicking a model bar would quietly drop the search, the
+   * edit filter, the chosen page size and even the chart metric.
+   *
+   * Repeated, not joined: a multi-select writes one parameter per value, and a
+   * model name is a string a comma could appear in.
+   */
+  const currentQuery = (() => {
+    const query = new URLSearchParams();
+    for (const model of models) query.append("model", model);
+    if (metric !== "count") query.set("metric", metric);
+    if (clientFilter) query.set("client", clientFilter);
+    if (search) query.set("q", search);
+    if (edited) query.set("edited", edited);
+    if (sentBy) query.set("sentBy", sentBy);
+    if (pageSize !== DEFAULT_GENERATION_PAGE_SIZE) query.set("pageSize", String(pageSize));
+    return query.toString();
+  })();
+
+  /**
+   * A page number past the end of the list lands on the last real page instead of
+   * on an empty window. The count above the rows is read from the page number, so
+   * letting a stale one through would print "Showing 61 to 63 of 63" over nothing —
+   * the page and its own count disagreeing in front of the reader. Only reachable
+   * by hand-editing the URL, since every link on this page drops `page`.
+   */
+  const lastPage = Math.max(1, Math.ceil(total / pageSize));
+  if (page > lastPage) {
+    const query = new URLSearchParams(currentQuery);
+    if (lastPage > 1) query.set("page", String(lastPage));
+    const target = query.toString();
+    redirect(target ? `${basePath}?${target}` : basePath);
+  }
+
   // `"key" in changes` (not `!== undefined`) so that passing `{ model: undefined }`
   // explicitly clears a filter — a plain `!== undefined` check can't tell that
   // apart from the key being absent, and silently keeps the old value instead.
+  // Every link drops `page`: a different filter is a different list, and page 4
+  // of the last one is not a page of this one.
   const hrefWith = (changes: { model?: string; metric?: string; client?: string }) => {
-    const params = new URLSearchParams();
-    const nextModel = "model" in changes ? changes.model : modelFilter;
-    const nextMetric = "metric" in changes ? changes.metric : metric;
-    const nextClient = "client" in changes ? changes.client : clientFilter;
-    if (nextModel) params.set("model", nextModel);
-    if (nextMetric && nextMetric !== "count") params.set("metric", nextMetric);
-    if (nextClient) params.set("client", nextClient);
-    const qs = params.toString();
+    const query = new URLSearchParams(currentQuery);
+    if ("model" in changes) {
+      query.delete("model");
+      if (changes.model) query.append("model", changes.model);
+    }
+    if ("metric" in changes) {
+      query.delete("metric");
+      if (changes.metric && changes.metric !== "count") query.set("metric", changes.metric);
+    }
+    if ("client" in changes) {
+      query.delete("client");
+      if (changes.client) query.set("client", changes.client);
+    }
+    query.delete("page");
+    const qs = query.toString();
     return qs ? `${basePath}?${qs}` : basePath;
   };
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <Stage className="mx-auto max-w-6xl space-y-8">
-        <Rise>
+      <SearchRail
+        className="max-w-6xl"
+        stageClassName="space-y-8"
+        bar={
+          <BrandSearchBar
+            tone="light"
+            placeholder="Search"
+            subjects={["generations", "clients", "subjects", "models"]}
+            recentKey="ai-generation-search"
+            defaultQuery={search ?? ""}
+            defaultFilters={[
+              ...models.map((model) => ({
+                category: "Filter by model",
+                label: model,
+                value: model,
+              })),
+              ...(sentBy
+                ? [
+                    {
+                      category: "Filter by team member",
+                      label: sentByName ?? "One team member",
+                      value: sentBy,
+                    },
+                  ]
+                : []),
+              ...(edited
+                ? [
+                    {
+                      category: "Filter by editing",
+                      label: edited === "yes" ? "Edited before sending" : "Sent as generated",
+                      value: edited,
+                    },
+                  ]
+                : []),
+            ]}
+            categories={{
+              "Filter by model": modelOptions,
+              "Filter by team member": team.map((member) => ({
+                label: member.full_name?.trim() || "Unnamed team member",
+                value: member.id,
+              })),
+              "Filter by editing": [
+                { label: "Edited before sending", value: "yes" },
+                { label: "Sent as generated", value: "no" },
+              ],
+            }}
+            params={{
+              "Filter by model": "model",
+              "Filter by team member": "sentBy",
+              "Filter by editing": "edited",
+            }}
+          />
+        }
+        heading={
           <AiHeader current="/admin/ai-generations">
             <p className="mt-3 text-sm leading-[1.7] text-dim">
               Every AI-generated email draft, which model produced it, and its token
@@ -204,7 +448,7 @@ export default async function AiGenerationsPage({
                 </Link>
               </div>
             )}
-            {error && (
+            {(chartError || pageError) && (
               <div className="mt-4">
                 <InlineAlert
                   variant="page"
@@ -213,8 +457,8 @@ export default async function AiGenerationsPage({
               </div>
             )}
           </AiHeader>
-        </Rise>
-
+        }
+      >
         <Group className="space-y-6">
           {/* One control governs both charts below it, so "tokens" or "cost" is
               never shown on one and "generations" on the other at the same time. */}
@@ -251,7 +495,7 @@ export default async function AiGenerationsPage({
               hint="Click a model to filter the history below it. The chart itself always shows every model."
               action={
                 <div className="flex items-center gap-3">
-                  {modelFilter && (
+                  {models.length > 0 && (
                     <Link
                       className="text-sm font-semibold text-lead underline underline-offset-2 hover:text-lead-mid"
                       href={hrefWith({ model: undefined })}
@@ -260,19 +504,21 @@ export default async function AiGenerationsPage({
                     </Link>
                   )}
                   <ModelFilterSelect
-                    activeModel={modelFilter ?? null}
+                    activeModel={activeModel}
                     basePath={basePath}
+                    carryQuery={currentQuery}
                     clientFilter={clientFilter}
-                    models={models}
+                    models={modelOptions.map((option) => option.value)}
                   />
                 </div>
               }
             >
               <div className="mt-4">
                 <ModelBreakdown
-                  activeModel={modelFilter ?? null}
+                  activeModel={activeModel}
                   basePath={basePath}
                   breakdown={breakdown}
+                  carryQuery={currentQuery}
                   clientFilter={clientFilter}
                   metric={metric}
                 />
@@ -283,21 +529,44 @@ export default async function AiGenerationsPage({
           <Rise>
             <SectionCard
               headingId="generation-history"
-              title={modelFilter ? `History — ${modelFilter}` : "History"}
-              hint={`${rows.length.toLocaleString()} generation${rows.length === 1 ? "" : "s"}`}
+              title={modelLabel ? `History — ${modelLabel}` : "History"}
+              hint={
+                <>
+                  {total.toLocaleString()} generation{total === 1 ? "" : "s"}
+                  {filtersInWords ? ` · ${filtersInWords}` : ""}
+                </>
+              }
+              action={paged ? <HistoryPageSize pageSize={pageSize} /> : undefined}
             >
+              {/* One page of history at a time: every row below carries a full
+                  prompt and output, so the database — not the browser — is asked
+                  for a window, and the window is chosen from here. The count sits
+                  above the rows rather than in a footer: this list only grows, and
+                  the reader has to see how much of it they are looking at. */}
+              {paged && (
+                <div className="mt-4">
+                  <HistoryPagingSummary totalItems={total} page={page} pageSize={pageSize} />
+                </div>
+              )}
+
               {rows.length === 0 ? (
                 <p className="px-1 py-10 text-center text-sm text-dim">
-                  {modelFilter && clientFilter
-                    ? `No generations recorded for ${modelFilter} on this client yet.`
-                    : modelFilter
-                      ? `No generations recorded for ${modelFilter} yet.`
-                      : clientFilter
-                        ? "No generations recorded for this client yet."
-                        : "No generations recorded yet."}
+                  {filtersInWords
+                    ? "No generations match these filters yet."
+                    : modelLabel && clientFilter
+                      ? `No generations recorded for ${modelLabel} on this client yet.`
+                      : modelLabel
+                        ? `No generations recorded for ${modelLabel} yet.`
+                        : clientFilter
+                          ? "No generations recorded for this client yet."
+                          : "No generations recorded yet."}
                 </p>
               ) : (
-                <ul className="mt-4 divide-y divide-rule-soft border-t border-rule-soft">
+                <ul
+                  className={`divide-y divide-rule-soft border-t border-rule-soft ${
+                    paged ? "mt-3" : "mt-4"
+                  }`}
+                >
                   {rows.map((row) => (
                     <li className="py-4 first:pt-4" key={row.id}>
                       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-1.5">
@@ -365,10 +634,17 @@ export default async function AiGenerationsPage({
                   ))}
                 </ul>
               )}
+
+              {clientMatchesTruncated && (
+                <p className="mt-3 text-[12px] leading-[1.5] text-dim">
+                  More than {GENERATION_CLIENT_MATCH_LIMIT} clients match this search, so it covers the
+                  first {GENERATION_CLIENT_MATCH_LIMIT} of them. Add a word to narrow it.
+                </p>
+              )}
             </SectionCard>
           </Rise>
         </Group>
-      </Stage>
+      </SearchRail>
     </div>
   );
 }

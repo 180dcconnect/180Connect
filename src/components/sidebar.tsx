@@ -12,6 +12,7 @@ import {
   SquareKanban,
   UserPlus,
 } from "lucide-react";
+import { BookmarkPlusIcon, type BookmarkPlusIconHandle } from "@/components/ui/bookmark-plus";
 import { InboxIcon, type InboxIconHandle } from "@animateicons/react/lucide/inbox-icon";
 import { ListChecksIcon, type ListChecksIconHandle } from "@animateicons/react/lucide/list-checks-icon";
 import { Cctv } from "@/components/animate-ui/icons/cctv";
@@ -57,7 +58,8 @@ export type SidebarIconName =
   | "settings"
   | "actions"
   | "analytics"
-  | "ai";
+  | "ai"
+  | "bookmark";
 
 export type SidebarNavItem = {
   href: string;
@@ -191,6 +193,7 @@ const ICONS: Record<SidebarIconName, RailIcon> = {
   // glyph animates its own interior, so a wrapper transform on top would read
   // as two gestures.
   ai: LoaderPinwheel,
+  bookmark: BookmarkPlusIcon,
 };
 
 const MotionLink = motion.create(Link);
@@ -210,9 +213,9 @@ const ICON_SPRING = { type: "spring", stiffness: 420, damping: 17, mass: 0.6 } a
 const ICON_MOTION: Partial<Record<SidebarIconName, Variants>> = {
   admin: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: -6 } },
   feedback: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: 6 } },
-  // `dashboard`, `clients`, `users`, `audit`, `import`, `database`, and `ai`
-  // are deliberately absent: those glyphs animate their own interiors, so a
-  // wrapper transform on top would read as two gestures.
+  // `dashboard`, `clients`, `users`, `audit`, `import`, `database`, `ai`,
+  // and `bookmark` are deliberately absent: those glyphs animate their own
+  // interiors, so a wrapper transform on top would read as two gestures.
 };
 
 /**
@@ -268,14 +271,21 @@ export function Sidebar({
   const iconVariants = (variants: Variants | undefined) =>
     reduceMotion ? undefined : variants;
 
-  // Row-hover drivers for the two @animateicons/react glyphs (inbox,
-  // actions): unlike every local icon they cannot read the AnimateIcon hover
-  // context, so the row starts/stops them imperatively through the refs the
-  // adapter forwards. Gated on the same reduceMotion flag as animateOnHover.
+  // Row-hover drivers for the @animateicons/react glyphs (inbox, actions) and
+  // the bookmark icon: unlike every local icon they cannot read the AnimateIcon
+  // hover context, so the row starts/stops them imperatively through the refs
+  // the adapter forwards. Gated on the same reduceMotion flag as animateOnHover.
   const inboxIconRef = useRef<InboxIconHandle>(null);
   const actionsIconRef = useRef<ListChecksIconHandle>(null);
+  const bookmarkIconRef = useRef<BookmarkPlusIconHandle>(null);
   const rowIconRef = (icon: SidebarIconName) =>
-    icon === "inbox" ? inboxIconRef : icon === "actions" ? actionsIconRef : null;
+    icon === "inbox"
+      ? inboxIconRef
+      : icon === "actions"
+        ? actionsIconRef
+        : icon === "bookmark"
+          ? bookmarkIconRef
+          : null;
   const startRowIcon = (icon: SidebarIconName) => {
     if (reduceMotion) return;
     rowIconRef(icon)?.current?.startAnimation();
@@ -397,6 +407,8 @@ export function Sidebar({
                             aria-hidden={true}
                             animationRef={actionsIconRef}
                           />
+                        ) : item.icon === "bookmark" ? (
+                          <BookmarkPlusIcon className="h-5 w-5" aria-hidden={true} animationRef={bookmarkIconRef} />
                         ) : Icon ? (
                           <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden={true} />
                         ) : null}

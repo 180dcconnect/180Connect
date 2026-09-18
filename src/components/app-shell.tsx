@@ -103,7 +103,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   if (canView(actor.role, "tags:manage")) {
-    sections[0].items.push({ href: "/admin/tags", label: "Tags", icon: "users" });
+    sections[0].items.push({ href: "/admin/tags", label: "Tags", icon: "bookmark" });
   }
 
   // Second group: oversight and admin tools, separated from the daily rail by

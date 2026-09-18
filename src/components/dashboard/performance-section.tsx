@@ -21,8 +21,6 @@ import {
 import SeriesLineChartCard from "@/components/ui/series-line-chart-card";
 import { StackedStickColumns, type StackedStickBucket } from "@/components/ui/stacked-stick-columns";
 import { PeriodSelect, type PeriodOption } from "@/components/ui/metric-controls";
-import { camLeaderboard } from "@/lib/dashboard/cam-leaderboard";
-import { CamLeaderboardTable } from "@/components/dashboard/cam-leaderboard-table";
 
 /**
  * The Performance section (F-added): the whole team's week, filterable down to
@@ -62,7 +60,6 @@ export interface PerformanceSectionProps {
   raw?: PerformanceInput;
   sectorByOrg?: Map<string, string | null>;
   className?: string;
-  showLeaderboard?: boolean;
 }
 
 /** A rate as a whole percentage. Null — nothing to divide by — reads as `—`,
@@ -351,7 +348,6 @@ export function PerformanceSection({
   raw,
   sectorByOrg,
   className = "",
-  showLeaderboard = true,
 }: PerformanceSectionProps) {
   const canPickCam = actorRole === "admin" || actorRole === "viewer";
   const canShowJustMe = actorRole !== "viewer";
@@ -443,14 +439,6 @@ export function PerformanceSection({
     if (scope.kind === "cam" && sectorsByUser) return sectorsByUser[scope.userId] ?? [];
     return sectors;
   }, [raw, sectorByOrg, selected, scope, actorId, canShowJustMe, sectors, sectorsByUser]);
-
-  // F212 — every team member side by side for the picked period, with anyone who
-  // may need support marked. Oversight roles only, and only on the whole-team
-  // view: comparing people is not what "Just me" or one picked person is for.
-  const leaderboard = useMemo(
-    () => (canPickCam && scope.kind === "team" ? camLeaderboard(effectiveSummary, cams) : null),
-    [canPickCam, scope.kind, effectiveSummary, cams],
-  );
 
   const visibleSectors = currentSectors.slice(0, 8);
   const hiddenSectors = currentSectors.length - visibleSectors.length;
@@ -635,8 +623,6 @@ export function PerformanceSection({
           )}
         </div>
       </div>
-
-      {showLeaderboard && leaderboard && <CamLeaderboardTable board={leaderboard} />}
     </div>
   );
 }

@@ -18,7 +18,7 @@
 | entry_method | enum |  | No | How the organisation record entered the system | System | Set when the record is created | api / manual |
 | is_verified | boolean |  | No | Whether all identifiers for this organisation have been verified | System | Set to true automatically when all related ORGANISATION_IDENTIFIERS records are verified | Default is false the is_verified boolean on ORGANISATIONS just reflects whether the identifiers underneath it have been confirmed. It never stores the actual numbers itself that's always in ORGANISATION_IDENTIFIERS. |
 | organisation_type | enum |  | No | Type of organisation | System | Derived from source and registration data | charity / cio / cic / social_enterprise / ngo / company / both / other |
-| website | text |  | Yes | Organisation website URL | API | Pulled from external sources |  |
+| website | text |  | Yes | Organisation website URL | API | Pulled from external sources | A client recorded as having no website is held in website_absent_at/website_absent_by below; writing a website here clears that mark. |
 | contact_email | text |  | Yes | Primary contact email address | API | Pulled from external sources or enrichment |  |
 | address_line_1 | text |  | Yes | First line of registered address | API | Pulled from Companies House or CharityBase |  |
 | city | text |  | Yes | City | API | Pulled from address data |  |
@@ -38,6 +38,8 @@
 | sic_codes | text[] |  | Yes | Companies House industry classifications | API | Companies House sic_codes; titles resolved from the SIC2007 table in the companies register file | Companies have no filed purpose statement — SIC is the only descriptive text either register publishes. Generic by design: 118 of 413 imported CICs share code 85590. |
 | cic_community_statement | text |  | Yes | The company's own filed description of the community it benefits and what it will do | API | Companies House CIC36 community interest statement, filed at incorporation; published only as a scanned page, so transcribed by OCR | Register-filed text, never generated. Sections A and B of the form, stored labelled and capped — the form's boxes clip mid-sentence and we capture what the box shows. Externally authored free text: treat as untrusted input anywhere it reaches a model. Only CICs file one; ordinary companies stay null. |
 | cic_statement_checked_at | timestamptz |  | Yes | When the company's filing history was last checked for a CIC36 | System | Set on every attempt by the CIC statement backfill, whether or not a statement was found | Cursor, not data. Same role grants_fetched_at plays for 360Giving: a company with no CIC36 is marked checked so it is never re-fetched. Null means never asked. |
+| website_absent_at | timestamptz |  | Yes | When someone confirmed this client has no website | Human | Set by an admin on the incomplete-records screen, or by an admin approving a CAM's "no website" proposal | Null = not confirmed, so an empty website column is still a gap. Cleared automatically the moment any website is written — adding one is the undo. Set and cleared together with website_absent_by (constraint organisations_website_absent_pair). |
+| website_absent_by | uuid | USERS | Yes | Who confirmed the client has no website | System | auth.uid() at the time the mark is recorded | Never set without website_absent_at, and never set by a client write: both columns sit outside the authenticated UPDATE grant, so only the set_website_absent RPC writes them. The readable history is the AUDIT_LOG rows (website_marked_absent / website_absent_cleared). |
 
 ## ORGANISATION_IDENTIFIERS
 
@@ -335,6 +337,7 @@
 | field_name | text |  | No | One of the six sensitive fields | System | Set when correction is proposed |  |
 | current_value | text |  | Yes | Value at proposal time, captured server-side | System | Captured server-side at proposal time |  |
 | proposed_value | text |  | No | The CAM's corrected value | Human | Proposed by CAM |  |
+| proposed_absent | boolean |  | No | Proposal that the field should hold nothing at all, rather than carry a replacement value | Human | Set when a CAM reports "this client has no website" from the client page | Default false; every existing row behaves as before. Website only (constraint edit_suggestions_absent_is_website), and proposed_value is empty on those rows by design (constraint edit_suggestions_proposed_not_blank). Approving one records the website_absent mark instead of writing a column. |
 | status | enum |  | No | pending, approved, rejected, superseded | System | pending at creation; updated by admin decision or superseded |  |
 | requested_by | uuid | USERS | No | CAM making the proposal | System | auth.uid() at request time |  |
 | superseded_by | uuid | EDIT_SUGGESTIONS | Yes | Newer suggestion that replaced this one | System | Set when a new suggestion for the same field is made |  |

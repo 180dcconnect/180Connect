@@ -31,7 +31,7 @@ Project Root/
 | Category | Examples | Sensitive? | Local | Preview | Production |
 |---|---|---|---|---|---|
 | **Supabase** | URL, anon key, service role key | Yes (service key) | Dev project | Dev project | Prod project |
-| **Gmail/Email** | OAuth client + one shared-mailbox refresh token | Yes | Dev Gmail account | The branch outreach mailbox, `clients.sheffield@180dc.org` | Not yet set — see [end-of-project/outreach-prod-env.md](end-of-project/outreach-prod-env.md) |
+| **Gmail/Email** | OAuth client + one shared-mailbox refresh token | Yes | Dev Gmail account | The branch outreach mailbox, `clients.sheffield@180dc.org` | Not yet set — see [prod-go-live-checklist.md](prod-go-live-checklist.md) §1, and [end-of-project/outreach-prod-env.md](end-of-project/outreach-prod-env.md) for why |
 | **LLM** | API key for VOICE or Claude | Yes | Test/dev key | Test/dev key | Production key |
 | **Third-party APIs** | CharityBase, Companies House, etc. | Yes | Test credentials | Test credentials | Production credentials |
 | **Feature flags** | `ENABLE_AI_BOOKLETS`, log levels | No | Feature flags | Feature flags | Feature flags |

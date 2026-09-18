@@ -10,6 +10,7 @@ import { getCurrentActor } from "@/lib/auth/actor";
 import { hasPermission, canView, seesAdminView } from "@/lib/auth/permissions";
 import { formatMyActions, type ActionRow } from "@/lib/actions";
 import { reportError } from "@/lib/error-logging";
+import { containsRedactionPlaceholder } from "@/lib/ingestion/personal-data";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import {
   computeDashboardMetrics,
@@ -56,7 +57,6 @@ import {
 import { myWorkSummary, type MyWorkSummary } from "@/lib/dashboard/my-work";
 import { summariseMyDesk, type DeskDraft, type MyDesk } from "@/lib/dashboard/my-desk";
 import { mergeDashboardFeed } from "@/lib/dashboard/recent-feed";
-import { camLeaderboard } from "@/lib/dashboard/cam-leaderboard";
 import {
   DEFAULT_OUTREACH_DAILY_SEND_LIMIT,
   dailySendWindowStart,
@@ -89,7 +89,6 @@ import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { AdminActionCenter, type AdminQueueCounts } from "@/components/dashboard/admin-action-center";
 import { QueueQualityCard } from "@/components/dashboard/queue-quality-card";
 import { PerformanceSection } from "@/components/dashboard/performance-section";
-import { CamLeaderboardTable } from "@/components/dashboard/cam-leaderboard-table";
 import { MyWorkStrip } from "@/components/dashboard/my-work-strip";
 import { PriorityOpportunitiesCard } from "@/components/dashboard/priority-opportunities-card";
 import { MyActionsCard } from "@/components/dashboard/my-actions-card";
@@ -97,6 +96,7 @@ import { SendingCapacityCard, type SendingCapacity } from "@/components/dashboar
 import { AiSpendOverviewPreview } from "@/components/dashboard/ai-spend-overview-preview";
 import { DataHealthCard } from "@/components/dashboard/data-health-card";
 import { SystemHealthCard } from "@/components/dashboard/system-health-card";
+import { DashboardInboxButton } from "@/components/dashboard/dashboard-inbox-button";
 import { readDataHealth, readSystemHealth, type DataHealthReads } from "@/lib/dashboard/health-reads";
 import { countCreatedSince, summariseDataHealth } from "@/lib/dashboard/data-health";
 import { summariseSystemHealth, type SystemHealthInput } from "@/lib/dashboard/system-health";
@@ -967,20 +967,50 @@ export default async function DashboardPage({
         ? newestMissionPerOrg(enrichmentMissionsRes.data)
         : new Map<string, string>();
       const incompleteRecordsCount = rows.filter((row) => {
+        const isRedactedEmail = containsRedactionPlaceholder(row.contact_email);
+        const isRedactedWebsite = containsRedactionPlaceholder(row.website);
+        const isRedactedSector = containsRedactionPlaceholder(row.sector);
+        const isRedactedCity = containsRedactionPlaceholder(row.city);
+        const storedMission =
+          row.charity_activities?.trim() ||
+          row.cic_community_statement?.trim() ||
+          incompleteEnrichmentMissions.get(row.id) ||
+          null;
+        const isRedactedMission = containsRedactionPlaceholder(storedMission);
+        const hasRedacted =
+          isRedactedEmail ||
+          isRedactedWebsite ||
+          isRedactedSector ||
+          isRedactedCity ||
+          isRedactedMission;
+
         const hasSector = Boolean(
           row.sector &&
           row.sector.trim().length > 0 &&
-          row.sector.toLowerCase() !== "unclassified",
+          row.sector.toLowerCase() !== "unclassified" &&
+          !isRedactedSector,
         );
         const hasMission = Boolean(
-          (row.charity_activities && row.charity_activities.trim().length > 0) ||
-          (row.cic_community_statement && row.cic_community_statement.trim().length > 0) ||
-          incompleteEnrichmentMissions.has(row.id),
+          storedMission &&
+          storedMission.length > 0 &&
+          !isRedactedMission,
         );
-        const hasWebsite = Boolean(row.website && row.website.trim().length > 0);
-        const hasEmail = Boolean(row.contact_email && row.contact_email.trim().length > 0);
-        const hasCity = Boolean(row.city && row.city.trim().length > 0);
-        return !hasSector || !hasMission || !hasWebsite || !hasEmail || !hasCity;
+        const hasWebsite = Boolean(
+          row.website &&
+          row.website.trim().length > 0 &&
+          !isRedactedWebsite,
+        );
+        const hasEmail = Boolean(
+          row.contact_email &&
+          row.contact_email.trim().length > 0 &&
+          !isRedactedEmail,
+        );
+        const hasCity = Boolean(
+          row.city &&
+          row.city.trim().length > 0 &&
+          !isRedactedCity,
+        );
+        return !hasSector || !hasMission || !hasWebsite || !hasEmail || !hasCity || hasRedacted;
       }).length;
 
       // "Your Priority Opportunities": this viewer's own book plus unclaimed
@@ -1212,6 +1242,7 @@ export default async function DashboardPage({
           suggestedEdits: queue.tally?.suggestedEdits ?? 0,
           discrepancies: queue.tally?.discrepancies ?? 0,
           statusChanges: queue.tally?.statusChanges ?? 0,
+          duplicates: queue.tally?.duplicates ?? 0,
           unassignedHighPriorityOrgs: unassignedHighPriorityCount,
         };
       }
@@ -1407,11 +1438,6 @@ export default async function DashboardPage({
     }
   }
 
-  const leaderboard =
-    performance && seesAdminView(actor.role)
-      ? camLeaderboard(performance.summary, performance.cams)
-      : null;
-
   return (
     <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
       <Stage className="mx-auto w-full max-w-[1400px] space-y-10">
@@ -1427,13 +1453,7 @@ export default async function DashboardPage({
             <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
               {/* The one accent on the screen: a single pill, glass backdrop + lime hover fill, pointing at
                   the screen where the work actually happens. */}
-              <OriginButton
-                href="/clients"
-                size="md"
-                className="shrink-0"
-              >
-                View all clients
-              </OriginButton>
+              <DashboardInboxButton />
             </div>
           )}
         </Rise>
@@ -1718,7 +1738,6 @@ export default async function DashboardPage({
                     sectors={performance.sectors}
                     raw={performance.raw}
                     sectorByOrg={performance.sectorByOrg}
-                    showLeaderboard={false}
                   />
                 </Rise>
               </Group>
@@ -1737,15 +1756,6 @@ export default async function DashboardPage({
                   </Rise>
                 </Group>
               )}
-
-            {/* F212 (#207) — Manager Analytics: CAM comparison table */}
-            {leaderboard && (
-              <Group className="space-y-4">
-                <Rise>
-                  <CamLeaderboardTable board={leaderboard} className="mt-0" />
-                </Rise>
-              </Group>
-            )}
 
             {/* Work with a date on it and drafts left unsent, beside AI spend summary for admins. */}
             {(myDesk || (seesAdminView(actor.role) && aiSpend)) && (

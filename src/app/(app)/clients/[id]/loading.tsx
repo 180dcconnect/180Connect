@@ -6,8 +6,8 @@ import { TabSkeleton, type TabSkeletonCard } from "./tab-skeleton";
  * right. Same order as `page.tsx` — the split is the midpoint of this list.
  *
  * Approximated because it is data: `SuggestEditSection` renders nothing when
- * there are no suggestions, and the similarity card only on a converted client.
- * Both are drawn here at one card, the most either adds.
+ * there are no suggestions. It is drawn here at one card, the most it adds —
+ * the similarity card renders on every client, so it is drawn as one too.
  */
 const CARDS: TabSkeletonCard[] = [
   { title: "w-44", hint: "w-72", action: true, kind: "facts", rows: 6 },

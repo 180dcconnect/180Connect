@@ -10,6 +10,7 @@ import { Blocks } from "@/components/animate-ui/icons/blocks";
 import { ChartColumnIncreasing } from "@/components/animate-ui/icons/chart-column-increasing";
 import { ClipboardList } from "@/components/animate-ui/icons/clipboard-list";
 import { RefreshCwOff } from "@/components/animate-ui/icons/refresh-cw-off";
+import { Clock4 } from "@/components/animate-ui/icons/clock-4";
 import { useRef } from "react";
 import { AnimateIcon } from "@/components/animate-ui/icons/icon";
 import { StampIcon, type StampIconHandle } from "@/components/ui/stamp-icon";
@@ -126,6 +127,7 @@ export function SettingsSidebar({
                   "/settings/score-settings": ChartColumnIncreasing,
                   "/settings/data-handling-rules": ClipboardList,
                   "/settings/restricted-fields": RefreshCwOff,
+                  "/settings/cycles": Clock4,
                 };
                 const Icon = iconByHref[item.href];
                 const linkClasses = `flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm transition-all hover:bg-black/10 ${

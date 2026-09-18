@@ -181,6 +181,19 @@ export const AUDIT_ACTIONS: Record<string, ActionSpec> = {
     icon: "quality",
   },
 
+  website_marked_absent: {
+    label: "No website recorded",
+    verb: "recorded that there is no website for",
+    tone: "neutral",
+    icon: "quality",
+  },
+  website_absent_cleared: {
+    label: "Website needed again",
+    verb: "put a website back on the list for",
+    tone: "neutral",
+    icon: "quality",
+  },
+
   duplicate_confirmed: { label: "Duplicate confirmed", verb: "confirmed a duplicate of", tone: "neutral", icon: "duplicate" },
   duplicate_dismissed: {
     label: "Duplicate dismissed",

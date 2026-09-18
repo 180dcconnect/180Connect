@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { OriginButton } from "@/components/ui/origin-button";
 import { completeActionAction } from "./actions";
 
 /**
@@ -24,16 +25,19 @@ export function CompleteActionButton({ actionId }: { actionId: string }) {
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <button
+      <OriginButton
         type="button"
         onClick={handleClick}
         disabled={isPending}
-        className="shrink-0 rounded-full border border-brand/30 px-3 py-1.5 text-xs font-bold text-brand transition-colors hover:bg-brand/5 disabled:opacity-50"
+        loading={isPending}
+        size="sm"
+        variant="outline"
+        className="shrink-0"
       >
         {isPending ? "Completing…" : "Mark complete"}
-      </button>
+      </OriginButton>
       {error && (
-        <p role="alert" className="max-w-[14rem] text-right text-[11px] font-bold text-destructive">
+        <p role="alert" className="text-right font-body text-[12px] font-semibold text-stop">
           {error}
         </p>
       )}

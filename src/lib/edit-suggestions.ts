@@ -589,6 +589,13 @@ export type EditSuggestionRow = {
   field_name: string;
   current_value: string | null;
   proposed_value: string;
+  /**
+   * True when the proposal is that the field should hold nothing at all rather
+   * than carry a replacement value (website only, `proposed_absent` in the
+   * table). `proposed_value` is empty on those rows by design: approving one
+   * records the "no website" mark instead of writing a column.
+   */
+  proposed_absent: boolean;
   status: EditSuggestionStatus;
   requested_by: string;
   decided_by: string | null;
@@ -597,16 +604,32 @@ export type EditSuggestionRow = {
   /** The requester's own note, added 20260923100000. Null on older rows. */
   reason: string | null;
   created_at: string;
-  organisations: { legal_name: string } | null;
+  /**
+   * The client the change is about. `website` and the register numbers ride
+   * along for the approvals queue's "Check the source" row — the admin deciding
+   * a proposal reads the same origins the incomplete-records queue offers.
+   */
+  organisations: {
+    legal_name: string;
+    website: string | null;
+    organisation_identifiers: {
+      identifier_type: string;
+      identifier_value: string | null;
+    }[] | null;
+  } | null;
   requested_by_user: { full_name: string | null; email: string } | null;
   decided_by_user: { full_name: string | null; email: string } | null;
 };
 
 /** Shared PostgREST select for the admin page's initial load and the GET route. */
 export const EDIT_SUGGESTION_SELECT = `
-  id, organisation_id, field_name, current_value, proposed_value, status,
+  id, organisation_id, field_name, current_value, proposed_value, proposed_absent, status,
   requested_by, decided_by, decided_at, rejection_reason, reason, created_at,
-  organisations ( legal_name ),
+  organisations (
+    legal_name,
+    website,
+    organisation_identifiers ( identifier_type, identifier_value )
+  ),
   requested_by_user:users!edit_suggestions_requested_by_fkey ( full_name, email ),
   decided_by_user:users!edit_suggestions_decided_by_fkey ( full_name, email )
 `;
@@ -642,12 +665,14 @@ const decideEditSchema = z.object({
   suggestionId: z.string().trim().uuid("Select a valid suggestion."),
   approve: z.boolean(),
   reason: z.string().trim().max(500, "Reason must be 500 characters or fewer.").optional(),
+  proposedValue: z.string().trim().min(1, "Proposed value cannot be blank.").optional(),
 });
 
 export type DecideEditInput = {
   suggestionId: string;
   approve: boolean;
   reason?: string;
+  proposedValue?: string;
 };
 
 /** Validates decision payload for approve/reject on suggested client edits. */
@@ -673,6 +698,23 @@ export function suggestionDecisionNotice(
       : `An admin declined your correction to ${fieldNameLabel}. The live record is unchanged.`;
   const reason = rejectionReason?.trim();
   return reason ? `${head} Reason: ${reason}` : head;
+}
+
+/**
+ * What a proposal claims, in the words of the record it is about.
+ *
+ * An absence proposal has no value to quote, so a screen that only knows how to
+ * print `current → proposed` would render it as a blank arrow. Both admin
+ * surfaces ask this first.
+ */
+export function proposedChangeLabel(row: {
+  field_name: string;
+  proposed_value: string;
+  proposed_absent?: boolean;
+}): string {
+  return row.proposed_absent
+    ? `No ${restrictedFieldLabel(row.field_name).toLowerCase()} on record`
+    : row.proposed_value;
 }
 
 /** One line summarising a pending proposal, reused by both admin surfaces. */

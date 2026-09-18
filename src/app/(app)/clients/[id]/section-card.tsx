@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
 
 /**
  * The client record's two repeated shapes, in one place so the tabs and the
@@ -42,10 +43,17 @@ export function SectionCard({
   children,
   className = "",
   tone = "default",
+  fold,
 }: {
   /** Target for the section's `aria-labelledby`. */
   headingId: string;
-  title: string;
+  /**
+   * The heading. Usually a string; a node where the heading *is* the control —
+   * the Machine Learning breakdown reads "Outcomes by <dimension>", and the
+   * dimension is the dropdown, so the word has to live inside the `h2` to sit on
+   * its baseline. Phrasing content only: a heading may hold a button, not a block.
+   */
+  title: ReactNode;
   /** Optional one-line explanation under the title. */
   hint?: ReactNode;
   /** Optional control pinned to the heading row's right edge. */
@@ -72,6 +80,22 @@ export function SectionCard({
   className?: string;
   /** `danger` tints the card where outreach is blocked. */
   tone?: "default" | "danger";
+  /**
+   * Turns the heading row into a fold toggle: tapping anywhere on it unfolds
+   * or folds the card, and a chevron beside `action` does the same for
+   * keyboard and screen-reader users. Taps that belong to a link, a control
+   * or a text selection are left alone, so nothing is swallowed by the fold —
+   * the suppressions queue's handle, shared rather than reinvented.
+   */
+  fold?: {
+    /** Whether the card body is currently unfolded. */
+    expanded: boolean;
+    onToggle: () => void;
+    /** Id of the region the toggle controls. */
+    controlsId: string;
+    /** Accessible label for the chevron, e.g. "Show details for X". */
+    label: string;
+  };
 }) {
   const toneClasses =
     tone === "danger"
@@ -102,7 +126,25 @@ export function SectionCard({
       aria-labelledby={headingId}
       className={`scroll-mt-6 rounded-panel px-5 py-4.5 ${toneClasses} ${className}`}
     >
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <div
+        className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-2 ${fold ? "cursor-pointer" : ""}`}
+        onClick={
+          fold
+            ? (event) => {
+                if (
+                  (event.target as HTMLElement).closest(
+                    "a, button, input, textarea, select, label",
+                  )
+                ) {
+                  return;
+                }
+                const selection = window.getSelection();
+                if (selection && selection.toString().trim().length > 0) return;
+                fold.onToggle();
+              }
+            : undefined
+        }
+      >
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2.5">
             {numbered && (
@@ -145,7 +187,28 @@ export function SectionCard({
             </p>
           )}
         </div>
-        {action && <div className="shrink-0">{action}</div>}
+        {(action || fold) && (
+          <div className="shrink-0">
+            <div className="flex items-center gap-2">
+              {action}
+              {fold && (
+                <button
+                  type="button"
+                  aria-expanded={fold.expanded}
+                  aria-controls={fold.controlsId}
+                  aria-label={fold.label}
+                  onClick={fold.onToggle}
+                  className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-inset text-dim transition-colors hover:bg-paper hover:text-ink focus-visible:ring-2 focus-visible:ring-lead/30 focus-visible:outline-none"
+                >
+                  <ChevronDown
+                    aria-hidden="true"
+                    className={`size-4 transition-transform duration-200 ${fold.expanded ? "rotate-180" : ""}`}
+                  />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
       {children}
     </section>

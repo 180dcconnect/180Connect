@@ -29,8 +29,7 @@ import {
  *
  * Approximated because it is data: how many rows a list or table ends up with
  * (each is drawn at its usual count), and whether a conditional card renders at
- * all — the pending-suggestions section, the converted-only similarity card, the
- * danger-tone card on Outreach.
+ * all — the pending-suggestions section, the danger-tone card on Outreach.
  */
 
 /** What a card's body holds. `title`/`hint` are widths; `undefined` draws none. */

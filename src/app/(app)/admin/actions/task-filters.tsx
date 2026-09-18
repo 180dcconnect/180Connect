@@ -5,6 +5,13 @@ import { Search, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type FilterOption = { value: string; label: string };
 
@@ -18,8 +25,44 @@ export type TeamTaskFilterValues = {
   sort: "due" | "priority" | "updated";
 };
 
-const selectClass =
-  "h-10 rounded-inset border border-rule bg-white px-3 font-body text-[13px] font-semibold text-ink outline-none focus:border-lead focus:ring-1 focus:ring-lead";
+const selectTriggerClass =
+  "h-10 rounded-inset border-rule bg-white font-body text-[13px] font-semibold text-ink shadow-none focus-visible:border-lead focus-visible:ring-2 focus-visible:ring-lead/20";
+
+const selectContentClass =
+  "rounded-inset border-rule bg-white font-body text-[13px] text-ink shadow-lg";
+
+function FilterSelect({
+  value,
+  onValueChange,
+  ariaLabel,
+  className,
+  options,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  ariaLabel: string;
+  className?: string;
+  options: readonly { value: string; label: string }[];
+}) {
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger aria-label={ariaLabel} className={`${selectTriggerClass} ${className ?? ""}`}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent className={selectContentClass}>
+        {options.map((option) => (
+          <SelectItem
+            key={option.value}
+            value={option.value}
+            className="rounded-inset focus:bg-paper focus:text-ink"
+          >
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
 
 export function TaskFilters({
   values,
@@ -82,24 +125,23 @@ export function TaskFilters({
           />
         </form>
 
-        <select
-          aria-label="Filter by status"
+        <FilterSelect
+          ariaLabel="Filter by status"
           value={values.status}
-          onChange={(event) => {
-            const status = event.target.value;
+          onValueChange={(status) => {
             navigate(
               status !== "open" && values.due === "overdue"
                 ? { status, due: "all" }
                 : { status },
             );
           }}
-          className={selectClass}
-        >
-          <option value="open">Open</option>
-          <option value="completed">Completed</option>
-          <option value="cancelled">Cancelled</option>
-          <option value="all">All statuses</option>
-        </select>
+          options={[
+            { value: "open", label: "Open" },
+            { value: "completed", label: "Completed" },
+            { value: "cancelled", label: "Cancelled" },
+            { value: "all", label: "All statuses" },
+          ]}
+        />
 
         <div className="w-[11rem]">
           <SearchableSelect
@@ -114,7 +156,7 @@ export function TaskFilters({
           />
         </div>
 
-        <div className="w-[12rem]">
+        <div className="w-[16rem] sm:w-[20rem] lg:w-[22rem]">
           <SearchableSelect
             id="task-client-filter"
             value={values.client}
@@ -124,47 +166,47 @@ export function TaskFilters({
             searchPlaceholder="Search clients…"
             ariaLabel="Filter by client"
             className="[&_button]:h-10 [&_button]:rounded-inset [&_button]:border-rule"
+            popoverClassName="w-full min-w-[20rem] sm:min-w-[24rem]"
           />
         </div>
 
-        <select
-          aria-label="Filter by priority"
+        <FilterSelect
+          ariaLabel="Filter by priority"
           value={values.priority}
-          onChange={(event) => navigate({ priority: event.target.value })}
-          className={selectClass}
-        >
-          <option value="all">All priorities</option>
-          <option value="high">High</option>
-          <option value="normal">Normal</option>
-          <option value="low">Low</option>
-        </select>
+          onValueChange={(priority) => navigate({ priority })}
+          options={[
+            { value: "all", label: "All priorities" },
+            { value: "high", label: "High" },
+            { value: "normal", label: "Normal" },
+            { value: "low", label: "Low" },
+          ]}
+        />
 
-        <select
-          aria-label="Filter by due date"
+        <FilterSelect
+          ariaLabel="Filter by due date"
           value={values.due}
-          onChange={(event) => {
-            const due = event.target.value;
+          onValueChange={(due) => {
             navigate(due === "overdue" ? { due, status: "open" } : { due });
           }}
-          className={selectClass}
-        >
-          <option value="all">Any due date</option>
-          <option value="overdue">Overdue</option>
-          <option value="today">Due today</option>
-          <option value="week">Next 7 days</option>
-          <option value="undated">No due date</option>
-        </select>
+          options={[
+            { value: "all", label: "Any due date" },
+            { value: "overdue", label: "Overdue" },
+            { value: "today", label: "Due today" },
+            { value: "week", label: "Next 7 days" },
+            { value: "undated", label: "No due date" },
+          ]}
+        />
 
-        <select
-          aria-label="Sort tasks"
+        <FilterSelect
+          ariaLabel="Sort tasks"
           value={values.sort}
-          onChange={(event) => navigate({ sort: event.target.value })}
-          className={selectClass}
-        >
-          <option value="due">Sort: due date</option>
-          <option value="priority">Sort: priority</option>
-          <option value="updated">Sort: recently updated</option>
-        </select>
+          onValueChange={(sort) => navigate({ sort })}
+          options={[
+            { value: "due", label: "Sort: due date" },
+            { value: "priority", label: "Sort: priority" },
+            { value: "updated", label: "Sort: recently updated" },
+          ]}
+        />
 
         {filtersActive && (
           <button

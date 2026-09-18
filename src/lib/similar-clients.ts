@@ -27,11 +27,12 @@
 // earned ("both have unknown sector" is not a similarity). A dimension the
 // CANDIDATE lacks simply fails to agree.
 //
-// AC1 — "past successful client" is read through the pipeline: a reference
-// qualifies when its outreach_status is `converted` (F150's terminal success)
-// or `future_potential` (F151 — not a fit now, worth revisiting; the
-// pipeline's other affirmative outcome). `isSimilarityReference` is the one
-// definition; the detail page offers the action only when it passes.
+// The pipeline outcome states (F150's terminal success, F151's revisit case).
+// `isSimilarityReference` names them for the outcome dimension below — it no
+// longer gates who the action is offered to. Any client can be the reference:
+// the record card offers it on every client and `?similar=` accepts any id,
+// and a reference too thinly described for a shortlist gets the honest
+// insufficient-data state instead of a refusal.
 //
 // AC3 — the explicit insufficient-data state. Two gates, both surfacing as
 // status: "insufficient_data" with a reason the page renders honestly:
@@ -72,6 +73,9 @@ export const MIN_SIMILAR_CLIENTS = 3;
 
 /** Default cap on returned matches; the page renders what fits a card. */
 export const MAX_SIMILAR_MATCHES = 25;
+
+/** How many matches the record card previews inline; the rest live on /clients. */
+export const SIMILAR_PREVIEW_COUNT = 5;
 
 /**
  * The row shape this module needs. VisibleClient (client list) satisfies it

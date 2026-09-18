@@ -69,6 +69,10 @@ const PAGES_TO_SCAN = 8;
  *
  * Restarting costs about a second (the language data is already on disk), so
  * this is cheap next to the ~5s a company already takes.
+ *
+ * Counted in OCR uses, not companies attempted: most attempts never reach
+ * recognition at all (no CICINC filing, no scannable pages), and replacing a
+ * worker that has done no work would stall a run for no benefit.
  */
 const RECYCLE_OCR_EVERY = 25;
 
@@ -219,10 +223,16 @@ export async function findCicTargets(
   };
 }
 
-/** One company: fetch, read, extract. Exported for the script's verbose mode. */
+/** One company: fetch, read, extract. Exported for the script's verbose mode.
+ *
+ * `getOcr` is a provider rather than a session so that companies which never
+ * reach recognition — no CICINC filing, no scannable pages — never start the
+ * worker. Starting it eagerly put worker startup on the critical path of
+ * every run including ones needing zero recognitions, and a stalled startup
+ * left the whole run `running` with nothing attempted. */
 export async function readStatementForCompany(
   companyNumber: string,
-  ocr: OcrSession,
+  getOcr: () => Promise<OcrSession>,
 ): Promise<
   | { kind: "statement"; text: string; confidence: number }
   | { kind: "no-statement" }
@@ -237,6 +247,16 @@ export async function readStatementForCompany(
 
   try {
     const images = await scannedPagesFromEnd(filing.pdf, PAGES_TO_SCAN);
+    // Requested once per company rather than once per page, so the recycle
+    // count in the caller stays per company: one worker serves at most
+    // RECYCLE_OCR_EVERY companies' pages before it is replaced. Either early
+    // return skips the worker entirely — a filing with no CICINC never gets
+    // this far, and one with no scannable pages stops here — which is what
+    // keeps worker startup off the critical path of runs that need no OCR.
+    // (Empty input would reach the same answer through extract/format: no
+    // candidate pages means null sections means a null statement.)
+    if (images.length === 0) return { kind: "no-statement" };
+    const ocr = await getOcr();
     const pages = [];
     for (const image of images) {
       pages.push({ page: await ocr.recognise(image.png), width: image.width });
@@ -280,23 +300,36 @@ export async function runCicBackfill(
     return { attempted: 0, written: 0, notCic: 0, failed: 0, remaining: targets.length };
   }
 
-  let ocr = await startOcr();
+  // The worker holder, rather than two locals: the provider below assigns the
+  // session from inside a closure, and a local assigned only inside closures
+  // narrows to `never` at later outer reads. Property reads reset their
+  // narrowing across the intervening awaits, so this stays typable.
+  const worker: { session: OcrSession | null; uses: number } = { session: null, uses: 0 };
   let written = 0;
   let notCic = 0;
   let failed = 0;
+
+  // Starts the worker on first need, not up front. Most attempts never reach
+  // recognition, so an eager start spent seconds and risked a stall on runs
+  // that needed zero recognitions.
+  async function useOcr(): Promise<OcrSession> {
+    // Replaced rather than reused past this point. Closing before opening
+    // the replacement keeps only one worker alive at a time.
+    if (worker.session && worker.uses >= RECYCLE_OCR_EVERY) {
+      await worker.session.close();
+      worker.session = null;
+      worker.uses = 0;
+    }
+    if (!worker.session) worker.session = await startOcr();
+    worker.uses++;
+    return worker.session;
+  }
 
   try {
     for (const [index, target] of slice.entries()) {
       onProgress?.(index + 1, slice.length, target.companyNumber);
 
-      // Replaced rather than reused past this point. Closing before opening
-      // the replacement keeps only one worker alive at a time.
-      if (index > 0 && index % RECYCLE_OCR_EVERY === 0) {
-        await ocr.close();
-        ocr = await startOcr();
-      }
-
-      const result = await readStatementForCompany(target.companyNumber, ocr);
+      const result = await readStatementForCompany(target.companyNumber, useOcr);
 
       if (result.kind === "error") {
         failed++;
@@ -332,7 +365,8 @@ export async function runCicBackfill(
   } finally {
     // In a finally, not after the loop: an un-terminated Tesseract worker keeps
     // the process alive, which turns a script that threw into one that hangs.
-    await ocr.close();
+    // Conditional: runs that never needed recognition never started one.
+    await worker.session?.close();
   }
 
   return {

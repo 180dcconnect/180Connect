@@ -8,18 +8,28 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchPaged } from "@/lib/supabase/fetch-paged";
 import { reportError } from "@/lib/error-logging";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import { containsRedactionPlaceholder } from "@/lib/ingestion/personal-data";
 import { IncompleteRecordsPanel } from "./incomplete-records-panel";
 import type { IncompleteClientRecord } from "./types";
+import {
+  describeAuditEvent,
+  groupByDay,
+  type AuditRow,
+} from "@/lib/audit-log-format";
 
 type RawOrgRow = {
   id: string;
   legal_name: string;
+  trading_name: string | null;
   organisation_type: string;
   city: string | null;
+  address_line_1: string | null;
+  postcode: string | null;
   country_code: string;
   sector: string | null;
   sub_sector: string | null;
   website: string | null;
+  website_absent_at: string | null;
   contact_email: string | null;
   charity_activities: string | null;
   cic_community_statement: string | null;
@@ -63,7 +73,7 @@ export default async function IncompleteRecordsPage() {
         supabase
           .from("organisations")
           .select(
-            "id, legal_name, organisation_type, city, country_code, sector, sub_sector, website, contact_email, charity_activities, cic_community_statement, outreach_status",
+            "id, legal_name, trading_name, organisation_type, city, address_line_1, postcode, country_code, sector, sub_sector, website, website_absent_at, contact_email, charity_activities, cic_community_statement, outreach_status",
           )
           .order("legal_name", { ascending: true })
           .order("id", { ascending: true })
@@ -147,11 +157,15 @@ export default async function IncompleteRecordsPage() {
   const incompleteRecords: IncompleteClientRecord[] = [];
 
   for (const org of activeOrgs) {
-    const hasSector = Boolean(
-      org.sector &&
-      org.sector.trim().length > 0 &&
-      org.sector.toLowerCase() !== "unclassified",
-    );
+    const isRedactedEmail = containsRedactionPlaceholder(org.contact_email);
+    const isRedactedWebsite = containsRedactionPlaceholder(org.website);
+    const isRedactedSector =
+      containsRedactionPlaceholder(org.sector) ||
+      containsRedactionPlaceholder(org.sub_sector);
+    const isRedactedCity =
+      containsRedactionPlaceholder(org.city) ||
+      containsRedactionPlaceholder(org.address_line_1) ||
+      containsRedactionPlaceholder(org.postcode);
 
     const storedMission =
       org.charity_activities?.trim() ||
@@ -159,11 +173,49 @@ export default async function IncompleteRecordsPage() {
       enrichmentMissionByOrg.get(org.id) ||
       null;
 
-    const hasMission = Boolean(storedMission && storedMission.length > 0);
-    const hasWebsite = Boolean(org.website && org.website.trim().length > 0);
-    const hasEmail = Boolean(org.contact_email && org.contact_email.trim().length > 0);
-    const hasCity = Boolean(org.city && org.city.trim().length > 0);
-    const isIncomplete = !hasSector || !hasMission || !hasWebsite || !hasEmail || !hasCity;
+    const isRedactedMission = containsRedactionPlaceholder(storedMission);
+    const isRedactedName =
+      containsRedactionPlaceholder(org.legal_name) ||
+      containsRedactionPlaceholder(org.trading_name);
+
+    const redactedFields: string[] = [];
+    if (isRedactedEmail) redactedFields.push("email");
+    if (isRedactedWebsite) redactedFields.push("website");
+    if (isRedactedMission) redactedFields.push("mission");
+    if (isRedactedSector) redactedFields.push("sector");
+    if (isRedactedCity) redactedFields.push("city");
+    if (isRedactedName) redactedFields.push("name");
+    if (containsRedactionPlaceholder(org.address_line_1) && !redactedFields.includes("city")) {
+      redactedFields.push("address");
+    }
+
+    const hasRedacted = redactedFields.length > 0;
+
+    const hasSector = Boolean(
+      org.sector &&
+      org.sector.trim().length > 0 &&
+      org.sector.toLowerCase() !== "unclassified" &&
+      !isRedactedSector,
+    );
+
+    const hasMission = Boolean(storedMission && storedMission.length > 0 && !isRedactedMission);
+    // An empty website is a gap unless somebody has recorded that this client
+    // genuinely has no website — the mark of 20261018090000. It is cleared by
+    // the database as soon as a website is on file, so a record cannot hold both.
+    const websiteAbsentAt = org.website_absent_at ?? null;
+    const hasWebsite = Boolean(
+      (org.website && org.website.trim().length > 0 && !isRedactedWebsite) ||
+        websiteAbsentAt,
+    );
+    const hasEmail = Boolean(org.contact_email && org.contact_email.trim().length > 0 && !isRedactedEmail);
+    const hasCity = Boolean(org.city && org.city.trim().length > 0 && !isRedactedCity);
+    const isIncomplete =
+      !hasSector ||
+      !hasMission ||
+      !hasWebsite ||
+      !hasEmail ||
+      !hasCity ||
+      hasRedacted;
 
     if (isIncomplete) {
       incompleteRecords.push({
@@ -171,6 +223,7 @@ export default async function IncompleteRecordsPage() {
         legal_name: org.legal_name,
         organisation_type: org.organisation_type,
         city: org.city,
+        postcode: org.postcode,
         country_code: org.country_code,
         sector: org.sector,
         sub_sector: org.sub_sector,
@@ -180,8 +233,11 @@ export default async function IncompleteRecordsPage() {
         hasMission,
         hasSector,
         hasWebsite,
+        websiteAbsentAt,
         hasEmail,
         hasCity,
+        hasRedacted,
+        redactedFields,
         isIncomplete,
         suggested_sector: null,
         suggested_sub_sector: null,
@@ -249,24 +305,86 @@ export default async function IncompleteRecordsPage() {
   const primaryIncompleteCount = incompleteRecords.length;
   const totalActiveCount = activeOrgs.length;
 
+  // The history tab is about the records currently in this queue. Read the
+  // existing append-only audit trail in id-sized chunks so a long queue does
+  // not create an oversized PostgREST URL. Fail soft: the records remain
+  // usable if history is temporarily unavailable.
+  const auditRows: AuditRow[] = [];
+  let auditHistoryDegraded = false;
+  const incompleteIds = incompleteRecords.map((record) => record.id);
+  const auditOrganisationNames = new Map(
+    incompleteRecords.map((record) => [record.id, record.legal_name]),
+  );
+  const AUDIT_ID_CHUNK_SIZE = 200;
+  for (let start = 0; start < incompleteIds.length; start += AUDIT_ID_CHUNK_SIZE) {
+    const { data, error } = await supabase
+      .from("audit_log")
+      .select("id, actor_user_id, action, target_table, target_id, detail, created_at")
+      .eq("target_table", "organisations")
+      .in("target_id", incompleteIds.slice(start, start + AUDIT_ID_CHUNK_SIZE))
+      .order("created_at", { ascending: false })
+      .overrideTypes<AuditRow[], { merge: false }>();
+    if (error) {
+      auditHistoryDegraded = true;
+      await reportError(error, { operation: "admin.incomplete_records.audit_log" });
+      continue;
+    }
+    auditRows.push(...(data ?? []));
+  }
+
+  const auditActorIds = Array.from(
+    new Set(auditRows.map((row) => row.actor_user_id).filter((id): id is string => Boolean(id))),
+  );
+  const auditPeople = new Map<string, string>();
+  if (auditActorIds.length > 0) {
+    const { data, error } = await supabase
+      .from("users")
+      .select("id, full_name, email")
+      .in("id", auditActorIds);
+    if (error) {
+      auditHistoryDegraded = true;
+      await reportError(error, { operation: "admin.incomplete_records.audit_log_people" });
+    }
+    for (const person of data ?? []) {
+      auditPeople.set(person.id, person.full_name?.trim() || person.email);
+    }
+  }
+
+  const auditNow = new Date();
+  const auditHistory = groupByDay(
+    auditRows
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((row) =>
+        describeAuditEvent(
+          row,
+          {
+            user: (id) => auditPeople.get(id) ?? null,
+            organisation: (id) => auditOrganisationNames.get(id) ?? null,
+          },
+          auditNow,
+        ),
+      ),
+  );
+
   return (
     <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
       <Stage className="mx-auto w-full max-w-[1400px] space-y-10">
         <Rise>
           <Link
-            href="/admin"
+            href="/dashboard"
             className="inline-flex items-center gap-1.5 text-[13px] font-medium text-lead hover:underline"
           >
             <ArrowLeft aria-hidden="true" className="size-[15px]" />
-            All admin tools
+            Back to dashboard
           </Link>
           <h1 className="mt-4 font-body text-[clamp(2rem,4vw,2.75rem)] font-semibold leading-[1] tracking-[-0.03em] text-ink">
             Incomplete records
           </h1>
           <p className="mt-1.5 text-[13px] leading-[1.55] text-dim">
-            Records missing a mission, sector, website, email, or location. Work them here —
-            each card links to the registers the record came from, so a gap can be checked
-            at its source rather than guessed.
+            Records missing a mission, sector, website, email, or location — or carrying
+            redacted personal details that need replacing. Work them here — each card links
+            to the registers the record came from, so a gap can be checked at its source
+            rather than guessed.
           </p>
           <p className="mt-5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-dim">
             <span
@@ -297,6 +415,8 @@ export default async function IncompleteRecordsPage() {
             <IncompleteRecordsPanel
               initialRecords={incompleteRecords}
               canEdit={canEdit}
+              auditHistory={auditHistory}
+              auditHistoryDegraded={auditHistoryDegraded}
             />
           </Rise>
         </Group>

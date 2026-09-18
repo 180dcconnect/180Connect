@@ -164,6 +164,7 @@ export function SkeletonSectionCard({
   titleHeight = "h-[23px]",
   hintWidth,
   action = false,
+  actionClassName = "",
   numbered = false,
   padded = true,
   className = "",
@@ -175,6 +176,12 @@ export function SkeletonSectionCard({
   /** Width of the single hint line. Omitted draws no hint. */
   hintWidth?: string;
   action?: boolean;
+  /**
+   * The action bar's box. The default is a pill (`h-8 w-28 rounded-full`); a card
+   * whose right-hand control is a page-size select, on its own or beside a pill,
+   * passes its own width so the heading row does not jump when the card arrives.
+   */
+  actionClassName?: string;
   numbered?: boolean;
   /** Set false when the caller supplies its own padding (e.g. flush list rows). */
   padded?: boolean;
@@ -194,7 +201,11 @@ export function SkeletonSectionCard({
           </div>
           {hintWidth && <Skeleton className={`mt-1 h-5 ${hintWidth} max-w-full`} />}
         </div>
-        {action && <Skeleton className="h-8 w-28 shrink-0 rounded-full" />}
+        {action && (
+          <Skeleton
+            className={`shrink-0 rounded-full ${actionClassName || "h-8 w-28"}`}
+          />
+        )}
       </div>
       {/* Padding matches `SectionCard` (`px-5 py-4.5`) when padded; flush when the
           caller brings its own row padding, as the tab bodies do. */}

@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { animate, AnimatePresence, motion, useReducedMotion } from "motion/react";
 
 import type { ScoreFactorsRecord } from "@/lib/scoring/persist-latest-score.ts";
 import {
@@ -319,7 +319,36 @@ export function PriorityDial({
 
   const clamped = score === null ? null : Math.max(0, Math.min(1, score));
 
-  const resolvedZone = clamped === null ? null : priorityZoneOf(clamped);
+  /**
+   * The needle's entrance: it rests at zero on first paint, then a slow
+   * spring carries it to the reading — the way a physical needle swings over
+   * and settles, with just a whisper of overshoot. Duration-based, so the
+   * timing stays put whatever the score; `bounce` is the wobble (0 would be
+   * a plain glide). Anyone asking for reduced motion gets the reading with
+   * no sweep at all.
+   */
+  const reduceMotion = useReducedMotion();
+  // At rest on zero when there is a sweep to perform, otherwise on the
+  // reading straight away — so the effect below only ever runs the spring.
+  const [swept, setSwept] = useState<number | null>(() =>
+    clamped === null || reduceMotion ? clamped : 0,
+  );
+  useEffect(() => {
+    if (clamped === null || reduceMotion) return;
+    const controls = animate(0, clamped, {
+      type: "spring",
+      duration: 1.8,
+      bounce: 0.12,
+      onUpdate: (value) => setSwept(value),
+    });
+    return () => controls.stop();
+  }, [clamped, reduceMotion]);
+
+  // The spring may breathe a hair past either end while settling; the dial
+  // only ever draws the 0–1 span.
+  const shown = swept === null ? null : Math.max(0, Math.min(1, swept));
+
+  const resolvedZone = shown === null ? null : priorityZoneOf(shown);
   const bandStyle = resolvedZone ? BAND_STYLE[resolvedZone] : FALLBACK_BAND;
   const bandLabel = resolvedZone ? BAND_STYLE[resolvedZone].label : (band ?? null);
 
@@ -351,23 +380,24 @@ export function PriorityDial({
     return out;
   }, []);
 
-  // The needle as a tapered wedge.
+  // The needle as a tapered wedge, drawn at the swept position so it rides
+  // the entrance spring (and rests on the reading once it lands).
   const needle = useMemo(() => {
-    if (clamped === null) return null;
-    const angle = angleAt(clamped);
+    if (shown === null) return null;
+    const angle = angleAt(shown);
     const nx = Math.cos(angle);
     const ny = Math.sin(angle);
     // Perpendicular to the needle's own axis.
     const px = -ny * NEEDLE_HALF_W;
     const py = nx * NEEDLE_HALF_W;
-    const tip = pointAt(clamped, NEEDLE_TIP_R);
-    const tail = pointAt(clamped, -NEEDLE_TAIL_R);
+    const tip = pointAt(shown, NEEDLE_TIP_R);
+    const tail = pointAt(shown, -NEEDLE_TAIL_R);
     return [
       `${round(tail.x + px)},${round(tail.y + py)}`,
       `${round(tip.x)},${round(tip.y)}`,
       `${round(tail.x - px)},${round(tail.y - py)}`,
     ].join(" ");
-  }, [clamped]);
+  }, [shown]);
 
   const activeZone = hoveredZone ?? pinnedZone;
   const activeNote =
@@ -508,7 +538,7 @@ export function PriorityDial({
             Priority
           </dt>
           <dd className="font-body text-[22px] lg:text-[25px] leading-none font-semibold tracking-[-0.03em] text-ink tabular-nums">
-            {score === null ? "—" : score.toFixed(2)}
+            {shown === null ? "—" : shown.toFixed(2)}
           </dd>
         </div>
 

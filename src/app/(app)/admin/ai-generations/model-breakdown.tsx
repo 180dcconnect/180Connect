@@ -64,16 +64,27 @@ export function ModelBreakdown({
   activeModel,
   basePath,
   clientFilter,
+  carryQuery = "",
 }: {
   breakdown: GenerationModelBreakdown[];
   metric: GenerationMetric;
   activeModel: string | null;
   basePath: string;
   clientFilter?: string | null;
+  /**
+   * Everything else the page is currently filtered by, as a query string — the
+   * search, the edit filter, the metric, the page size. A bar click sets the
+   * model and nothing else; without this the rest would be thrown away by the
+   * navigation, which is the most infuriating kind of bug to hit.
+   */
+  carryQuery?: string;
 }) {
   function hrefFor(model: string | null) {
-    const params = new URLSearchParams();
-    if (model) params.set("model", model);
+    const params = new URLSearchParams(carryQuery);
+    params.delete("model");
+    // A different filter is a different list, so it starts at page one.
+    params.delete("page");
+    if (model) params.append("model", model);
     if (clientFilter) params.set("client", clientFilter);
     const qs = params.toString();
     return qs ? `${basePath}?${qs}` : basePath;

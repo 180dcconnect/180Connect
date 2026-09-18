@@ -21,7 +21,9 @@ export const DISCREPANCY_FIELD_LABEL: Record<string, string> = {
 };
 
 export function discrepancyFieldLabel(fieldName: string): string {
-  return DISCREPANCY_FIELD_LABEL[fieldName] ?? fieldName;
+  // A newly-added database field must not leak its column name into an admin
+  // screen before the plain-English label is added above.
+  return DISCREPANCY_FIELD_LABEL[fieldName] ?? "Other detail";
 }
 
 export type FieldDiscrepancyRow = {

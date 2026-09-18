@@ -2,8 +2,11 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { Loader2 } from "lucide-react";
+import { ChevronDown, Loader2 } from "lucide-react";
 import { Pill } from "@/app/(app)/clients/[id]/section-card";
+import { BrandSearchBar, type FilterOption } from "@/components/brand/search-bar";
+import { CheckTheSource } from "@/components/check-the-source";
+import { SearchTheWebLink } from "@/components/search-the-web-link";
 import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import { adminDirectEditsAction } from "@/app/(app)/clients/[id]/admin-actions";
 import { readMissionFromWebsiteAction } from "@/app/(app)/clients/[id]/mission-actions";
@@ -22,17 +25,31 @@ import {
   lookupPostcodePlacesAction,
   searchPlacesByNameAction,
 } from "./postcode-actions";
+import {
+  readEmailFromWebsiteAction,
+  readLocationFromWebsiteAction,
+  type EmailLookupState,
+  type LocationLookupState,
+} from "./website-lookup-actions";
+import { setWebsiteAbsentAction } from "./website-absent-actions";
 import { formatLocation, formatOrganisationType } from "@/lib/organisation-format";
+import type { OrganisationSource } from "@/lib/organisation-source-links";
+import { containsRedactionPlaceholder } from "@/lib/ingestion/personal-data";
+import { websiteAbsenceSavedMessage } from "@/lib/website-absence";
 import { PaginatedList } from "@/components/ui/paginated-list";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import {
   SearchableSelect,
   type SearchableOptionGroup,
 } from "@/components/ui/searchable-select";
 import type { FilterTab, IncompleteClientRecord } from "./types";
+import { AuditFeed, type AuditDayGroup } from "../audit-log/audit-feed";
 
 /** The "proposed" arm of a website sector lookup — the only one the card holds. */
 type SectorProposal = Extract<SectorLookupState, { kind: "proposed" }>;
+type EmailProposal = Extract<EmailLookupState, { kind: "proposed" }>;
+type LocationProposal = Extract<LocationLookupState, { kind: "proposed" }>;
 
 /**
  * The sector picker's options ARE the app's taxonomy, not a shorter list of its
@@ -135,6 +152,7 @@ const READ_ONLY_NOTE = "text-[13px] text-dim";
 
 const TABS: { value: FilterTab; label: string; missing: string }[] = [
   { value: "all", label: "All", missing: "all incomplete records" },
+  { value: "redacted", label: "Redacted", missing: "records with redacted details" },
   { value: "mission", label: "Mission", missing: "records missing a mission statement" },
   { value: "sector", label: "Sector", missing: "records missing a sector" },
   { value: "website", label: "Website", missing: "records missing a website" },
@@ -142,19 +160,93 @@ const TABS: { value: FilterTab; label: string; missing: string }[] = [
   { value: "city", label: "Location", missing: "records missing a location" },
 ];
 
+const CITY_FILTER = "Filter by city";
+const TYPE_FILTER = "Filter by organisation type";
+const SECTOR_FILTER = "Filter by sector";
+const MISSING_FILTER = "Filter by missing detail";
+
+type AppliedFilter = FilterOption & { category: string };
+
+function uniqueOptions(values: Array<{ label: string; value: string }>): FilterOption[] {
+  const byValue = new Map<string, string>();
+  for (const option of values) {
+    if (!byValue.has(option.value)) byValue.set(option.value, option.label);
+  }
+  return Array.from(byValue, ([value, label]) => ({ label, value })).sort((a, b) =>
+    a.label.localeCompare(b.label, "en-GB"),
+  );
+}
+
+function recordIsMissing(record: IncompleteClientRecord, field: FilterTab): boolean {
+  switch (field) {
+    case "redacted":
+      return record.hasRedacted;
+    case "mission":
+      return !record.hasMission;
+    case "sector":
+      return !record.hasSector;
+    case "website":
+      return !record.hasWebsite;
+    case "email":
+      return !record.hasEmail;
+    case "city":
+      return !record.hasCity;
+    case "audit":
+      return false;
+    case "all":
+      return record.isIncomplete;
+  }
+}
+
 export function IncompleteRecordsPanel({
   initialRecords,
   canEdit,
+  auditHistory,
+  auditHistoryDegraded,
 }: {
   initialRecords: IncompleteClientRecord[];
   canEdit: boolean;
+  auditHistory: AuditDayGroup[];
+  auditHistoryDegraded: boolean;
 }) {
   const [records, setRecords] = useState<IncompleteClientRecord[]>(initialRecords);
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchFilters, setSearchFilters] = useState<AppliedFilter[]>([]);
 
-  const counts: Record<FilterTab, number> = {
+  const searchCategories = useMemo<Record<string, FilterOption[]>>(
+    () => ({
+      [CITY_FILTER]: uniqueOptions(
+        records.flatMap((record) => {
+          const city = record.city?.trim();
+          return city ? [{ label: city, value: city }] : [];
+        }),
+      ),
+      [TYPE_FILTER]: uniqueOptions(
+        records.map((record) => ({
+          label: formatOrganisationType(record.organisation_type),
+          value: record.organisation_type,
+        })),
+      ),
+      [SECTOR_FILTER]: uniqueOptions(
+        records.flatMap((record) => {
+          const sector = record.sector?.trim();
+          return sector && sector.toLowerCase() !== "unclassified"
+            ? [{ label: sector, value: sector }]
+            : [];
+        }),
+      ),
+      [MISSING_FILTER]: TABS.filter((tab) => tab.value !== "all").map((tab) => ({
+        label: tab.label,
+        value: tab.value,
+      })),
+    }),
+    [records],
+  );
+
+  const counts: Record<Exclude<FilterTab, "audit">, number> = {
     all: records.filter((r) => r.isIncomplete).length,
+    redacted: records.filter((r) => r.hasRedacted).length,
     mission: records.filter((r) => !r.hasMission).length,
     sector: records.filter((r) => !r.hasSector).length,
     website: records.filter((r) => !r.hasWebsite).length,
@@ -170,22 +262,41 @@ export function IncompleteRecordsPanel({
       if (!matchesName && !matchesCity) return false;
     }
 
-    switch (activeTab) {
-      case "all":
-        return record.isIncomplete;
-      case "mission":
-        return !record.hasMission;
-      case "sector":
-        return !record.hasSector;
-      case "website":
-        return !record.hasWebsite;
-      case "email":
-        return !record.hasEmail;
-      case "city":
-        return !record.hasCity;
-      default:
-        return true;
+    const cityFilters = searchFilters.filter((filter) => filter.category === CITY_FILTER);
+    if (
+      cityFilters.length > 0 &&
+      !cityFilters.some((filter) => filter.value === record.city?.trim())
+    ) {
+      return false;
     }
+
+    const typeFilters = searchFilters.filter((filter) => filter.category === TYPE_FILTER);
+    if (
+      typeFilters.length > 0 &&
+      !typeFilters.some((filter) => filter.value === record.organisation_type)
+    ) {
+      return false;
+    }
+
+    const sectorFilters = searchFilters.filter((filter) => filter.category === SECTOR_FILTER);
+    if (
+      sectorFilters.length > 0 &&
+      !sectorFilters.some((filter) => filter.value === record.sector?.trim())
+    ) {
+      return false;
+    }
+
+    const missingFilters = searchFilters.filter(
+      (filter) => filter.category === MISSING_FILTER,
+    );
+    if (
+      missingFilters.length > 0 &&
+      !missingFilters.some((filter) => recordIsMissing(record, filter.value as FilterTab))
+    ) {
+      return false;
+    }
+
+    return recordIsMissing(record, activeTab);
   });
 
   const handleUpdateRecord = (updated: Partial<IncompleteClientRecord> & { id: string }) => {
@@ -198,7 +309,8 @@ export function IncompleteRecordsPanel({
           !merged.hasMission ||
           !merged.hasWebsite ||
           !merged.hasEmail ||
-          !merged.hasCity;
+          !merged.hasCity ||
+          merged.hasRedacted;
         return { ...merged, isIncomplete };
       }),
     );
@@ -206,8 +318,11 @@ export function IncompleteRecordsPanel({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <nav aria-label="Incomplete records filters" className="flex flex-wrap items-center gap-1.5">
+      <div className="relative z-30 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <nav
+          aria-label="Incomplete records filters"
+          className="flex flex-wrap items-center gap-1.5 lg:pt-4"
+        >
           {TABS.map((tab) => {
             const active = activeTab === tab.value;
             return (
@@ -230,31 +345,52 @@ export function IncompleteRecordsPanel({
               </button>
             );
           })}
+          <button
+            type="button"
+            onClick={() => setActiveTab("audit")}
+            aria-pressed={activeTab === "audit"}
+            aria-label="Show the audit log"
+            className={`rounded-full px-3.5 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30 ${
+              activeTab === "audit"
+                ? "bg-lead font-semibold text-white"
+                : "font-semibold text-dim hover:bg-paper hover:text-ink"
+            }`}
+          >
+            Audit log
+          </button>
         </nav>
 
-        <div className="w-full lg:w-72">
-          <label htmlFor="incomplete-search" className="sr-only">
-            Search incomplete clients
-          </label>
-          <input
-            id="incomplete-search"
-            type="search"
-            placeholder="Search by client name or city…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className={INPUT}
+        <div className="w-full lg:w-[440px] lg:shrink-0">
+          <BrandSearchBar
+            tone="light"
+            clearRowOnOpen
+            placeholder="Search"
+            subjects={["client names", "towns", "cities"]}
+            categories={searchCategories}
+            params={{
+              [CITY_FILTER]: "city",
+              [TYPE_FILTER]: "type",
+              [SECTOR_FILTER]: "sector",
+              [MISSING_FILTER]: "missing",
+            }}
+            onSubmitQuery={(query, filters) => {
+              setSearchQuery(query);
+              setSearchFilters(filters);
+            }}
           />
         </div>
       </div>
 
-      {filteredRecords.length === 0 ? (
+      {activeTab === "audit" ? (
+        <IncompleteAuditLog groups={auditHistory} degraded={auditHistoryDegraded} />
+      ) : filteredRecords.length === 0 ? (
         <div className="rounded-panel border border-rule bg-white px-5 py-10 text-center sm:px-6">
           <p className="font-body text-[19px] leading-[1.3] font-normal tracking-[-0.01em] text-ink">
             All records complete
           </p>
           <p className="mt-1.5 text-[13px] leading-[1.55] text-dim">
-            {searchQuery
-              ? "No client records matched your search."
+            {searchQuery || searchFilters.length > 0
+              ? "No client records matched your search and filters."
               : activeTab === "all"
                 ? "No client records are currently missing a mission statement, sector, website, email, or location."
                 : `No client records are currently ${TABS.find((tab) => tab.value === activeTab)?.missing ?? "incomplete"}.`}
@@ -278,6 +414,37 @@ export function IncompleteRecordsPanel({
           )}
         />
       )}
+    </div>
+  );
+}
+
+function IncompleteAuditLog({
+  groups,
+  degraded,
+}: {
+  groups: AuditDayGroup[];
+  degraded: boolean;
+}) {
+  if (groups.length === 0) {
+    return (
+      <EmptyState
+        message={
+          degraded
+            ? "The audit history could not be loaded. Refresh and try again."
+            : "No actions have been recorded for the incomplete records currently in this queue."
+        }
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {degraded && (
+        <p className="text-sm text-dim" role="status">
+          Some history could not be loaded. Refresh to see the full trail.
+        </p>
+      )}
+      <AuditFeed groups={groups} />
     </div>
   );
 }
@@ -322,6 +489,24 @@ const WHY_IT_MATTERS: Record<FieldKey, string> = {
   city: "Location feeds priority scoring, and CAMs filtering by place never see a client without it.",
 };
 
+function whyItMatters(key: FieldKey, isRedacted: boolean): string {
+  if (isRedacted) {
+    switch (key) {
+      case "email":
+        return "A personal email address was redacted during ingestion to comply with data privacy policy. Replace with a generic role inbox (such as info@ or enquiries@).";
+      case "website":
+        return "The recorded website contained personal information that was redacted. Replace with the organisation's public homepage.";
+      case "mission":
+        return "The mission statement contained personal details that were redacted. Add a cleaned statement.";
+      case "sector":
+        return "The sector entry contained redacted details. Select the correct sector.";
+      case "city":
+        return "The location details were redacted. Set the organisation's town or council area.";
+    }
+  }
+  return WHY_IT_MATTERS[key];
+}
+
 /**
  * What the toast says. It names the client, because the screen is a list of
  * cards and a bare "Saved" leaves the reader checking which one it meant — and
@@ -333,6 +518,11 @@ function savedMessage(label: string, client: string): string {
 
 function failedMessage(label: string, client: string): string {
   return `${label} could not be saved for ${client}`;
+}
+
+/** "3 Sep 2026" — the day a "this client has no website" mark was recorded. */
+function formatRecordedDate(value: string): string {
+  return new Date(value).toLocaleDateString("en-GB", { dateStyle: "medium" });
 }
 
 const FIELD_LABEL: Record<FieldKey, string> = {
@@ -403,6 +593,8 @@ function ClientCleaningCard({
   onUpdate: (updated: Partial<IncompleteClientRecord> & { id: string }) => void;
 }) {
   const { showToast } = useToast();
+  const [isExpanded, setIsExpanded] = useState(true);
+  const detailsId = `incomplete-record-${record.id}-details`;
 
   // The gap this card opens on. Read once, from the record as it arrived, so
   // the editors below can start open on it — the live ordering is recomputed
@@ -411,7 +603,11 @@ function ClientCleaningCard({
 
   // Sector state
   const [sectorInput, setSectorInput] = useState(
-    record.sector && record.sector.toLowerCase() !== "unclassified" ? record.sector : "",
+    record.sector &&
+      record.sector.toLowerCase() !== "unclassified" &&
+      !containsRedactionPlaceholder(record.sector)
+      ? record.sector
+      : "",
   );
   const [isEditingSector, setIsEditingSector] = useState(openingGap === "sector");
   const [isSavingSector, startSectorTransition] = useTransition();
@@ -424,13 +620,21 @@ function ClientCleaningCard({
   const [sectorLookupNote, setSectorLookupNote] = useState<string | null>(null);
 
   // Website state
-  const [websiteInput, setWebsiteInput] = useState(record.website ?? "");
+  const [websiteInput, setWebsiteInput] = useState(
+    record.website && !containsRedactionPlaceholder(record.website) ? record.website : "",
+  );
   const [isEditingWebsite, setIsEditingWebsite] = useState(openingGap === "website");
   const [isSavingWebsite, startWebsiteTransition] = useTransition();
   const [websiteMessage, setWebsiteMessage] = useState<string | null>(null);
+  // "This client has no website": its own save state, kept apart from the website
+  // editor's so a failed mark never reads as a failed website save.
+  const [isSavingWebsiteAbsence, startWebsiteAbsenceTransition] = useTransition();
+  const [websiteAbsenceMessage, setWebsiteAbsenceMessage] = useState<string | null>(null);
 
   // Mission state
-  const [missionInput, setMissionInput] = useState(record.mission ?? "");
+  const [missionInput, setMissionInput] = useState(
+    record.mission && !containsRedactionPlaceholder(record.mission) ? record.mission : "",
+  );
   const [isEditingMission, setIsEditingMission] = useState(openingGap === "mission");
   const [isSavingMission, startMissionTransition] = useTransition();
   const [isFetchingMission, setIsFetchingMission] = useState(false);
@@ -438,16 +642,29 @@ function ClientCleaningCard({
   const [missionStatus, setMissionStatus] = useState<"idle" | "proposed" | "error">("idle");
 
   // Email state
-  const [emailInput, setEmailInput] = useState(record.contact_email ?? "");
+  const [emailInput, setEmailInput] = useState(
+    record.contact_email && !containsRedactionPlaceholder(record.contact_email)
+      ? record.contact_email
+      : "",
+  );
   const [isEditingEmail, setIsEditingEmail] = useState(openingGap === "email");
   const [isSavingEmail, startEmailTransition] = useTransition();
   const [emailMessage, setEmailMessage] = useState<string | null>(null);
+  const [isReadingEmail, setIsReadingEmail] = useState(false);
+  const [emailProposal, setEmailProposal] = useState<EmailProposal | null>(null);
+  const [emailLookupNote, setEmailLookupNote] = useState<string | null>(null);
 
   // City state
-  const [cityInput, setCityInput] = useState(record.city ?? "");
+  const [cityInput, setCityInput] = useState(
+    record.city && !containsRedactionPlaceholder(record.city) ? record.city : "",
+  );
   const [isEditingCity, setIsEditingCity] = useState(openingGap === "city");
   const [isSavingCity, startCityTransition] = useTransition();
   const [cityMessage, setCityMessage] = useState<string | null>(null);
+  const [isReadingCity, setIsReadingCity] = useState(false);
+  const [cityProposal, setCityProposal] = useState<LocationProposal | null>(null);
+  const [cityLookupNote, setCityLookupNote] = useState<string | null>(null);
+  const [isUsingPostcode, setIsUsingPostcode] = useState(false);
   // What the place picker is being searched for, and the last answer the
   // postcode service gave. Held here rather than inside the picker because
   // answering it is a server round trip, which is not the picker's business.
@@ -517,6 +734,116 @@ function ClientCleaningCard({
       setSectorLookupNote("That website could not be read. Pick a sector below instead.");
     } finally {
       setIsReadingSector(false);
+    }
+  };
+
+  // Read an email off the client's website that complies with policy (role addresses)
+  const handleReadEmail = async () => {
+    const urlToRead = websiteInput.trim() || record.website?.trim();
+    if (!urlToRead) {
+      setEmailProposal(null);
+      setEmailLookupNote("Add a website first, then the email can be read from it.");
+      return;
+    }
+
+    setIsReadingEmail(true);
+    setEmailProposal(null);
+    setEmailLookupNote(null);
+
+    try {
+      const res = await readEmailFromWebsiteAction({
+        organisationId: record.id,
+        url: urlToRead,
+      });
+      if (res.kind === "proposed") {
+        setEmailProposal(res);
+      } else {
+        setEmailLookupNote(res.message);
+      }
+    } catch {
+      setEmailLookupNote("That website could not be read. Enter a contact email below instead.");
+    } finally {
+      setIsReadingEmail(false);
+    }
+  };
+
+  // Read location off the client's website (town, city, or postcode)
+  const handleReadCity = async () => {
+    const urlToRead = websiteInput.trim() || record.website?.trim();
+    if (!urlToRead) {
+      setCityProposal(null);
+      setCityLookupNote("Add a website first, then the location can be read from it.");
+      return;
+    }
+
+    setIsReadingCity(true);
+    setCityProposal(null);
+    setCityLookupNote(null);
+
+    try {
+      const res = await readLocationFromWebsiteAction({
+        organisationId: record.id,
+        url: urlToRead,
+      });
+      if (res.kind === "proposed") {
+        setCityProposal(res);
+      } else {
+        setCityLookupNote(res.message);
+      }
+    } catch {
+      setCityLookupNote("That website could not be read. Pick a location below instead.");
+    } finally {
+      setIsReadingCity(false);
+    }
+  };
+
+  const storedPostcode =
+    record.postcode && !containsRedactionPlaceholder(record.postcode)
+      ? record.postcode.trim()
+      : "";
+
+  // Turn the postcode already on the record into a location proposal. This is
+  // deliberately review-first: it fills the picker, while the existing Save
+  // location button remains the only write.
+  const handleUsePostcode = async () => {
+    if (!storedPostcode) return;
+
+    setIsUsingPostcode(true);
+    setCityProposal(null);
+    setCityLookupNote(null);
+    setCityMessage(null);
+
+    try {
+      const res = await lookupPostcodePlacesAction({ query: storedPostcode });
+      if (res.kind !== "places") {
+        setCityLookupNote(res.message);
+        return;
+      }
+
+      if (res.places.length === 1) {
+        const location = displayPlaceName(res.places[0]);
+        setCityInput(location);
+        setCityLookupNote(
+          `${storedPostcode} points to ${location}. Check it, then save the location.`,
+        );
+        return;
+      }
+
+      setPlaceQuery(storedPostcode);
+      setPostcodeAnswer({
+        postcode: res.postcode,
+        places: res.places,
+        message: null,
+      });
+      setCityLookupNote(
+        "That postcode covers more than one area. Choose the right location above, then save it.",
+      );
+    } catch {
+      setCityLookupNote(
+        "The postcode could not be checked just now. Search for the location instead.",
+      );
+    } finally {
+      setIsUsingPostcode(false);
     }
   };
 
@@ -686,7 +1013,14 @@ function ClientCleaningCard({
         setIsEditingSector(false);
         setSectorProposal(null);
         setSectorLookupNote(null);
-        onUpdate({ id: record.id, sector: sectorInput.trim(), hasSector: true });
+        const remainingRedacted = record.redactedFields.filter((f) => f !== "sector");
+        onUpdate({
+          id: record.id,
+          sector: sectorInput.trim(),
+          hasSector: true,
+          redactedFields: remainingRedacted,
+          hasRedacted: remainingRedacted.length > 0,
+        });
       } else {
         setSectorMessage(res.message || "Failed to save sector");
         showToast(failedMessage("Sector", record.legal_name), "error");
@@ -707,11 +1041,54 @@ function ClientCleaningCard({
         setWebsiteMessage("Saved");
         showToast(savedMessage("Website", record.legal_name));
         setIsEditingWebsite(false);
-        onUpdate({ id: record.id, website: websiteInput.trim(), hasWebsite: true });
+        const remainingRedacted = record.redactedFields.filter((f) => f !== "website");
+        onUpdate({
+          id: record.id,
+          website: websiteInput.trim(),
+          hasWebsite: true,
+          redactedFields: remainingRedacted,
+          hasRedacted: remainingRedacted.length > 0,
+        });
       } else {
         setWebsiteMessage(res.message || "Failed to save website");
         showToast(failedMessage("Website", record.legal_name), "error");
       }
+    });
+  };
+
+  // Record that this client has no website — or take the record back.
+  //
+  // The mark is what stops an empty website column counting as a gap. It is a
+  // fact about the client, not an edit to the column: the column stays empty,
+  // which is what the register links, the scorer and the pipeline read.
+  const handleSetWebsiteAbsent = (absent: boolean) => {
+    setWebsiteAbsenceMessage(null);
+    startWebsiteAbsenceTransition(async () => {
+      const res = await setWebsiteAbsentAction({ organisationId: record.id, absent });
+      if (res.kind !== "success") {
+        setWebsiteAbsenceMessage(res.message);
+        showToast(res.message, "error");
+        return;
+      }
+
+      showToast(websiteAbsenceSavedMessage(absent, record.legal_name));
+      setIsEditingWebsite(false);
+      setWebsiteInput(record.website ?? "");
+
+      // A mark settles what the column holds: "no website" is not a redacted
+      // website, so the placeholder stops being something to replace. Taking the
+      // mark back leaves redaction exactly as it was.
+      const remainingRedacted = absent
+        ? record.redactedFields.filter((f) => f !== "website")
+        : record.redactedFields;
+
+      onUpdate({
+        id: record.id,
+        websiteAbsentAt: absent ? new Date().toISOString() : null,
+        hasWebsite: absent || Boolean(record.website?.trim()),
+        redactedFields: remainingRedacted,
+        hasRedacted: remainingRedacted.length > 0,
+      });
     });
   };
 
@@ -768,7 +1145,14 @@ function ClientCleaningCard({
         showToast(savedMessage("Mission statement", record.legal_name));
         setMissionStatus("idle");
         setIsEditingMission(false);
-        onUpdate({ id: record.id, mission: missionInput.trim(), hasMission: true });
+        const remainingRedacted = record.redactedFields.filter((f) => f !== "mission");
+        onUpdate({
+          id: record.id,
+          mission: missionInput.trim(),
+          hasMission: true,
+          redactedFields: remainingRedacted,
+          hasRedacted: remainingRedacted.length > 0,
+        });
       } else {
         setMissionMessage(res.message || "Failed to save mission");
         showToast(failedMessage("Mission statement", record.legal_name), "error");
@@ -790,7 +1174,14 @@ function ClientCleaningCard({
         setEmailMessage("Saved");
         showToast(savedMessage("Contact email", record.legal_name));
         setIsEditingEmail(false);
-        onUpdate({ id: record.id, contact_email: emailInput.trim(), hasEmail: true });
+        const remainingRedacted = record.redactedFields.filter((f) => f !== "email");
+        onUpdate({
+          id: record.id,
+          contact_email: emailInput.trim(),
+          hasEmail: true,
+          redactedFields: remainingRedacted,
+          hasRedacted: remainingRedacted.length > 0,
+        });
       } else {
         setEmailMessage(res.message || "Failed to save email");
         showToast(failedMessage("Contact email", record.legal_name), "error");
@@ -812,7 +1203,14 @@ function ClientCleaningCard({
         setCityMessage("Saved");
         showToast(savedMessage("Location", record.legal_name));
         setIsEditingCity(false);
-        onUpdate({ id: record.id, city: cityInput.trim(), hasCity: true });
+        const remainingRedacted = record.redactedFields.filter((f) => f !== "city");
+        onUpdate({
+          id: record.id,
+          city: cityInput.trim(),
+          hasCity: true,
+          redactedFields: remainingRedacted,
+          hasRedacted: remainingRedacted.length > 0,
+        });
       } else {
         setCityMessage(res.message || "Failed to save location");
         showToast(failedMessage("Location", record.legal_name), "error");
@@ -828,20 +1226,13 @@ function ClientCleaningCard({
     : null;
 
   // Where this record came from, for checking a gap at its origin rather than
-  // guessing. Links only — readings, so viewers see them too.
-  const charityDigits = record.charity_number?.replace(/\D/g, "") || null;
-  const charityRegisterHref = charityDigits
-    ? `https://register-of-charities.charitycommission.gov.uk/en/charity-search/-/charity-details/${charityDigits}`
-    : null;
-  const companyNumber = record.company_number?.trim() || null;
-  const companiesHouseHref = companyNumber
-    ? `https://find-and-update.company-information.service.gov.uk/company/${companyNumber}`
-    : null;
-  const sourceLinks = [
-    charityRegisterHref && { href: charityRegisterHref, label: "Charity Commission register" },
-    companiesHouseHref && { href: companiesHouseHref, label: "Companies House" },
-    websiteHref && { href: websiteHref, label: "Website" },
-  ].filter((link): link is { href: string; label: string } => Boolean(link));
+  // guessing. Links only, so viewers see them too — the shared row renders
+  // nothing when the record has neither a register number nor a website.
+  const source: OrganisationSource = {
+    charityNumber: record.charity_number,
+    companyNumber: record.company_number,
+    website: activeWebsite,
+  };
 
   const sectorId = `incomplete-sector-${record.id}`;
   const websiteId = `incomplete-website-${record.id}`;
@@ -907,6 +1298,10 @@ function ClientCleaningCard({
               <span className="sr-only"> (opens in a new tab)</span>
             </a>
           )}
+
+          {/* Nobody writes a mission from memory. This is the search an admin
+              would run by hand, with the client's name already in it. */}
+          <SearchTheWebLink field="mission" clientName={record.legal_name} />
         </div>
 
         <div className="flex items-center gap-2">
@@ -1023,6 +1418,7 @@ function ClientCleaningCard({
             <span className="sr-only"> (opens in a new tab)</span>
           </a>
         )}
+        <SearchTheWebLink field="sector" clientName={record.legal_name} />
       </div>
 
       {sectorLookupNote && (
@@ -1126,6 +1522,36 @@ function ClientCleaningCard({
         </button>
       </div>
 
+      {/* The third answer for a client with no website. It sits in the editor
+          because that is where an admin is already looking at the column, and
+          it toggles: the same button takes the mark back. */}
+      <div className="space-y-1.5">
+        <p className={FOOTNOTE}>
+          {record.websiteAbsentAt
+            ? "This client is recorded as having no website. Adding one above clears that."
+            : "Some clients have no website. Record it here and the empty column stops counting as missing — you can add one, or take the mark back, at any time."}
+        </p>
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+          <SearchTheWebLink field="website" clientName={record.legal_name} />
+          <button
+            type="button"
+            disabled={isSavingWebsiteAbsence || isSavingWebsite}
+            aria-busy={isSavingWebsiteAbsence || undefined}
+            onClick={() => handleSetWebsiteAbsent(!record.websiteAbsentAt)}
+            className={OUTLINED_BUTTON}
+          >
+            {isSavingWebsiteAbsence && <Loader2 className="size-3.5 animate-spin" />}
+            {record.websiteAbsentAt ? "Needs a website after all" : "This client has no website"}
+          </button>
+        </div>
+      </div>
+
+      {websiteAbsenceMessage && (
+        <p role="status" className={ERROR_NOTE}>
+          {websiteAbsenceMessage}
+        </p>
+      )}
+
       {websiteMessage && (
         <p role="status" className={ERROR_NOTE}>
           {websiteMessage}
@@ -1154,6 +1580,8 @@ function ClientCleaningCard({
               setEmailInput(record.contact_email ?? "");
               setIsEditingEmail(false);
               setEmailMessage(null);
+              setEmailProposal(null);
+              setEmailLookupNote(null);
             }}
             className={QUIET_BUTTON}
           >
@@ -1172,6 +1600,70 @@ function ClientCleaningCard({
           {isSavingEmail ? "Saving…" : "Save email"}
         </button>
       </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={isReadingEmail || isSavingEmail}
+          onClick={handleReadEmail}
+          title={activeWebsite ? `Check ${activeWebsite} for a contact email` : "Add a website first"}
+          className={OUTLINED_BUTTON}
+        >
+          {isReadingEmail && <Loader2 className="size-3.5 animate-spin" />}
+          {isReadingEmail ? "Reading website…" : "Read from website"}
+        </button>
+        {websiteHref && (
+          <a
+            href={websiteHref}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[13px] font-medium text-lead hover:underline"
+          >
+            Visit website
+            <span className="sr-only"> (opens in a new tab)</span>
+          </a>
+        )}
+        <SearchTheWebLink field="email" clientName={record.legal_name} />
+      </div>
+
+      {emailLookupNote && (
+        <p
+          role="status"
+          className="rounded-inset bg-paper px-3 py-2.5 text-[13px] leading-[1.55] text-dim"
+        >
+          {emailLookupNote}
+        </p>
+      )}
+
+      {emailProposal && (
+        <div className="space-y-2 rounded-inset bg-lead-wash px-3 py-2.5">
+          <p className="text-[13px] leading-[1.55] text-ink">
+            Found on {emailProposal.hostname}:{" "}
+            <span className="font-semibold">{emailProposal.email}</span>
+            {emailProposal.role && <span className="text-dim"> · role address</span>}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setEmailInput(emailProposal.email);
+                setEmailProposal(null);
+                setEmailLookupNote(null);
+              }}
+              className={OUTLINED_BUTTON}
+            >
+              Use this email
+            </button>
+            <button
+              type="button"
+              onClick={() => setEmailProposal(null)}
+              className={QUIET_BUTTON}
+            >
+              Doesn&apos;t fit
+            </button>
+          </div>
+        </div>
+      )}
 
       {emailMessage && (
         <p role="status" className={ERROR_NOTE}>
@@ -1217,6 +1709,8 @@ function ClientCleaningCard({
               setCityInput(record.city ?? "");
               setIsEditingCity(false);
               setCityMessage(null);
+              setCityProposal(null);
+              setCityLookupNote(null);
             }}
             className={QUIET_BUTTON}
           >
@@ -1235,6 +1729,83 @@ function ClientCleaningCard({
           {isSavingCity ? "Saving…" : "Save location"}
         </button>
       </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {storedPostcode && !record.hasCity && (
+          <button
+            type="button"
+            disabled={isUsingPostcode || isReadingCity || isSavingCity}
+            aria-busy={isUsingPostcode || undefined}
+            onClick={handleUsePostcode}
+            title={`Find the location for ${storedPostcode}`}
+            className={OUTLINED_BUTTON}
+          >
+            {isUsingPostcode && <Loader2 className="size-3.5 animate-spin" />}
+            {isUsingPostcode ? "Checking postcode…" : "Use postcode"}
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={isReadingCity || isUsingPostcode || isSavingCity}
+          onClick={handleReadCity}
+          title={activeWebsite ? `Check ${activeWebsite} for a location` : "Add a website first"}
+          className={OUTLINED_BUTTON}
+        >
+          {isReadingCity && <Loader2 className="size-3.5 animate-spin" />}
+          {isReadingCity ? "Reading website…" : "Read from website"}
+        </button>
+        {websiteHref && (
+          <a
+            href={websiteHref}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[13px] font-medium text-lead hover:underline"
+          >
+            Visit website
+            <span className="sr-only"> (opens in a new tab)</span>
+          </a>
+        )}
+        <SearchTheWebLink field="city" clientName={record.legal_name} />
+      </div>
+
+      {cityLookupNote && (
+        <p
+          role="status"
+          className="rounded-inset bg-paper px-3 py-2.5 text-[13px] leading-[1.55] text-dim"
+        >
+          {cityLookupNote}
+        </p>
+      )}
+
+      {cityProposal && (
+        <div className="space-y-2 rounded-inset bg-lead-wash px-3 py-2.5">
+          <p className="text-[13px] leading-[1.55] text-ink">
+            Found on {cityProposal.hostname}:{" "}
+            <span className="font-semibold">{cityProposal.city}</span>
+            {cityProposal.evidence && <span className="text-dim"> · {cityProposal.evidence}</span>}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setCityInput(cityProposal.city);
+                setCityProposal(null);
+                setCityLookupNote(null);
+              }}
+              className={OUTLINED_BUTTON}
+            >
+              Use this location
+            </button>
+            <button
+              type="button"
+              onClick={() => setCityProposal(null)}
+              className={QUIET_BUTTON}
+            >
+              Doesn&apos;t fit
+            </button>
+          </div>
+        </div>
+      )}
 
       {cityMessage && (
         <p role="status" className={ERROR_NOTE}>
@@ -1272,7 +1843,21 @@ function ClientCleaningCard({
         {record.contact_email}
       </a>
     ),
-    website: websiteHref ? (
+    website: record.websiteAbsentAt ? (
+      <div className="space-y-1.5">
+        <p className="text-sm text-ink">
+          No website on file — recorded {formatRecordedDate(record.websiteAbsentAt)}.
+        </p>
+        {/* The instruction points at the editor, so it is only true for a reader
+            who has one. A viewer is told the fact and nothing else — the same as
+            every other row in this list. */}
+        {canEdit && (
+          <p className={FOOTNOTE}>
+            Change it above if that is wrong: add a website, or say one is needed after all.
+          </p>
+        )}
+      </div>
+    ) : websiteHref ? (
       <a
         href={websiteHref}
         target="_blank"
@@ -1317,7 +1902,19 @@ function ClientCleaningCard({
   return (
     <article className="rounded-panel border border-rule bg-white px-5 py-5 sm:px-6">
       {/* 1 — who this is */}
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+      <div
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest("a, button, input, textarea, select")) {
+            return;
+          }
+          const selection = window.getSelection();
+          if (selection && selection.toString().trim().length > 0) {
+            return;
+          }
+          setIsExpanded((expanded) => !expanded);
+        }}
+        className="flex cursor-pointer flex-wrap items-start justify-between gap-x-4 gap-y-2"
+      >
         <div className="min-w-0">
           <Link
             href={`/clients/${record.id}`}
@@ -1328,148 +1925,191 @@ function ClientCleaningCard({
           <p className="mt-1 text-[13.5px] text-dim">
             {formatOrganisationType(record.organisation_type)} · {formatLocation(record)}
           </p>
-          {sourceLinks.length > 0 && (
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-dim">
-              <span>Check the source:</span>
-              {sourceLinks.map((link, index) => (
-                <span key={link.href} className="flex items-center gap-x-2">
-                  {index > 0 && (
-                    <span aria-hidden="true" className="text-faint">
-                      ·
-                    </span>
-                  )}
-                  <a
-                    href={link.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-medium text-lead hover:underline"
-                  >
-                    {link.label}
-                    <span className="sr-only"> (opens in a new tab)</span>
-                  </a>
-                </span>
-              ))}
-            </p>
-          )}
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2.5">
-          {missingKeys.length === 0 ? (
+        <div className="flex max-w-full flex-wrap items-center justify-end gap-x-2.5 gap-y-1.5">
+          {missingKeys.length === 0 && !record.hasRedacted ? (
             <Pill tone="go">Complete</Pill>
           ) : (
-            <Pill tone="hold">
-              {missingKeys.length} of {FIX_ORDER.length} details missing
-            </Pill>
+            <>
+              {missingKeys.length > 0 && (
+                <Pill tone="hold">
+                  {missingKeys.length} of {FIX_ORDER.length} details missing
+                </Pill>
+              )}
+              {record.hasRedacted && (
+                <Pill tone="stop">
+                  {record.redactedFields.length} redacted
+                </Pill>
+              )}
+            </>
           )}
+          <CheckTheSource source={source} trailingSeparator />
           <Link
             href={`/clients/${record.id}`}
             className="text-[13px] font-medium text-lead hover:underline"
           >
             Open profile
           </Link>
+          <button
+            type="button"
+            aria-expanded={isExpanded}
+            aria-controls={detailsId}
+            aria-label={`${isExpanded ? "Hide" : "Show"} details for ${record.legal_name}`}
+            onClick={() => setIsExpanded((expanded) => !expanded)}
+            className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-inset text-dim transition-colors hover:bg-paper hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30"
+          >
+            <ChevronDown
+              aria-hidden="true"
+              className={`size-4 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+            />
+          </button>
         </div>
       </div>
 
-      {/* 2 — the gap to close first, already open */}
-      {firstGap && (
-        <section className="mt-4 rounded-inset border border-rule bg-paper px-4 py-4 sm:px-5">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            {canEdit ? (
-              <label
-                htmlFor={inputIds[firstGap]}
-                className="font-body text-[15px] font-semibold leading-[1.3] text-ink"
-              >
-                Add the {FIELD_LABEL[firstGap].toLowerCase()}
-              </label>
-            ) : (
-              <h3 className="font-body text-[15px] font-semibold leading-[1.3] text-ink">
-                No {FIELD_LABEL[firstGap].toLowerCase()} on file
-              </h3>
-            )}
-            <span className="text-[13px] text-dim">Start here</span>
+      <div
+        id={detailsId}
+        aria-hidden={!isExpanded}
+        inert={!isExpanded}
+        data-expanded={isExpanded}
+        className="card-collapse-grid"
+      >
+        <div>
+        {/* Notice for any non-primary redacted fields */}
+        {record.redactedFields.some((f) => !FIX_ORDER.includes(f as FieldKey)) && (
+          <div className="mt-4 rounded-inset border border-stop/20 bg-stop-wash px-4 py-3 sm:px-5">
+            <p className="text-[13px] font-medium text-stop">
+              Other redacted information on file: {record.redactedFields.filter((f) => !FIX_ORDER.includes(f as FieldKey)).join(", ")}. Please update these on the client profile.
+            </p>
           </div>
-          <p className="mt-1 text-[13px] leading-[1.55] text-dim">{WHY_IT_MATTERS[firstGap]}</p>
-          <div className="mt-3">
-            {canEdit ? editors[firstGap] : <p className={READ_ONLY_NOTE}>{VIEW_ONLY_CONTROL_NOTE}</p>}
-          </div>
-        </section>
-      )}
+        )}
 
-      {/* 3 — anything else missing: named, closed, one click from its editor */}
-      {remainingGaps.length > 0 && (
-        <section className="mt-5">
-          <h3 className="text-[13px] font-medium text-dim">Also missing</h3>
-          <div className="mt-1">
-            {remainingGaps.map((key) => (
-              <div key={key} className="border-t border-rule-soft py-3">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-                  {isEditing[key] && canEdit ? (
-                    <label htmlFor={inputIds[key]} className="text-sm font-medium text-ink">
-                      {FIELD_LABEL[key]}
-                    </label>
-                  ) : (
-                    <span className="text-sm font-medium text-ink">{FIELD_LABEL[key]}</span>
-                  )}
-                  {canEdit && !isEditing[key] && (
-                    <button
-                      type="button"
-                      onClick={() => setEditing[key](true)}
-                      className={ROW_ACTION}
-                    >
-                      Add {FIELD_LABEL[key].toLowerCase()}
-                    </button>
-                  )}
-                </div>
-                <p className="mt-0.5 text-[13px] leading-[1.55] text-dim">{WHY_IT_MATTERS[key]}</p>
-                {canEdit && isEditing[key] && <div className="mt-2.5">{editors[key]}</div>}
-              </div>
-            ))}
-          </div>
-          {!canEdit && (
-            <p className={`mt-2 ${READ_ONLY_NOTE}`}>{VIEW_ONLY_CONTROL_NOTE}</p>
-          )}
-        </section>
-      )}
+        {/* 2 — the gap to close first, already open */}
+        {firstGap && (
+          <section className="mt-4 rounded-inset border border-rule bg-paper px-4 py-4 sm:px-5">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              {canEdit ? (
+                <label
+                  htmlFor={inputIds[firstGap]}
+                  className="font-body text-[15px] font-semibold leading-[1.3] text-ink"
+                >
+                  {record.redactedFields.includes(firstGap)
+                    ? `Replace redacted ${FIELD_LABEL[firstGap].toLowerCase()}`
+                    : `Add the ${FIELD_LABEL[firstGap].toLowerCase()}`}
+                </label>
+              ) : (
+                <h3 className="font-body text-[15px] font-semibold leading-[1.3] text-ink">
+                  {record.redactedFields.includes(firstGap)
+                    ? `Redacted ${FIELD_LABEL[firstGap].toLowerCase()} on file`
+                    : `No ${FIELD_LABEL[firstGap].toLowerCase()} on file`}
+                </h3>
+              )}
+              <span className="text-[13px] text-dim">Start here</span>
+            </div>
+            <p className="mt-1 text-[13px] leading-[1.55] text-dim">
+              {whyItMatters(firstGap, record.redactedFields.includes(firstGap))}
+            </p>
+            <div className="mt-3">
+              {canEdit ? (
+                editors[firstGap]
+              ) : (
+                <p className={READ_ONLY_NOTE}>{VIEW_ONLY_CONTROL_NOTE}</p>
+              )}
+            </div>
+          </section>
+        )}
 
-      {/* 4 — what the record already holds */}
-      {heldKeys.length > 0 && (
-        <section className="mt-5">
-          <h3 className="text-[13px] font-medium text-dim">On file</h3>
-          <div className="mt-1">
-            {heldKeys.map((key) => (
-              <FieldRow
-                key={key}
-                label={FIELD_LABEL[key]}
-                labelHtmlFor={isEditing[key] && canEdit ? inputIds[key] : undefined}
-                action={
-                  canEdit && !isEditing[key] ? (
-                    <button
-                      type="button"
-                      onClick={() => setEditing[key](true)}
-                      className={ROW_ACTION}
-                    >
-                      Change
-                    </button>
-                  ) : undefined
-                }
-              >
-                {isEditing[key] && canEdit ? (
-                  editors[key]
-                ) : (
-                  <div className="space-y-1.5">
-                    {readings[key]}
-                    {savedNotes[key] && (
-                      <p role="status" className={SAVED_NOTE}>
-                        {savedNotes[key]}
-                      </p>
-                    )}
+        {/* 3 — anything else missing: named, closed, one click from its editor */}
+        {remainingGaps.length > 0 && (
+          <section className="mt-5">
+            <h3 className="text-[13px] font-medium text-dim">Also missing</h3>
+            <div className="mt-1">
+              {remainingGaps.map((key) => {
+                const isRedacted = record.redactedFields.includes(key);
+                return (
+                  <div key={key} className="border-t border-rule-soft py-3">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+                      {isEditing[key] && canEdit ? (
+                        <label htmlFor={inputIds[key]} className="text-sm font-medium text-ink">
+                          {FIELD_LABEL[key]} {isRedacted && <span className="font-normal text-stop">(Redacted)</span>}
+                        </label>
+                      ) : (
+                        <span className="text-sm font-medium text-ink">
+                          {FIELD_LABEL[key]} {isRedacted && <span className="font-normal text-stop">(Redacted)</span>}
+                        </span>
+                      )}
+                      <div className="flex items-center gap-3">
+                        {/* Look it up before deciding there is nothing to add: the
+                            search everyone runs by hand, with the name in it. */}
+                        <SearchTheWebLink field={key} clientName={record.legal_name} />
+                        {canEdit && !isEditing[key] && (
+                          <button
+                            type="button"
+                            onClick={() => setEditing[key](true)}
+                            className={ROW_ACTION}
+                          >
+                            {isRedacted
+                              ? `Replace ${FIELD_LABEL[key].toLowerCase()}`
+                              : `Add ${FIELD_LABEL[key].toLowerCase()}`}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <p className="mt-0.5 text-[13px] leading-[1.55] text-dim">
+                      {whyItMatters(key, isRedacted)}
+                    </p>
+                    {canEdit && isEditing[key] && <div className="mt-2.5">{editors[key]}</div>}
                   </div>
-                )}
-              </FieldRow>
-            ))}
-          </div>
-        </section>
-      )}
+                );
+              })}
+            </div>
+            {!canEdit && (
+              <p className={`mt-2 ${READ_ONLY_NOTE}`}>{VIEW_ONLY_CONTROL_NOTE}</p>
+            )}
+          </section>
+        )}
+
+        {/* 4 — what the record already holds */}
+        {heldKeys.length > 0 && (
+          <section className="mt-5">
+            <h3 className="text-[13px] font-medium text-dim">On file</h3>
+            <div className="mt-1">
+              {heldKeys.map((key) => (
+                <FieldRow
+                  key={key}
+                  label={FIELD_LABEL[key]}
+                  labelHtmlFor={isEditing[key] && canEdit ? inputIds[key] : undefined}
+                  action={
+                    canEdit && !isEditing[key] ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditing[key](true)}
+                        className={ROW_ACTION}
+                      >
+                        Change
+                      </button>
+                    ) : undefined
+                  }
+                >
+                  {isEditing[key] && canEdit ? (
+                    editors[key]
+                  ) : (
+                    <div className="space-y-1.5">
+                      {readings[key]}
+                      {savedNotes[key] && (
+                        <p role="status" className={SAVED_NOTE}>
+                          {savedNotes[key]}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </FieldRow>
+              ))}
+            </div>
+          </section>
+        )}
+        </div>
+      </div>
     </article>
   );
 }

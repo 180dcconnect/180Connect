@@ -72,8 +72,8 @@ export default async function AdminPage() {
           <Tile href="/admin/review" title="Review queue">
             Review records held for validation and status changes flagged during sync.
           </Tile>
-          <Tile href="/admin/suppressions" title="Suppressions">
-            Suppress a charity, or approve/reject a CAM&apos;s request.
+          <Tile href="/admin/suppressions" title="Suppress a client">
+            Block outreach to a client, review CAM requests, or restore a suppressed client.
           </Tile>
           <Tile href="/admin/ownership-requests" title="Ownership requests">
             Decide who gets a client when a CAM asks for one another CAM owns.

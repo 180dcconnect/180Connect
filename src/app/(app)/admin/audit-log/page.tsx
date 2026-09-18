@@ -267,6 +267,7 @@ export default async function AuditLogPage({
         }
         bar={
             <BrandSearchBar
+              tone="light"
               placeholder="Search the trail for"
               subjects={["actions", "people", "clients", "changes"]}
               defaultQuery={search ?? ""}

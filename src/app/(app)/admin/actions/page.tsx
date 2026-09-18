@@ -107,7 +107,9 @@ export default async function AdminActionsPage({ searchParams }: { searchParams?
       (from, to) =>
         supabase
           .from("organisations")
-          .select("id, legal_name, owner_id, owner:users!organisations_owner_id_fkey(full_name)")
+          .select(
+            "id, legal_name, organisation_type, sector, city, country_code, outreach_status, website, owner_id, owner:users!organisations_owner_id_fkey(full_name, email)",
+          )
           .order("legal_name")
           .order("id")
           .range(from, to)
@@ -136,7 +138,7 @@ export default async function AdminActionsPage({ searchParams }: { searchParams?
   const nextHref = page * PAGE_SIZE < total ? hrefForPage(currentParams, page + 1) : null;
 
   return (
-    <div className="min-h-screen max-w-full overflow-x-hidden bg-paper px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
       <Stage className="mx-auto w-full max-w-[1400px] space-y-6">
         <Rise>
           <ActionsHeader current="/admin/actions">
@@ -147,7 +149,7 @@ export default async function AdminActionsPage({ searchParams }: { searchParams?
         </Rise>
 
         <Group className="space-y-4">
-          <Rise>
+          <Rise className="relative z-20">
             <TaskFilters
               key={query}
               values={filters}
@@ -168,7 +170,7 @@ export default async function AdminActionsPage({ searchParams }: { searchParams?
             </Rise>
           )}
 
-          <Rise className="space-y-4">
+          <Rise className="relative z-0 space-y-4">
             <TeamTasksPanel
               tasks={tasks}
               team={team}

@@ -38,6 +38,7 @@ import {
   searchClientsByMissionKeywords,
   sortClients,
   visibleClients,
+  LIST_COLUMNS,
   type ClientListRow,
   type ListSortField,
   type OpenSuppression,
@@ -100,7 +101,6 @@ import {
 import {
   describeInsufficientData,
   findSimilarClients,
-  isSimilarityReference,
 } from "@/lib/similar-clients";
 import { bulkStatusBlockedReason, canBulkUpdateStatus } from "@/lib/bulk-status";
 import { ClientSelectCheckbox, SelectPageCheckbox } from "./bulk-selection";
@@ -309,27 +309,9 @@ export default async function ClientsPage({
   // Parsed before the list read because it decides what that read selects.
   const missionTerm = parseMissionTerm(missionParam);
 
-  /**
-   * What the list reads for every client. Every column is paid for on every
-   * visit, for every client, so this carries only what a filter, sort, count or
-   * row actually uses:
-   *
-   * - `grant_total:grants(count)` — the list only asks how many grants a client
-   *   has (the "360Giving" filter and the similarity factor). Selecting every
-   *   grant row made grants the largest part of the payload.
-   * - `financial_periods` — capped at the 3 most recent periods (see
-   *   fetchAllOrganisations). Income resolution only ever reads the newest
-   *   period carrying a figure, so a decade of filings per client would be
-   *   payload with no reader.
-   */
-  const listColumns = [
-    "id, legal_name, organisation_type, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, charity_activities, cic_community_statement",
-    "owner:users!organisations_owner_id_fkey(full_name)",
-    "org_tags(tag_id)",
-    "financial_periods(income_band, total_income, period_end)",
-    "grant_total:grants(count)",
-    "latest_scores(priority_score, priority_band, scored_at)",
-  ].join(", ");
+  // What the list reads for every client — LIST_COLUMNS in visible-clients.ts,
+  // shared with the record page's similar-clients preview.
+  const listColumns = LIST_COLUMNS;
 
   // PostgREST caps a single response at 1000 rows — same truncation the
   // dashboard hit at 1794 orgs. Paginate organisations + suppressions so the
@@ -526,30 +508,25 @@ export default async function ClientsPage({
 
   /**
    * F216 — Search by Similarity. `?similar=<id>` asks: which visible clients
-   * look like this past successful one? The reference's F088 factors are
-   * recomputed from the same list rows every other filter reads (its own
-   * LATEST_SCORES row is not enough — the module needs the scorers' states,
-   * not just the total), so the comparison and the score-breakdown card can
-   * never disagree.
+   * look like this one? Any client can be the reference — the comparison is
+   * agreement on the reference's known dimensions, and a thinly described
+   * reference gets the honest insufficient-data state rather than a refusal.
+   * The reference's F088 factors are recomputed from the same list rows every
+   * other filter reads (its own LATEST_SCORES row is not enough — the module
+   * needs the scorers' states, not just the total), so the comparison and the
+   * score-breakdown card can never disagree.
    *
    * The reference is looked up in `allVisibleClients`, NOT the filtered set:
-   * a CAM who found a converted client through a filter, hit "find similar",
-   * and then changed their mind about one chip should still get the same
-   * shortlist — the shortlist describes the reference, not the view it was
-   * requested from. Candidates are likewise every visible client, so the
-   * result is stable under filter changes and the suppression filter has
-   * already been applied once, by visibleClients().
+   * a CAM who found a client through a filter, hit "find similar", and then
+   * changed their mind about one chip should still get the same shortlist —
+   * the shortlist describes the reference, not the view it was requested
+   * from. Candidates are likewise every visible client, so the result is
+   * stable under filter changes and the suppression filter has already been
+   * applied once, by visibleClients().
    */
   const reference = similarParam
     ? allVisibleClients.find((client) => client.id === similarParam) ?? null
     : null;
-  // AC1's rule is enforced here, not just on the detail-page link: ?similar= is
-  // a plain URL parameter, so a hand-edited id must not buy a shortlist for a
-  // client that is not a past success. Same predicate the detail page gates
-  // the entry card with — one definition of "past successful client".
-  const similarIneligible =
-    reference !== null && !isSimilarityReference(reference.outreach_status);
-  const eligibleReference = similarIneligible ? null : reference;
   /** F092's input is a matched grant count; the list embeds the count itself. */
   const withGrantCounts = (client: VisibleClient) => ({
     ...client,
@@ -557,12 +534,12 @@ export default async function ClientsPage({
   });
   // "Same priority area" uses the towns saved in score settings — the one list
   // scoring and imports share. Loaded only when a shortlist is actually asked for.
-  const similarTowns = eligibleReference
+  const similarTowns = reference
     ? (await getActiveScoutConfig()).rules?.geography.priorityTowns
     : undefined;
-  const similarResult = eligibleReference
+  const similarResult = reference
     ? findSimilarClients(
-        withGrantCounts(eligibleReference),
+        withGrantCounts(reference),
         allVisibleClients.map(withGrantCounts),
         { priorityRegions: similarTowns },
       )
@@ -804,9 +781,9 @@ export default async function ClientsPage({
       incomplete: incompleteParam,
       // The validated term, not the raw param — same junk-leaves-the-URL rule.
       mission: missionTerm ?? undefined,
-      // F216 — a dangling or ineligible id is dropped here (the banner says
-      // so); a valid one rides along so paging/sorting keeps the mode.
-      similar: eligibleReference ? similarParam : undefined,
+      // F216 — a dangling id is dropped here (the banner says so); a valid
+      // one rides along so paging/sorting keeps the mode.
+      similar: reference ? similarParam : undefined,
       stage: stageParam,
       sort: sortParam,
       dir: dirParam,
@@ -940,6 +917,7 @@ export default async function ClientsPage({
           headingClassName="mb-8"
           bar={
             <BrandSearchBar
+              tone="light"
               ask={{
                 label: "Ask in plain English",
                 placeholder: "small education charities in Leeds",
@@ -1253,19 +1231,7 @@ export default async function ClientsPage({
             a search that ran. */}
         {similarParam && (
           <Rise>
-            {similarIneligible ? (
-              <div
-                role="alert"
-                className="mb-8 rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4"
-              >
-                <p className="text-sm font-bold text-destructive">
-                  Similarity search starts from a converted client.
-                </p>
-                <p className="mt-1.5 text-sm leading-[1.7] text-foreground/65">
-                  <Link href={clearSimilarHref} className="font-bold underline">Show all clients</Link>.
-                </p>
-              </div>
-            ) : similarDangling ? (
+            {similarDangling ? (
               <div
                 role="alert"
                 className="mb-8 rounded-2xl border border-destructive/20 bg-destructive/[0.06] px-5 py-4"
@@ -1360,7 +1326,7 @@ export default async function ClientsPage({
                     search,
                     ask: askParam,
                     mission: missionTerm,
-                    similar: eligibleReference?.legal_name ?? (similarDangling || similarIneligible ? true : null),
+                    similar: reference?.legal_name ?? (similarDangling ? true : null),
                     filterActive,
                     incomplete: incompleteParam,
                   })}

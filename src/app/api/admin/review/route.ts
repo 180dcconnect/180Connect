@@ -57,7 +57,7 @@ export async function GET() {
     supabase
       .from("organisation_status_flags")
       .select(
-        "id, organisation_id, company_number, previous_status, new_status, " +
+        "id, organisation_id, source, company_number, previous_status, new_status, " +
           "detected_at, resolved, resolved_at, organisations ( legal_name )",
       )
       .order("detected_at", { ascending: false })

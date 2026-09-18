@@ -36,7 +36,11 @@ production project is not in active client use yet. Wiring live Gmail
 credentials into an environment nobody is watching invites an unattended real
 send before anyone means to go live.
 
-**What to do.**
+**What to do.** Folded into [../prod-go-live-checklist.md](../prod-go-live-checklist.md)
+(§1 for the Vercel variables, §2 for the Supabase Vault secrets, §3 for the
+reply-check function), which supersedes the step list below — it also covers the
+two vault secrets this note omits and the wider set of jobs a missing
+`CRON_SECRET` stops. Kept here for the finding and its reasoning.
 
 1. Set on the **Production** scope — Vercel dashboard → `180connect` →
    Settings → Environment Variables (tick Production), or
@@ -53,7 +57,9 @@ send before anyone means to go live.
 2. Redeploy production.
 
 3. Put the **same** `CRON_SECRET` in the production Supabase project's Vault —
-   pg_cron reads it there, and the two must match.
+   pg_cron reads it there, and the two must match. Every job also reads
+   `companies_house_cron_base_url` and `vercel_protection_bypass` from the same
+   Vault, and both are per-environment values; see the checklist §2.
 
 4. Confirm `20260902120100_schedule_scheduled_outreach_cron.sql` is applied to
    the production Supabase project (auto-applies on merge to `main`;

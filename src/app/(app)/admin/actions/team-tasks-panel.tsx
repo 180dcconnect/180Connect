@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { CalendarDays, ChevronRight, Flag, Plus, UserRound } from "lucide-react";
+import { CalendarDays, ChevronRight, Flag, Plus } from "lucide-react";
 
 import {
   Sheet,
@@ -12,7 +12,15 @@ import {
   SheetTitle,
 } from "@/components/animate-ui/components/radix/sheet";
 import { OriginButton } from "@/components/ui/origin-button";
+import { InitialsAvatar } from "@/components/ui/initials-avatar";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Pill } from "@/app/(app)/clients/[id]/section-card";
@@ -24,6 +32,10 @@ import {
   type TaskPriority,
   type TeamTask,
 } from "@/lib/actions";
+import {
+  OrganisationHoverCard,
+  type OrganisationPreview,
+} from "@/components/organisation-hover-card";
 import {
   createTeamTaskAction,
   setTeamTaskStatusAction,
@@ -40,9 +52,36 @@ export type TaskTeamMember = {
 export type TaskClientOption = {
   id: string;
   legal_name: string;
+  organisation_type?: string | null;
+  sector?: string | null;
+  city?: string | null;
+  country_code?: string | null;
+  outreach_status?: string | null;
+  website?: string | null;
   owner_id: string | null;
-  owner: { full_name: string | null } | null;
+  owner: { full_name: string | null; email?: string | null } | null;
 };
+
+function buildClientPreview(
+  organisationId: string,
+  organisationName: string,
+  clientMap: Map<string, TaskClientOption>,
+): OrganisationPreview {
+  const client = clientMap.get(organisationId);
+  return {
+    id: organisationId,
+    legalName: client?.legal_name || organisationName,
+    organisationType: client?.organisation_type ?? null,
+    sector: client?.sector ?? null,
+    city: client?.city ?? null,
+    countryCode: client?.country_code ?? null,
+    outreachStatus: client?.outreach_status ?? "not_contacted",
+    website: client?.website ?? null,
+    ownerId: client?.owner_id ?? null,
+    ownerName: client?.owner?.full_name ?? null,
+    ownerEmail: client?.owner?.email ?? null,
+  };
+}
 
 type Draft = {
   organisationId: string;
@@ -108,7 +147,15 @@ function DueReading({ task }: { task: TeamTask }) {
   return <span className="tabular-nums text-ink">{formatDueDate(task.dueDate)}</span>;
 }
 
-function TaskRows({ tasks, onOpen }: { tasks: readonly TeamTask[]; onOpen: (task: TeamTask) => void }) {
+function TaskRows({
+  tasks,
+  clientMap,
+  onOpen,
+}: {
+  tasks: readonly TeamTask[];
+  clientMap: Map<string, TaskClientOption>;
+  onOpen: (task: TeamTask) => void;
+}) {
   return (
     <div className="overflow-hidden rounded-panel border border-rule bg-white">
       <div
@@ -127,7 +174,7 @@ function TaskRows({ tasks, onOpen }: { tasks: readonly TeamTask[]; onOpen: (task
       <ul className="divide-y divide-rule-soft">
         {tasks.map((task) => (
           <li key={task.id}>
-            <div className="grid gap-3 px-4 py-4 transition-colors hover:bg-paper/70 sm:px-5 md:grid-cols-[minmax(15rem,2.2fr)_minmax(10rem,1.35fr)_minmax(9rem,1fr)_8rem_7rem_7.5rem_2rem] md:items-center md:gap-4">
+            <div className="grid gap-3 px-4 py-5 transition-colors hover:bg-paper/70 sm:px-5 md:grid-cols-[minmax(15rem,2.2fr)_minmax(10rem,1.35fr)_minmax(9rem,1fr)_8rem_7rem_7.5rem_2rem] md:items-center md:gap-4">
               <button
                 type="button"
                 onClick={() => onOpen(task)}
@@ -136,25 +183,26 @@ function TaskRows({ tasks, onOpen }: { tasks: readonly TeamTask[]; onOpen: (task
                 <span className="block truncate font-body text-[14px] font-semibold text-ink">
                   {task.title}
                 </span>
-                <span className="mt-0.5 block truncate font-body text-[12.5px] text-dim">
+                <span className="mt-1 block line-clamp-2 font-body text-[12.5px] leading-[1.45] text-dim">
                   {task.description?.trim() || "No description"}
                 </span>
               </button>
 
               <span className="grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-3 md:block">
                 <span className="font-body text-[12px] text-dim md:hidden">Client</span>
-                <Link
+                <OrganisationHoverCard
+                  org={buildClientPreview(task.organisationId, task.organisationName, clientMap)}
                   href={`/clients/${task.organisationId}`}
-                  className="truncate font-body text-[13px] font-semibold text-lead hover:text-lead-mid hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
+                  className="block truncate font-body text-[13px] font-semibold text-lead hover:text-lead-mid hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
                 >
                   {task.organisationName}
-                </Link>
+                </OrganisationHoverCard>
               </span>
 
               <span className="grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-3 md:block">
                 <span className="font-body text-[12px] text-dim md:hidden">Assigned to</span>
                 <span className="flex min-w-0 items-center gap-2 font-body text-[13px] text-ink">
-                  <UserRound aria-hidden="true" className="size-3.5 shrink-0 text-faint" />
+                  <InitialsAvatar name={task.assigneeName} compact />
                   <span className="truncate">{task.assigneeName}</span>
                 </span>
               </span>
@@ -198,7 +246,13 @@ function TaskRows({ tasks, onOpen }: { tasks: readonly TeamTask[]; onOpen: (task
   );
 }
 
-function ReadOnlyTask({ task }: { task: TeamTask }) {
+function ReadOnlyTask({
+  task,
+  clientMap,
+}: {
+  task: TeamTask;
+  clientMap: Map<string, TaskClientOption>;
+}) {
   const facts = [
     ["Client", task.organisationName],
     ["Assigned to", task.assigneeName],
@@ -214,7 +268,19 @@ function ReadOnlyTask({ task }: { task: TeamTask }) {
         {facts.map(([label, value]) => (
           <div key={label} className="grid grid-cols-[7rem_1fr] gap-4 py-3 font-body text-[13px]">
             <dt className="text-dim">{label}</dt>
-            <dd className="font-semibold text-ink">{value}</dd>
+            <dd className="font-semibold text-ink">
+              {label === "Client" ? (
+                <OrganisationHoverCard
+                  org={buildClientPreview(task.organisationId, task.organisationName, clientMap)}
+                  href={`/clients/${task.organisationId}`}
+                  className="text-lead hover:underline"
+                >
+                  {value}
+                </OrganisationHoverCard>
+              ) : (
+                value
+              )}
+            </dd>
           </div>
         ))}
       </dl>
@@ -248,6 +314,11 @@ export function TeamTasksPanel({
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
+
+  const clientMap = useMemo(
+    () => new Map(clients.map((client) => [client.id, client])),
+    [clients],
+  );
 
   const openNew = () => {
     setSelected(null);
@@ -363,7 +434,7 @@ export function TeamTasksPanel({
       )}
 
       {tasks.length > 0 ? (
-        <TaskRows tasks={tasks} onOpen={openExisting} />
+        <TaskRows tasks={tasks} clientMap={clientMap} onOpen={openExisting} />
       ) : (
         <div className="rounded-panel border border-dashed border-rule bg-white px-6 py-12 text-center">
           <p className="font-body text-[15px] font-semibold text-ink">No tasks match these filters.</p>
@@ -403,7 +474,7 @@ export function TeamTasksPanel({
           </SheetHeader>
 
           {selected && !canManage ? (
-            <ReadOnlyTask task={selected} />
+            <ReadOnlyTask task={selected} clientMap={clientMap} />
           ) : (
             <form
               className="flex flex-1 flex-col"
@@ -416,9 +487,13 @@ export function TeamTasksPanel({
                 {selected ? (
                   <div>
                     <p className="font-body text-[12px] font-semibold text-dim">Client</p>
-                    <Link href={`/clients/${selected.organisationId}`} className="mt-1 inline-block font-body text-sm font-semibold text-lead hover:underline">
+                    <OrganisationHoverCard
+                      org={buildClientPreview(selected.organisationId, selected.organisationName, clientMap)}
+                      href={`/clients/${selected.organisationId}`}
+                      className="mt-1 inline-block font-body text-sm font-semibold text-lead hover:underline"
+                    >
                       {selected.organisationName}
-                    </Link>
+                    </OrganisationHoverCard>
                     <p className="mt-1 font-body text-[12px] leading-[1.5] text-dim">
                       A task cannot be moved to another client. Create a new task if the client is wrong.
                     </p>
@@ -506,16 +581,23 @@ export function TeamTasksPanel({
                     <span className="flex items-center gap-1.5 font-body text-[12px] font-semibold text-dim">
                       <Flag className="size-3.5 text-faint" /> Priority
                     </span>
-                    <select
+                    <Select
                       value={draft.priority}
-                      onChange={(event) => setDraft((current) => ({ ...current, priority: event.target.value as TaskPriority }))}
+                      onValueChange={(priority) => setDraft((current) => ({ ...current, priority: priority as TaskPriority }))}
                       disabled={pending}
-                      className="mt-1.5 h-10 w-full rounded-inset border border-rule bg-white px-3 font-body text-sm text-ink outline-none focus:border-lead focus:ring-1 focus:ring-lead"
                     >
-                      <option value="high">High</option>
-                      <option value="normal">Normal</option>
-                      <option value="low">Low</option>
-                    </select>
+                      <SelectTrigger
+                        aria-label="Priority"
+                        className="mt-1.5 h-10 w-full rounded-inset border-rule bg-white font-body text-sm text-ink shadow-none focus-visible:border-lead focus-visible:ring-2 focus-visible:ring-lead/20"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-inset border-rule bg-white font-body text-sm text-ink shadow-lg">
+                        <SelectItem value="high" className="rounded-inset focus:bg-paper focus:text-ink">High</SelectItem>
+                        <SelectItem value="normal" className="rounded-inset focus:bg-paper focus:text-ink">Normal</SelectItem>
+                        <SelectItem value="low" className="rounded-inset focus:bg-paper focus:text-ink">Low</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </label>
                 </div>
 

@@ -3,7 +3,9 @@ import { Skeleton, SkeletonLine, SkeletonSectionCard } from "@/components/ui/ske
 /**
  * Mirrors page.tsx: the AI group's heading (fixed copy, so drawn) over its tab
  * row, the description, then the "Client outcomes in database" gauge card, the
- * "Outcomes by type" card, and the three-step "How this works" card.
+ * outcomes breakdown card — whose dimension is the word after "Outcomes by", and
+ * which keeps its page size on the heading row — and the three-step "How this
+ * works" card.
  *
  * The tab row is bars for the reason given in `ai-generations/loading.tsx`.
  * The gauge card's big reading is drawn with `SkeletonLine` at the label's own
@@ -45,7 +47,15 @@ export default function Loading() {
             <Skeleton className="mt-3 h-4 w-80 max-w-full" />
           </SkeletonSectionCard>
 
-          <SkeletonSectionCard titleWidth="w-28" hintWidth="w-72">
+          {/* The breakdown: the hint under the heading, the pager on the heading
+              row beside the title, then a label and a count per row. Three rows is
+              the drawn approximation — how many buckets there are is data. */}
+          <SkeletonSectionCard
+            action
+            actionClassName="h-8 w-64"
+            hintWidth="w-72"
+            titleWidth="w-44"
+          >
             <div className="mt-4 divide-y divide-rule-soft border-t border-rule-soft">
               {Array.from({ length: 3 }).map((_, index) => (
                 <div key={index} className="flex justify-between gap-4 py-2">

@@ -160,11 +160,11 @@ contacted yet" and "contacted everyone and won nothing" are different findings.
 
 `replyRate × winRate` equals the converted share of contacted clients, which is
 the number the funnel draws — that is the point of having exactly two. Team
-analytics (`cam-analytics.ts`), the CAM comparison (`dashboard/cam-leaderboard.ts`),
-sector performance (`performance-metrics.ts`), the dashboard summary
-(`dashboard-metrics.ts`), tone performance (`tone-performance.ts`) and a team
-member's dial all consume this module. A new screen with a percentage on it uses
-it too, rather than dividing two numbers of its own.
+analytics (`cam-analytics.ts`), sector performance (`performance-metrics.ts`),
+the dashboard summary (`dashboard-metrics.ts`), tone performance
+(`tone-performance.ts`) and a team member's dial all consume this module. A new
+screen with a percentage on it uses it too, rather than dividing two numbers of
+its own.
 
 ## `src/lib/` map
 

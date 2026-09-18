@@ -126,6 +126,12 @@ export function BackfillCard({
 
   const remaining = Math.max(total - checked, 0);
 
+  // Nothing left to ask 360Giving about: pressing the button would run a
+  // slice that walks nobody, so the control rests dimmed instead of spending
+  // the request. The action keeps its own "nothing to do" answer for a stale
+  // page that submits anyway.
+  const allChecked = remaining === 0;
+
   const liveWalked = live?.walked ?? null;
   const liveTotal = live?.total ?? null;
   const hasLiveCount = liveWalked !== null && liveTotal !== null && liveTotal > 0;
@@ -148,7 +154,9 @@ export function BackfillCard({
         time.{" "}
         {readOnly
           ? `The system checks ${cronBatchSize.toLocaleString()} automatically every fifteen minutes.`
-          : `The system checks ${cronBatchSize.toLocaleString()} automatically every fifteen minutes — this button checks the next ${selectedBatch.toLocaleString()} now instead of waiting (about ${formatDuration(estimatedTotal)}).`}
+          : allChecked
+            ? `The system checks ${cronBatchSize.toLocaleString()} automatically every fifteen minutes — everything is checked right now, so there is nothing for the button below to do.`
+            : `The system checks ${cronBatchSize.toLocaleString()} automatically every fifteen minutes — this button checks the next ${selectedBatch.toLocaleString()} now instead of waiting (about ${formatDuration(estimatedTotal)}).`}
       </p>
 
       <p className="mt-4 flex items-baseline gap-2">
@@ -214,7 +222,7 @@ export function BackfillCard({
                 step={1}
                 value={batchInput}
                 onChange={(event) => setBatchInput(event.target.value)}
-                disabled={pending}
+                disabled={pending || allChecked}
                 inputMode="numeric"
                 aria-describedby="backfill-batch-size-hint"
                 className="h-10 w-20 rounded-inset border border-rule bg-white px-3 text-sm font-semibold tabular-nums text-ink outline-none focus:border-lead disabled:opacity-50"
@@ -224,13 +232,34 @@ export function BackfillCard({
               </span>
               <button
                 type="submit"
-                disabled={pending}
+                disabled={pending || allChecked}
                 aria-busy={pending || undefined}
+                aria-describedby={allChecked ? "backfill-all-checked-note" : undefined}
                 className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-inset border border-lead bg-lead px-2.5 py-1 text-[13px] font-medium text-white transition-colors hover:bg-lead-mid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30 disabled:pointer-events-none disabled:opacity-50"
               >
                 {pending && <Loader2 className="size-3.5 animate-spin" strokeWidth={2.2} />}
-                {pending ? "Checking…" : `Check the next ${selectedBatch.toLocaleString()} now`}
+                {pending
+                  ? "Checking…"
+                  : allChecked
+                    ? "All clients checked"
+                    : `Check the next ${selectedBatch.toLocaleString()} now`}
               </button>
+              {allChecked && !pending && (
+                <p
+                  id="backfill-all-checked-note"
+                  role="status"
+                  className="flex w-full items-start gap-1.5 text-xs font-semibold text-go"
+                >
+                  <Check
+                    aria-hidden="true"
+                    className="mt-0.5 size-3.5 shrink-0 text-go"
+                    strokeWidth={2.5}
+                  />
+                  {total === 0
+                    ? "There are no clients to check yet — the button wakes up when the first client arrives."
+                    : "Every client has already been checked. The system keeps re-checking on its own every fifteen minutes — this button wakes up when a client is due again."}
+                </p>
+              )}
               {state.kind !== "idle" && !pending && (
                 <p
                   className={`flex w-full items-start gap-1.5 text-xs font-semibold ${

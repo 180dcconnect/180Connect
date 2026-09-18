@@ -83,10 +83,9 @@ export default async function ActionsPage() {
     (actionRows ?? []) as unknown as ActionRow[],
     authorization.actor.id,
   );
-
   return (
-    <div className="min-h-screen bg-paper px-6 py-10 sm:px-10 sm:py-12">
-      <Stage className="mx-auto w-full max-w-3xl space-y-6">
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+      <Stage className="mx-auto w-full max-w-[1400px] space-y-6">
         <Rise>
           <ActionsHeader current="/actions">
             <p className="mt-3 font-body text-sm leading-[1.7] text-dim">

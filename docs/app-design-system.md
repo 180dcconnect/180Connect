@@ -265,6 +265,32 @@ put `.dark` on `<html>` and define token overrides under it.
 | Pick one of a few (settings) | `OptionGroup` from `src/app/settings/option-group.tsx` |
 | A tag | `TagChip` from `src/lib/tags/tag-chips.tsx` |
 | A reading's shape | The sticks — `HorizontalStickGauge`, `StackedStickColumns` |
+| Paging a list | `PaginatedList` on a screen still on the old language (it keeps its footer); `list-pager.tsx` on a converted one (controls at the top) |
+
+**Paged lists carry their count above the first row.** A list an admin works
+through — the CAM request queue, the decision history, the suppression lists — is
+answered as it is read, so a pager under the last row is one the reader has to
+traverse the whole list to reach. On a converted screen the page size sits on the
+card's heading row beside the title and the pill, and "Showing 1 to 10 of 13" with
+the chevrons is the first line of the body; a list with no card heading of its own
+(`PagerRow`) puts both on one row above its first card. `PaginatedList` keeps its
+footer until its screen is converted, which is why the two look different rather
+than half-converted. **Never drop the count**: these lists only grow, and a pager
+without a count reads as though the page is all there is. The arithmetic is
+`src/lib/pagination.ts` for both, so the two placements can't disagree.
+
+**A panel that opens on a click grows, it doesn't snap.** Two ways, and the
+choice is not taste:
+
+- A **list row** folds with `card-collapse-grid` — CSS only, 280ms. Its clip is
+  permanent (the row height is what animates), so nothing inside it may hold a
+  popover: a dropdown in there is cut off at the card's edge.
+- A **panel with a control in it** — the suppress-a-client form, the client
+  form's disclosure rows, the admin guides — uses the Motion reveal in
+  `clients/new/disclosure-section.tsx`: `height: 0 → auto` with opacity, 0.35s on
+  `EASE`, `duration: 0` under reduced motion, and `overflow-hidden` only *while*
+  the height is moving. The clip comes off when the panel settles, which is what
+  lets a client dropdown hang past the card instead of being swallowed by it.
 
 **A tag is one chip, everywhere.** `TagChip` is the tag as it appears on the
 client record, on the tags screen's list and inside its colour picker: a

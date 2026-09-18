@@ -40,7 +40,7 @@ Three roles, and the third catches people out.
 
 | Role | Who | What they may do |
 | --- | --- | --- |
-| `cam` | Client Account Managers | Work the client list: edit, contact, manage tags. No admin-only screens. |
+| `cam` | Client Acquisition Managers | Work the client list: edit, contact, manage tags. No admin-only screens. |
 | `admin` | Administrators | Everything: approvals, imports, platform settings. |
 | `viewer` | 180DC leadership — branch and global | **See every screen an admin sees. Change nothing.** |
 

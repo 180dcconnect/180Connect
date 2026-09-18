@@ -320,6 +320,7 @@ export default async function AdminImportStatusPage({
         }
         bar={
             <BrandSearchBar
+              tone="light"
               placeholder="Search the runs for"
               subjects={["sources", "outcomes", "dates", "triggers", "failures", "records"]}
               defaultQuery={search ?? ""}

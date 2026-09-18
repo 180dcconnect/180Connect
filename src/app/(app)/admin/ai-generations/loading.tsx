@@ -1,9 +1,15 @@
 import { Skeleton, SkeletonSectionCard } from "@/components/ui/skeleton";
 
 /**
- * Mirrors page.tsx: the AI group's heading (fixed copy, so drawn) over its tab
- * row, the description, the metric switch, the "over time" chart card, then the
- * "by model" and "History" section cards.
+ * Mirrors page.tsx: the sticky search bar on its rail, the AI group's heading
+ * (fixed copy, so drawn) over its tab row, the description, the metric switch,
+ * the "over time" chart card, then the "by model" and "History" section cards —
+ * the last of which keeps its page size on the heading row and its count above
+ * the rows.
+ *
+ * The search bar's rail is reserved, not drawn as a bar-shaped control: a
+ * placeholder that sits still while the real bar loads reads as a broken
+ * control, so only its box is held (see clients/loading.tsx).
  *
  * The tab row is bars rather than the real `GroupTabs`: which tabs show depends
  * on the viewer's role, and reading that would make this file wait on the very
@@ -13,8 +19,20 @@ import { Skeleton, SkeletonSectionCard } from "@/components/ui/skeleton";
 export default function Loading() {
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
-      <div className="mx-auto max-w-6xl space-y-8">
-        <div>
+      <div className="relative mx-auto w-full max-w-6xl">
+        {/* The sticky search rail, reserved (see the note above). */}
+        <div className="pointer-events-none absolute inset-x-0 -top-1.5 bottom-0 z-40 lg:-top-2.5">
+          <div className="sticky top-3 flex justify-end lg:top-3.5">
+            {/* BrandSearchBar's collapsed row is 64px, and its radius is that
+                same number — hence `rounded-full`. */}
+            <div className="w-full lg:w-[440px]">
+              <Skeleton className="h-16 w-full rounded-full" />
+            </div>
+          </div>
+        </div>
+
+      <div className="space-y-8">
+        <div className="pt-[76px] lg:pt-0 lg:pr-[472px]">
           <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] leading-[1] font-semibold tracking-[-0.03em] text-ink">
             AI generation history
           </h1>
@@ -46,8 +64,20 @@ export default function Loading() {
               ))}
             </div>
           </SkeletonSectionCard>
-          <SkeletonSectionCard titleWidth="w-24" hintWidth="w-28">
-            <div className="mt-4 divide-y divide-rule-soft border-t border-rule-soft">
+          <SkeletonSectionCard
+            titleWidth="w-24"
+            hintWidth="w-28"
+            action
+            actionClassName="h-8 w-36"
+          >
+            {/* The history is paged at the database, from the top: the page-size
+                control sits on the heading row (drawn above) and the count and
+                chevrons are the first line of the body. */}
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+              <Skeleton className="h-4 w-44" />
+              <Skeleton className="h-4 w-28" />
+            </div>
+            <div className="mt-3 divide-y divide-rule-soft border-t border-rule-soft">
               {Array.from({ length: 4 }).map((_, index) => (
                 <div key={index} className="flex flex-wrap items-start justify-between gap-x-6 py-4">
                   <div className="min-w-0">
@@ -61,6 +91,7 @@ export default function Loading() {
             </div>
           </SkeletonSectionCard>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -2,8 +2,8 @@ import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
 
 /**
  * Mirrors page.tsx: the back link and heading (fixed copy, so drawn), the
- * "needs work" count line, then the panel's filter pills beside its search
- * field, and a page of the work cards.
+ * "needs work" count line, then the panel's filter pills beside the light
+ * client-search pill, and a page of the work cards.
  *
  * The card shape is `ClientCleaningCard`'s, which reads top-down as one job:
  * the client's name over what it is and where, a count pill and profile link
@@ -39,15 +39,14 @@ export default function Loading() {
         </div>
 
         <div aria-hidden="true" className="space-y-6">
-          {/* Filter pills beside the search field — bars, like the sibling
-              loaders draw their tab rows. */}
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          {/* Filter pills beside the 64px light BrandSearchBar. */}
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="flex flex-wrap items-center gap-1.5">
               {["w-16", "w-20", "w-18", "w-20", "w-16", "w-22"].map((width, index) => (
                 <Skeleton key={index} className={`h-8 rounded-full ${width}`} />
               ))}
             </div>
-            <Skeleton className="h-10 w-full lg:w-72" />
+            <Skeleton className="h-16 w-full rounded-full lg:w-[440px]" />
           </div>
 
           {/* Two work cards */}
@@ -67,6 +66,7 @@ export default function Loading() {
                 <div className="flex shrink-0 flex-wrap items-center gap-2.5">
                   <Skeleton className="h-6 w-40 rounded-full" />
                   <Skeleton className="h-4 w-20" />
+                  <Skeleton className="size-8 rounded-inset" />
                 </div>
               </div>
 

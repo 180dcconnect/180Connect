@@ -27,6 +27,7 @@
     "backfill:charity-financials": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-charity-financials.mts",
     "backfill:reach": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --conditions=react-server --env-file-if-exists=.env.local scripts/backfill-geographic-reach.mts",
     "backfill:field-sources": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --conditions=react-server --env-file-if-exists=.env.local scripts/backfill-field-sources.mts",
+    "backfill:locations": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/backfill-locations-from-postcodes.mts",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --conditions=react-server --test \"src/**/*.test.ts\" \"scripts/**/*.test.mts\"",
     "export:data-model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/export-data-model.mts",
     "export:training-dataset": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/export-training-dataset.mts",

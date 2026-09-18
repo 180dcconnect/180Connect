@@ -45,7 +45,7 @@ import {
   restrictedFieldLabel,
   succeededFields,
 } from "./inline-edit";
-import { suggestEditsAction } from "./actions";
+import { suggestEditsAction, suggestWebsiteAbsentAction } from "./actions";
 import { adminDirectEditsAction } from "./admin-actions";
 import { useToast } from "@/components/ui/toast";
 import { readMissionFromWebsiteAction } from "./mission-actions";
@@ -587,6 +587,27 @@ export function BasicInfoPanel({
     });
   }
 
+  /**
+   * The CAM's "this client has no website" — the only way to say a blank website
+   * is the truth rather than a gap, since a CAM cannot write the column and the
+   * suggestion flow has no value to propose. The record does not change until an
+   * admin confirms it, so the row goes on reading as blank.
+   */
+  const [absentPending, startAbsentTransition] = useTransition();
+  function suggestNoWebsite() {
+    startAbsentTransition(async () => {
+      const outcome = await suggestWebsiteAbsentAction({
+        organisationId: organisation.id,
+        reason: reason.trim() || null,
+      });
+      if (outcome.ok) {
+        showToast(outcome.message);
+      } else {
+        showToast(outcome.error, "error");
+      }
+    });
+  }
+
   return (
     <SectionCard
       headingId="basic-info-heading"
@@ -799,6 +820,21 @@ export function BasicInfoPanel({
                         </button>
                       )}
 
+                      {/* The other answer a CAM can give about a blank website:
+                          not "here is the value" but "there is no value". It
+                          goes to the queue an admin already works, and the
+                          record is untouched until they confirm it. */}
+                      {isCam && column === "website" && missing && !blockedByOther && (
+                        <button
+                          type="button"
+                          disabled={absentPending}
+                          onClick={suggestNoWebsite}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-inset border border-rule bg-white px-2 py-0.5 text-[12px] font-semibold text-dim transition-colors hover:border-lead hover:text-lead focus-visible:ring-2 focus-visible:ring-lead-mid focus-visible:outline-none disabled:opacity-50"
+                        >
+                          {absentPending ? "Sending…" : "No website"}
+                        </button>
+                      )}
+
                       {blockedByOther && (
                         <span className="inline-flex shrink-0 items-center gap-1 text-[12px] text-faint">
                           <Lock aria-hidden="true" className="size-3" />
@@ -814,11 +850,17 @@ export function BasicInfoPanel({
                     otherwise. */}
                 {blocking && !blockedByOther && !isOpen && (
                   <p className="text-[12px] text-dim">
-                    You proposed{" "}
-                    <span className="font-semibold text-ink">
-                      {blocking.proposed_value}
-                    </span>{" "}
-                    — awaiting review.
+                    {blocking.proposed_absent ? (
+                      <>You proposed that this client has no website — awaiting review.</>
+                    ) : (
+                      <>
+                        You proposed{" "}
+                        <span className="font-semibold text-ink">
+                          {blocking.proposed_value}
+                        </span>{" "}
+                        — awaiting review.
+                      </>
+                    )}
                   </p>
                 )}
 

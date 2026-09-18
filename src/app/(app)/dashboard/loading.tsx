@@ -29,7 +29,7 @@ import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
  * Two things it deliberately does not try to predict, because they are data: the
  * length of the lists (Your tasks is drawn at its five task rows, the feed
  * at its five) and whether a section renders at all (the engine-health panel,
- * the onboarding guide, the leaderboard and the health cards are conditional).
+ * the onboarding guide and the health cards are conditional).
  * Those move the page by a card at most, and no static skeleton can be right
  * about them.
  */

@@ -290,7 +290,7 @@ export async function linkAttachmentToTimelineAction(
   return { kind: "success", message: "Timeline link saved." };
 }
 
-const similarPreviewSchema = z.object({ organisationId: uuidField });
+const similarPreviewSchema = z.object({ organisationId: uuidField() });
 
 export type SimilarPreviewMatch = {
   id: string;

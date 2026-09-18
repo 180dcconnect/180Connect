@@ -372,8 +372,12 @@ export function SuppressionsPanel({
         });
         return;
       }
-      // The optimistic row stays mounted for this visit. A fresh page load reads
-      // the new active suppression row from the server.
+      // Re-suppression creates a new row. Replace the optimistic, previously
+      // lifted card with the authoritative snapshot so its reason, requester
+      // and dates all describe the new decision. The snapshot also makes every
+      // local lift overlay obsolete: those rows now carry their real status.
+      setRows(result.suppressions);
+      setLocallyLiftedIds(new Set());
       setNotice({ text: "Suppression restored. The client is blocked from outreach again.", tone: "success" });
     } catch (error) {
       rollBackSwitch();

@@ -10,10 +10,12 @@ import {
   EDIT_SUGGESTION_SELECT,
   type EditSuggestionRow,
 } from "@/lib/edit-suggestions";
+import { validateClientEmail } from "@/lib/client-email-validation";
 import {
   MANUAL_ENTRY_REVIEW_SELECT,
   type ManualEntryReviewRow,
 } from "@/lib/manual-entry";
+import { validateWebsiteFormat } from "@/lib/website-validation";
 import type { OrganisationSource } from "@/lib/organisation-source-links";
 import { ApprovalsPanel } from "./approvals-panel";
 
@@ -72,6 +74,19 @@ export default async function AdminApprovalsPage() {
 
   const rows = data ?? [];
   const manualEntries = manualEntriesData ?? [];
+
+  /**
+   * Email/website badges for the New clients tab, read here rather than in the
+   * cards: the format checkers need Node (`website-validation` calls
+   * `node:net`), so they cannot run in the client bundle.
+   */
+  const manualEntryBadges: Record<string, { email: string; website: string }> = {};
+  for (const entry of manualEntries) {
+    manualEntryBadges[entry.id] = {
+      email: validateClientEmail(entry.contact_email).status,
+      website: validateWebsiteFormat(entry.website).status,
+    };
+  }
 
   /**
    * What each card's "Check the source" row needs to offer its links: the
@@ -135,6 +150,7 @@ export default async function AdminApprovalsPage() {
           <ApprovalsPanel
             initialSuggestions={rows}
             initialManualEntries={manualEntries}
+            manualEntryBadges={manualEntryBadges}
             canDecide={canDecide}
             sourceByOrganisation={sourceByOrganisation}
           />

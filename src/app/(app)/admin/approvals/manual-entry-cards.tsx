@@ -13,9 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { validateClientEmail } from "@/lib/client-email-validation";
 import type { ManualEntryReviewRow } from "@/lib/manual-entry";
-import { validateWebsiteFormat } from "@/lib/website-validation";
 import {
   approveManualEntry,
   checkAvailableManualEntryDependencies,
@@ -24,6 +22,16 @@ import {
 } from "./manual-entry-actions";
 
 const initialReviewState: ManualEntryReviewState = { kind: "idle", message: "" };
+
+/**
+ * Email/website badge readings per entry, computed on the server. The format
+ * checkers need Node (`website-validation` calls `node:net`), so they cannot
+ * run in these client cards — the approvals page reads them once for the whole
+ * queue, the same way it reads `sourceByOrganisation`.
+ */
+export type ManualEntryBadgeMap = Record<string, { email: string; website: string }>;
+
+const UNKNOWN_BADGES = { email: "unknown", website: "unknown" };
 
 const CHECK_STYLES = {
   passed: "border-go/25 bg-go-wash/50",
@@ -74,9 +82,13 @@ function formatDateTime(value: string) {
   });
 }
 
-function EntryFacts({ entry }: { entry: ManualEntryReviewRow }) {
-  const emailStatus = validateClientEmail(entry.contact_email);
-  const websiteStatus = validateWebsiteFormat(entry.website);
+function EntryFacts({
+  entry,
+  badges,
+}: {
+  entry: ManualEntryReviewRow;
+  badges: { email: string; website: string };
+}) {
   const confirmation = roleConfirmation(entry);
   return (
     <div>
@@ -115,6 +127,10 @@ function EntryFacts({ entry }: { entry: ManualEntryReviewRow }) {
         <p
           className="mt-3 rounded-inset border border-hold/25 bg-hold-wash/60 px-3.5 py-2.5 text-[13px] leading-[1.55] text-dim"
           role="note"
+          // The confirmed-on day renders in the runtime's local timezone, so
+          // the server and the browser can disagree across a midnight boundary
+          // — same timestamp treatment as the inbox reading pane.
+          suppressHydrationWarning
         >
           <span className="font-semibold text-hold">
             Shared inbox confirmed by {confirmation.by}
@@ -125,19 +141,19 @@ function EntryFacts({ entry }: { entry: ManualEntryReviewRow }) {
         </p>
       )}
       <div className="mt-3 flex flex-wrap gap-2">
-        <Pill tone={emailStatus.status === "invalid" ? "stop" : emailStatus.status === "valid" ? "go" : "neutral"}>
-          Email: {emailStatus.status}
+        <Pill tone={badges.email === "invalid" ? "stop" : badges.email === "valid" ? "go" : "neutral"}>
+          Email: {badges.email}
         </Pill>
         <Pill
           tone={
-            websiteStatus.status === "invalid" || websiteStatus.status === "unreachable"
+            badges.website === "invalid" || badges.website === "unreachable"
               ? "stop"
-              : websiteStatus.status === "valid" || websiteStatus.status === "reachable"
+              : badges.website === "valid" || badges.website === "reachable"
                 ? "go"
                 : "neutral"
           }
         >
-          Website: {websiteStatus.status}
+          Website: {badges.website}
         </Pill>
       </div>
     </div>
@@ -153,10 +169,12 @@ function EntryFacts({ entry }: { entry: ManualEntryReviewRow }) {
  */
 export function PendingManualEntryCard({
   entry,
+  badges,
   canDecide,
   onDecided,
 }: {
   entry: ManualEntryReviewRow;
+  badges: ManualEntryBadgeMap;
   /** Same permission asked by all three writes. Viewers read the card only. */
   canDecide: boolean;
   onDecided: (result: {
@@ -242,7 +260,11 @@ export function PendingManualEntryCard({
               >
                 {entry.legal_name}
               </h2>
-              <p className="mt-1 text-[13px] leading-[1.55] text-dim">
+              <p
+                className="mt-1 text-[13px] leading-[1.55] text-dim"
+                // Local-timezone rendering; the server may disagree — see above.
+                suppressHydrationWarning
+              >
                 New client proposed by {submitterName(entry)} on {formatDateTime(entry.created_at)}
               </p>
             </div>
@@ -280,7 +302,7 @@ export function PendingManualEntryCard({
                 Proposed new client
               </div>
 
-              <EntryFacts entry={entry} />
+              <EntryFacts entry={entry} badges={badges[entry.id] ?? UNKNOWN_BADGES} />
 
               {canDecide && (
                 <div className="border-t border-rule-soft pt-4">
@@ -519,10 +541,12 @@ export function PendingManualEntryCard({
  */
 export function DecidedManualEntryCard({
   entry,
+  badges,
   isExpanded,
   onToggle,
 }: {
   entry: ManualEntryReviewRow;
+  badges: ManualEntryBadgeMap;
   isExpanded: boolean;
   onToggle: () => void;
 }) {
@@ -563,7 +587,11 @@ export function DecidedManualEntryCard({
                   New client
                 </span>
               </div>
-              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] leading-[1.5] text-dim">
+              <div
+                className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] leading-[1.5] text-dim"
+                // Local-timezone rendering; the server may disagree — see above.
+                suppressHydrationWarning
+              >
                 <span>
                   Proposed by {submitterName(entry)} on {formatDateTime(entry.created_at)}
                 </span>
@@ -610,7 +638,7 @@ export function DecidedManualEntryCard({
         >
           <div>
             <div className="border-t border-rule-soft mt-3 pt-3">
-              <EntryFacts entry={entry} />
+              <EntryFacts entry={entry} badges={badges[entry.id] ?? UNKNOWN_BADGES} />
 
               {entry.review_notes?.trim() && (
                 <div

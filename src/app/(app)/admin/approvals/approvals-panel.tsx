@@ -51,6 +51,7 @@ import { decideEditSuggestionAction } from "./actions";
 import {
   DecidedManualEntryCard,
   PendingManualEntryCard,
+  type ManualEntryBadgeMap,
 } from "./manual-entry-cards";
 
 type ApprovalTab = "pending" | "new-clients" | "history";
@@ -562,12 +563,15 @@ function DecidedSuggestionCard({
 export function ApprovalsPanel({
   initialSuggestions,
   initialManualEntries,
+  manualEntryBadges,
   canDecide,
   sourceByOrganisation,
 }: {
   initialSuggestions: EditSuggestionRow[];
   /** Whole new clients submitted by CAMs (F036) — the New clients tab. */
   initialManualEntries: ManualEntryReviewRow[];
+  /** Email/website badge readings per manual entry, read server-side. */
+  manualEntryBadges: ManualEntryBadgeMap;
   /**
    * Whether this reader may decide anything. False for leadership, who read the
    * queue and are offered no control in it — see `approval:manage` in
@@ -1324,6 +1328,7 @@ export function ApprovalsPanel({
                   <PendingManualEntryCard
                     key={entry.id}
                     entry={entry}
+                    badges={manualEntryBadges}
                     canDecide={canDecide}
                     onDecided={handleManualDecided}
                   />
@@ -1347,6 +1352,7 @@ export function ApprovalsPanel({
                     <DecidedManualEntryCard
                       key={entry.id}
                       entry={entry}
+                      badges={manualEntryBadges}
                       isExpanded={expandedManualIds.has(entry.id)}
                       onToggle={() => toggleManualExpand(entry.id)}
                     />

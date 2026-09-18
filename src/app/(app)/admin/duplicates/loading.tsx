@@ -21,7 +21,7 @@ import { Skeleton, SkeletonSectionCard } from "@/components/ui/skeleton";
  */
 export default function Loading() {
   return (
-    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+    <div className="min-h-screen bg-ground px-6 py-10 sm:px-10 sm:py-12">
       <div className="w-full space-y-8">
         <div>
           <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] leading-[1] font-semibold tracking-[-0.03em] text-ink">

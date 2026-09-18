@@ -318,15 +318,6 @@ export function summariseSystemHealth(input: SystemHealthInput): SystemHealthSum
         lastUseRow("scoring", "Priority scoring", input.lastScored, "Last scored", "No clients scored yet", now),
       ],
     },
-    {
-      title: "Connected services",
-      rows: [
-        gmailRow(input.gmail),
-        keyRow("gemini", "Google Gemini", input.keys.ai),
-        keyRow("companies-house", "Companies House", input.keys.companiesHouse),
-        keyRow("charity-commission", "Charity Commission", input.keys.charityCommission),
-      ],
-    },
     input.cronJobs
       ? {
           title: "Scheduled jobs",
@@ -337,6 +328,15 @@ export function summariseSystemHealth(input: SystemHealthInput): SystemHealthSum
           rows: null,
           unavailable: "The schedule could not be read just now — that is this check failing, not the jobs stopping. Refresh to try again.",
         },
+    {
+      title: "Connected services",
+      rows: [
+        gmailRow(input.gmail),
+        keyRow("gemini", "Google Gemini", input.keys.ai),
+        keyRow("companies-house", "Companies House", input.keys.companiesHouse),
+        keyRow("charity-commission", "Charity Commission", input.keys.charityCommission),
+      ],
+    },
   ];
 
   const attention = groups.flatMap((group) =>

@@ -67,7 +67,7 @@ export default async function AdminPage() {
 
         <Section label="Approvals & data quality">
           <Tile href="/admin/approvals" title="Approvals">
-            Review and decide pending suggested client edits across the team.
+            Review and decide pending suggested client edits and new manual clients across the team.
           </Tile>
           <Tile href="/admin/review" title="Review queue">
             Review records held for validation and status changes flagged during sync.
@@ -80,9 +80,6 @@ export default async function AdminPage() {
           </Tile>
           <Tile href="/admin/edit-suggestions" title="Suggested client edits">
             Approve or reject CAM-proposed corrections to sensitive client fields.
-          </Tile>
-          <Tile href="/admin/manual-entries" title="Manual client entries">
-            Review organisations submitted manually by CAMs.
           </Tile>
           <Tile href="/admin/duplicates" title="Possible duplicates">
             Review charities the import pipeline flagged as likely duplicates.

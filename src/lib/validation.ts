@@ -16,6 +16,17 @@ export type ValidationResult<T> =
   | { success: false; fieldErrors: FieldErrors };
 
 /**
+ * Builds an object schema at the shared validation boundary.
+ *
+ * Feature modules compose the field helpers below through this function rather
+ * than importing Zod themselves, keeping schema construction and future Zod
+ * changes behind one module.
+ */
+export function objectSchema<T extends z.ZodRawShape>(shape: T) {
+  return z.object(shape);
+}
+
+/**
  * Runs a Zod schema against input and returns per-field errors instead of
  * throwing, so every failing field can be reported to the user at once
  * rather than one at a time.

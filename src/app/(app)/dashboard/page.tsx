@@ -11,6 +11,7 @@ import { hasPermission, canView, seesAdminView } from "@/lib/auth/permissions";
 import { formatMyActions, type ActionRow } from "@/lib/actions";
 import { reportError } from "@/lib/error-logging";
 import { containsRedactionPlaceholder } from "@/lib/ingestion/personal-data";
+import { hasResolvedWebsite } from "@/lib/website-absence";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import {
   computeDashboardMetrics,
@@ -467,7 +468,7 @@ export default async function DashboardPage({
           supabase
             .from("organisations")
             .select(
-              "id, legal_name, outreach_status, owner_id, updated_at, created_at, sector, organisation_type, city, country_code, website, contact_email, charity_activities, cic_community_statement",
+              "id, legal_name, outreach_status, owner_id, updated_at, created_at, sector, organisation_type, city, country_code, website, website_absent_at, contact_email, charity_activities, cic_community_statement",
             )
             .order("created_at", { ascending: true })
             .order("id", { ascending: true })
@@ -995,11 +996,11 @@ export default async function DashboardPage({
           storedMission.length > 0 &&
           !isRedactedMission,
         );
-        const hasWebsite = Boolean(
-          row.website &&
-          row.website.trim().length > 0 &&
-          !isRedactedWebsite,
-        );
+        const hasWebsite = hasResolvedWebsite({
+          website: row.website,
+          websiteAbsentAt: row.website_absent_at,
+          websiteIsRedacted: isRedactedWebsite,
+        });
         const hasEmail = Boolean(
           row.contact_email &&
           row.contact_email.trim().length > 0 &&

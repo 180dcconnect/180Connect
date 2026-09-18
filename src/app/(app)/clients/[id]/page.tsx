@@ -254,14 +254,6 @@ export default async function ClientOverviewPage({
             />
           </Rise>
 
-          {/* F216 — the Search-by-Similarity entry point, on every client. A
-              CAM standing on any record asks "who else looks like this?"; the
-              trigger previews the top few inline and hands the full shortlist
-              to the list page, where every other search lives. */}
-          <Rise>
-            <SimilarClientsCard organisationId={client.id} />
-          </Rise>
-
           {/* The Tags card's picker has to paint over the cards after it, and
               each Rise is a `filter` animation — its own stacking context — so
               a z-index inside the card cannot reach past its Rise. It goes
@@ -391,6 +383,14 @@ export default async function ClientOverviewPage({
               sources={sources}
               hasManualFields={fieldHistory.hasManual}
             />
+          </Rise>
+
+          {/* F216 — the Search-by-Similarity entry point, on every client. A
+              CAM standing on any record asks "who else looks like this?"; the
+              trigger previews the top few inline and hands the full shortlist
+              to the list page, where every other search lives. */}
+          <Rise>
+            <SimilarClientsCard organisationId={client.id} />
           </Rise>
         </Group>
       </div>

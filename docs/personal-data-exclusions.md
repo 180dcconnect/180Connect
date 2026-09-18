@@ -106,7 +106,7 @@ Two refinements (`20261003130000_contact_email_shared_inbox_override.sql`):
   (`MANUAL_ENTRY_RECORDS.contact_email_role_confirmed_*`), is set only through
   `save_manual_entry`, is void as soon as the address changes, and writes
   `audit_log` `manual_entry_contact_email_role_confirmed` holding the domain only.
-  An admin sees "Shared inbox confirmed by …" in the manual-entry review queue
+  An admin sees "Shared inbox confirmed by …" in Approvals, under New clients,
   before approving a CAM's submission.
 
 ## Rules ahead of the data

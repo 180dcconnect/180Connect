@@ -32,6 +32,8 @@ export type ManualEntryReviewState = {
   message: string;
   checks?: ManualEntryCheck[];
   approval?: ManualEntryApprovalContext;
+  /** The organisation the approval created or linked, on success. */
+  organisationId?: string | null;
 };
 
 type ManualEntryRow = {
@@ -88,7 +90,7 @@ export async function checkAvailableManualEntryDependencies(
   _previous: ManualEntryReviewState,
   formData: FormData,
 ): Promise<ManualEntryReviewState> {
-  const authorization = await getViewingActor("approval:manage", { route: "/admin/manual-entries" });
+  const authorization = await getViewingActor("approval:manage", { route: "/admin/approvals" });
   if (!authorization.ok) {
     return { kind: "error", message: actorFailureMessage(authorization.reason) };
   }
@@ -252,7 +254,7 @@ export async function approveManualEntry(
   _previous: ManualEntryReviewState,
   formData: FormData,
 ): Promise<ManualEntryReviewState> {
-  const authorization = await getCurrentActor("approval:manage", { route: "/admin/manual-entries" });
+  const authorization = await getCurrentActor("approval:manage", { route: "/admin/approvals" });
   if (!authorization.ok) {
     return { kind: "error", message: actorFailureMessage(authorization.reason) };
   }
@@ -291,7 +293,7 @@ export async function approveManualEntry(
     }
 
     const organisationId = String(data);
-    revalidatePath("/admin/manual-entries");
+    revalidatePath("/admin/approvals");
     revalidatePath("/clients");
     revalidatePath(`/clients/${organisationId}`);
 
@@ -309,6 +311,7 @@ export async function approveManualEntry(
       message: duplicateDecision === "link_existing"
         ? "Approved and linked to the existing client without creating a duplicate."
         : "Approved and created as an active manual client.",
+      organisationId,
     };
   } catch (error) {
     await reportError(error, {
@@ -327,7 +330,7 @@ export async function rejectManualEntry(
   _previous: ManualEntryReviewState,
   formData: FormData,
 ): Promise<ManualEntryReviewState> {
-  const authorization = await getCurrentActor("approval:manage", { route: "/admin/manual-entries" });
+  const authorization = await getCurrentActor("approval:manage", { route: "/admin/approvals" });
   if (!authorization.ok) {
     return { kind: "error", message: actorFailureMessage(authorization.reason) };
   }
@@ -347,7 +350,7 @@ export async function rejectManualEntry(
       p_notes: notes,
     });
     if (error) throw error;
-    revalidatePath("/admin/manual-entries");
+    revalidatePath("/admin/approvals");
     return { kind: "success", message: "Manual entry rejected." };
   } catch (error) {
     await reportError(error, {

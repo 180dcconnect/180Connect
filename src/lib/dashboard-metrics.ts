@@ -32,6 +32,8 @@ export type DashboardOrgRow = {
   city?: string | null;
   country_code?: string | null;
   website?: string | null;
+  /** An audited confirmation that an empty website is intentional. */
+  website_absent_at?: string | null;
   /** Read only by the dashboard's incomplete-records tile count. */
   contact_email?: string | null;
   /**

@@ -9,6 +9,7 @@ import { fetchPaged } from "@/lib/supabase/fetch-paged";
 import { reportError } from "@/lib/error-logging";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { containsRedactionPlaceholder } from "@/lib/ingestion/personal-data";
+import { hasResolvedWebsite } from "@/lib/website-absence";
 import { IncompleteRecordsPanel } from "./incomplete-records-panel";
 import type { IncompleteClientRecord } from "./types";
 import {
@@ -203,10 +204,11 @@ export default async function IncompleteRecordsPage() {
     // genuinely has no website — the mark of 20261018090000. It is cleared by
     // the database as soon as a website is on file, so a record cannot hold both.
     const websiteAbsentAt = org.website_absent_at ?? null;
-    const hasWebsite = Boolean(
-      (org.website && org.website.trim().length > 0 && !isRedactedWebsite) ||
-        websiteAbsentAt,
-    );
+    const hasWebsite = hasResolvedWebsite({
+      website: org.website,
+      websiteAbsentAt,
+      websiteIsRedacted: isRedactedWebsite,
+    });
     const hasEmail = Boolean(org.contact_email && org.contact_email.trim().length > 0 && !isRedactedEmail);
     const hasCity = Boolean(org.city && org.city.trim().length > 0 && !isRedactedCity);
     const isIncomplete =

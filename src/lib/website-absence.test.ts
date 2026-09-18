@@ -1,7 +1,45 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { websiteAbsenceFailureMessage, websiteAbsenceSavedMessage } from "./website-absence.ts";
+import {
+  hasResolvedWebsite,
+  websiteAbsenceFailureMessage,
+  websiteAbsenceSavedMessage,
+} from "./website-absence.ts";
+
+describe("hasResolvedWebsite", () => {
+  it("accepts either a real website or a confirmed absence", () => {
+    assert.equal(
+      hasResolvedWebsite({
+        website: "https://example.org",
+        websiteAbsentAt: null,
+      }),
+      true,
+    );
+    assert.equal(
+      hasResolvedWebsite({
+        website: null,
+        websiteAbsentAt: "2026-09-18T09:00:00Z",
+      }),
+      true,
+    );
+  });
+
+  it("keeps an unconfirmed blank or redacted website incomplete", () => {
+    assert.equal(
+      hasResolvedWebsite({ website: "   ", websiteAbsentAt: null }),
+      false,
+    );
+    assert.equal(
+      hasResolvedWebsite({
+        website: "https://redacted.example",
+        websiteAbsentAt: null,
+        websiteIsRedacted: true,
+      }),
+      false,
+    );
+  });
+});
 
 describe("websiteAbsenceFailureMessage", () => {
   it("says who can record the mark", () => {

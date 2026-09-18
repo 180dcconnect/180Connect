@@ -156,7 +156,7 @@ describe("summariseSystemHealth", () => {
   it("has nothing to raise when everything is proven", () => {
     const summary = summariseSystemHealth(input());
     assert.deepEqual(summary.attention, []);
-    const services = summary.groups[1].rows ?? [];
+    const services = summary.groups.find((group) => group.title === "Connected services")?.rows ?? [];
     // Every connected service says the same word, so the list reads as one
     // statement. Only Gmail's is a live round trip; the rest are their key.
     for (const key of ["gmail", "gemini", "companies-house", "charity-commission"]) {
@@ -180,7 +180,8 @@ describe("summariseSystemHealth", () => {
     assert.deepEqual(summary.attention, []);
     const drafting = summary.groups[0].rows?.find((row) => row.key === "drafting");
     assert.equal(drafting?.note, "Not connected");
-    const services = summary.groups[1].rows ?? [];
+    const services =
+      summary.groups.find((group) => group.title === "Connected services")?.rows ?? [];
     for (const key of ["gmail", "gemini", "companies-house", "charity-commission"]) {
       assert.equal(services.find((row) => row.key === key)?.note, "Not connected");
     }

@@ -10,21 +10,28 @@ import {
   EDIT_SUGGESTION_SELECT,
   type EditSuggestionRow,
 } from "@/lib/edit-suggestions";
+import {
+  MANUAL_ENTRY_REVIEW_SELECT,
+  type ManualEntryReviewRow,
+} from "@/lib/manual-entry";
 import type { OrganisationSource } from "@/lib/organisation-source-links";
 import { ApprovalsPanel } from "./approvals-panel";
 
 /**
  * F181 (#177) — Approval Tab.
  *
- * Dedicated admin approvals workspace where proposed client field edits
- * (F077–F079) are reviewed and decided. All decisions run through the audited
- * `decide_edit_suggestion` RPC with stale-snapshot checks. Approving applies
- * the verified value to the live client record; rejecting logs the reason and
- * leaves the record intact.
+ * The one workspace where proposed client work is reviewed and decided:
+ * field edits (F077–F079) on the Awaiting review tab, whole new clients
+ * submitted by CAMs (F036) on the New clients tab. Edit decisions run through
+ * the audited `decide_edit_suggestion` RPC with stale-snapshot checks —
+ * approving applies the verified value to the live client record; manual-entry
+ * decisions run through the audited `approve_manual_entry` / `reject_manual_entry`
+ * RPCs, which create (or link) the organisation. Rejecting logs the reason and
+ * leaves the record intact either way.
  *
- * Leadership (viewer) reads the same queue and decides nothing in it: the two
- * buttons and the rejection dialog are withheld, `hasPermission` deciding that
- * rather than a role literal, because it is the same question the RPC answers.
+ * Leadership (viewer) reads the same queues and decides nothing in them: every
+ * decision control is withheld, `hasPermission` deciding that rather than a
+ * role literal, because it is the same question the RPCs answer.
  */
 export default async function AdminApprovalsPage() {
   const authorization = await getViewingActor("approval:manage", {
@@ -39,17 +46,32 @@ export default async function AdminApprovalsPage() {
   const canDecide = hasPermission(authorization.actor.role, "approval:manage");
 
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("edit_suggestions")
-    .select(EDIT_SUGGESTION_SELECT)
-    .order("created_at", { ascending: false })
-    .overrideTypes<EditSuggestionRow[], { merge: false }>();
+  // Either queue can fail without taking the other down: a CAM whose edits
+  // cannot load can still have their new clients decided, and vice versa.
+  const [{ data, error }, { data: manualEntriesData, error: manualEntriesError }] =
+    await Promise.all([
+      supabase
+        .from("edit_suggestions")
+        .select(EDIT_SUGGESTION_SELECT)
+        .order("created_at", { ascending: false })
+        .overrideTypes<EditSuggestionRow[], { merge: false }>(),
+      supabase
+        .from("manual_entry_records")
+        .select(MANUAL_ENTRY_REVIEW_SELECT)
+        .in("review_status", ["pending", "approved", "rejected"])
+        .order("created_at", { ascending: false })
+        .overrideTypes<ManualEntryReviewRow[], { merge: false }>(),
+    ]);
 
   if (error) {
     await reportError(error, { operation: "admin.approvals.page_list" });
   }
+  if (manualEntriesError) {
+    await reportError(manualEntriesError, { operation: "admin.approvals.page_manual_entries" });
+  }
 
   const rows = data ?? [];
+  const manualEntries = manualEntriesData ?? [];
 
   /**
    * What each card's "Check the source" row needs to offer its links: the
@@ -92,19 +114,19 @@ export default async function AdminApprovalsPage() {
                 </h1>
                 <p className="mt-3 text-sm leading-[1.65] text-dim">
                   Review changes proposed by Client Acquisition Managers before they reach
-                  the live client record.
+                  the live client record — field edits and whole new clients alike.
                 </p>
               </div>
             </div>
           </header>
         </Rise>
 
-        {error && (
+        {(error || manualEntriesError) && (
           <Rise>
             <InlineAlert
               variant="page"
               className="rounded-panel border-stop/20 bg-stop-wash/60 text-stop"
-              message="The approvals list could not be loaded. Refresh the page and try again."
+              message="Some approval information could not be loaded. Refresh the page and try again."
             />
           </Rise>
         )}
@@ -112,6 +134,7 @@ export default async function AdminApprovalsPage() {
         <Rise>
           <ApprovalsPanel
             initialSuggestions={rows}
+            initialManualEntries={manualEntries}
             canDecide={canDecide}
             sourceByOrganisation={sourceByOrganisation}
           />

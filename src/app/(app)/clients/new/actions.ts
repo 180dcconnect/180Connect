@@ -290,7 +290,7 @@ export async function saveManualEntry(
     }
 
     revalidatePath("/clients/new");
-    revalidatePath("/admin/manual-entries");
+    revalidatePath("/admin/approvals");
     if (authorization.actor.role !== "admin") {
       return {
         kind: "success",
@@ -314,7 +314,7 @@ export async function saveManualEntry(
       if (approvalError.code === "55000") {
         return {
           kind: "warning",
-          message: "Saved, but a possible duplicate needs your decision in the manual-entry review queue.",
+          message: "Saved, but a possible duplicate needs your decision in Approvals, under New clients.",
           warnings,
           entryId: savedEntryId,
         };

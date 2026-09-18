@@ -14,6 +14,28 @@ const GENERIC_FAILURE =
   "That could not be saved. Refresh the page and try again.";
 
 /**
+ * Whether the website part of an incomplete-record check is resolved.
+ *
+ * A real URL resolves it, as does the audited admin confirmation that the
+ * client genuinely has no website. Redaction placeholders never count as a
+ * usable URL; callers already detect those while building the rest of the
+ * record's completeness state, so that fact is explicit here too.
+ */
+export function hasResolvedWebsite({
+  website,
+  websiteAbsentAt,
+  websiteIsRedacted = false,
+}: {
+  website: string | null | undefined;
+  websiteAbsentAt: string | null | undefined;
+  websiteIsRedacted?: boolean;
+}): boolean {
+  return Boolean(
+    (website?.trim() && !websiteIsRedacted) || websiteAbsentAt?.trim(),
+  );
+}
+
+/**
  * Maps a Postgres error from `set_website_absent` onto something safe to show.
  *
  * Each errcode below is one the RPC raises deliberately; everything else — a

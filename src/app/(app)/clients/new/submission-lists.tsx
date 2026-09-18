@@ -80,8 +80,8 @@ export function RecentlyAdded({
               {isAdmin ? (
                 <>
                   {awaiting} {awaiting === 1 ? "needs a decision" : "need decisions"} in{" "}
-                  <Link className="font-semibold underline underline-offset-2" href="/admin/manual-entries">
-                    manual entries
+                  <Link className="font-semibold underline underline-offset-2" href="/admin/approvals">
+                    approvals
                   </Link>
                 </>
               ) : (

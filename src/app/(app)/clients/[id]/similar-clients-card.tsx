@@ -2,15 +2,56 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { motion, useReducedMotionConfig } from "motion/react";
-import { ArrowRight, ChevronDown, Search } from "lucide-react";
-import { EASE } from "@/components/brand/motion";
-import { LIP, SEARCH_GLASS_FROSTED_LIGHT, SEARCH_GLASS_LIGHT } from "@/components/brand/tokens";
+import { AnimatePresence, motion, useReducedMotionConfig, type Variants } from "motion/react";
+import { ArrowRight } from "lucide-react";
+import { EASE, stagger } from "@/components/brand/motion";
+import {
+  LIP,
+  SEARCH_GLASS_LIGHT,
+  SEARCH_GLASS_OPEN_LIGHT,
+} from "@/components/brand/tokens";
 import { SectionCard } from "./section-card";
 import {
   getSimilarClientsPreviewAction,
   type SimilarPreviewResult,
 } from "./actions";
+
+/** Match the Inbox search's 64px row and 32px capsule exactly. */
+const ROW = 64;
+
+const PANEL_STAGGER = stagger(0.05, 0.14);
+
+/** Inbox glass rows rise without blur so the glass surface stays crisp. */
+const GLASS_ITEM: Variants = {
+  hidden: { opacity: 0, y: 8 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: EASE } },
+};
+
+/**
+ * Similarity is agreement across two to five known dimensions, so the useful
+ * bands follow the scores that can actually occur (20-point steps when all
+ * five are known). Colour accelerates the scan; the exact number and dot keep
+ * the meaning available without relying on colour alone.
+ */
+function SimilarityBadge({ percent }: { percent: number }) {
+  const band =
+    percent >= 80
+      ? { label: "High match", className: "bg-go-wash text-go" }
+      : percent >= 60
+        ? { label: "Moderate match", className: "bg-hold-wash text-hold" }
+        : { label: "Lower match", className: "bg-stop-wash text-stop" };
+
+  return (
+    <span
+      aria-label={`${percent}% similar — ${band.label}`}
+      title={band.label}
+      className={`mt-0.5 inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold tabular-nums ${band.className}`}
+    >
+      <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
+      {percent}% similar
+    </span>
+  );
+}
 
 /**
  * F216 — the Search-by-Similarity entry point on the record. Offered on every
@@ -20,15 +61,11 @@ import {
  * client with at least two known dimensions gets a shortlist, and a thinly
  * described one gets an honest message instead of a list it cannot back.
  *
- * The trigger wears the client-list search bar's light language (the frosted
- * pill, `components/brand/search-bar.tsx` `tone="light"`): a bespoke pill
- * rather than the component itself, which carries query/filter/AI machinery
- * this read-only expander has no use for. Tapping it drops the preview panel
- * below with the Motion reveal from `clients/new/disclosure-section.tsx`
- * (height 0 → auto, clip off once settled), listing the top few matches with
- * their agreement score and why, plus the way out to the full shortlist on
- * /clients. The preview loads on expand, so a record view pays for the
- * full-list read only when its reader asks.
+ * This is an Inbox-search-shaped control adapted to one action. It deliberately
+ * shares that component's 64px rounded glass capsule, Lato prompt treatment,
+ * blue-to-white surface morph, rolling-square working state and staggered
+ * panel reveal. It stays bespoke because there is no query or filter state to
+ * justify mounting BrandSearchBar's much larger interaction model.
  *
  * Read-only throughout — links and an expander, no writes — so viewers get
  * the same card as everyone else.
@@ -36,7 +73,6 @@ import {
 export function SimilarClientsCard({ organisationId }: { organisationId: string }) {
   const reduceMotion = useReducedMotionConfig();
   const [open, setOpen] = useState(false);
-  const [settled, setSettled] = useState(false);
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<SimilarPreviewResult | null>(null);
   const panelId = "similar-clients-panel";
@@ -64,113 +100,213 @@ export function SimilarClientsCard({ organisationId }: { organisationId: string 
       title="Find similar clients"
       hint="Ranked by shared sector, location, size, grant history and outcome — the same dimensions the priority score reads."
     >
-      {/* The trigger: the search bar's frosted pill in miniature. */}
-      <button
-        type="button"
-        onClick={toggle}
-        aria-expanded={open}
-        aria-controls={panelId}
-        className="mt-3.5 flex h-12 w-full cursor-pointer items-center gap-3 rounded-full pr-1.5 pl-4 text-left ring-lead/25 backdrop-blur-[20px] transition-shadow focus-visible:ring-2 focus-visible:outline-none"
+      <motion.div
+        className="relative mt-3.5 w-full overflow-hidden backdrop-blur-[3px]"
         style={{
-          background: open ? SEARCH_GLASS_FROSTED_LIGHT : SEARCH_GLASS_LIGHT,
-          boxShadow: `${LIP}, 0 1px 2px rgba(20, 26, 34, 0.08)`,
+          boxShadow: LIP,
+          borderRadius: ROW / 2,
+        }}
+        animate={{
+          height: open ? "auto" : ROW,
+          backgroundColor: open ? SEARCH_GLASS_OPEN_LIGHT : SEARCH_GLASS_LIGHT,
+        }}
+        initial={false}
+        transition={
+          reduceMotion
+            ? { duration: 0 }
+            : {
+                height: { duration: 0.7, ease: EASE },
+                backgroundColor: { duration: 0.7, ease: EASE },
+              }
+        }
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && open) {
+            event.stopPropagation();
+            setOpen(false);
+          }
         }}
       >
-        <Search aria-hidden="true" className="size-4 shrink-0 text-ink/60" />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
-          {open ? "Similar clients" : "Find clients like this one"}
-        </span>
-        <span
+        {/* The blur sits on a childless layer, matching BrandSearchBar's glass
+            construction and avoiding content affecting backdrop sampling. */}
+        <div
           aria-hidden="true"
-          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-ink text-white"
-        >
-          <ChevronDown
-            className={`size-4 transition-transform duration-300 motion-reduce:transition-none ${
-              open ? "rotate-180" : ""
-            }`}
-          />
-        </span>
-      </button>
+          className="pointer-events-none absolute inset-0 z-0 rounded-[inherit] backdrop-blur-[3px]"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-30 rounded-[inherit] ring-1 ring-transparent ring-inset"
+        />
 
-      <motion.div
-        id={panelId}
-        animate={open ? { height: "auto", opacity: 1 } : { height: 0, opacity: 0 }}
-        className={open && settled ? "overflow-visible" : "overflow-hidden"}
-        onAnimationComplete={() => setSettled(open)}
-        onAnimationStart={() => setSettled(false)}
-        inert={!open}
-        initial={false}
-        transition={reduceMotion ? { duration: 0 } : { duration: 0.35, ease: EASE }}
-      >
-        <div className="pt-2 pb-1" aria-live="polite">
-          {loading && !preview ? (
-            <ul className="mt-2 space-y-3" aria-label="Finding similar clients">
-              {[0, 1, 2].map((index) => (
-                <li key={index} className="flex items-center gap-3 border-t border-rule-soft py-3">
-                  <span className="h-4 w-24 animate-pulse rounded-inset bg-paper" />
-                  <span className="h-4 flex-1 animate-pulse rounded-inset bg-paper" />
-                  <span className="h-5 w-16 animate-pulse rounded-full bg-paper" />
-                </li>
-              ))}
-            </ul>
-          ) : preview?.status === "ok" ? (
-            <div className="mt-2">
-              <p className="text-[13px] leading-[1.55] text-dim">
-                Ranked by {preview.basis.join(", ")} — the traits on record for this client.
-              </p>
-              <ul className="mt-1">
-                {preview.matches.map((match, index) => (
-                  <li
-                    key={match.id}
-                    className="flex items-start gap-3 border-t border-rule-soft py-3"
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          aria-controls={open ? panelId : undefined}
+          aria-busy={loading}
+          className="relative z-20 flex w-full cursor-pointer items-center pr-3 pl-7 text-left focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-lime-600"
+          style={{ height: ROW }}
+        >
+          <span className="relative mr-3 min-w-0 flex-1 overflow-hidden">
+            <AnimatePresence initial={false} mode="wait">
+              <motion.span
+                key={loading ? "loading" : open ? "open" : "closed"}
+                className="font-body flex items-center text-[15px] whitespace-nowrap text-slate-900 sm:text-base"
+                initial={
+                  reduceMotion
+                    ? false
+                    : { opacity: 0, y: 10, filter: "blur(6px)" }
+                }
+                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                exit={
+                  reduceMotion
+                    ? { opacity: 0 }
+                    : { opacity: 0, y: -10, filter: "blur(6px)" }
+                }
+                transition={reduceMotion ? { duration: 0 } : { duration: 0.45, ease: EASE }}
+              >
+                {loading ? (
+                  <span className="text-slate-500">Finding similar clients…</span>
+                ) : open ? (
+                  "Similar clients"
+                ) : (
+                  <>
+                    <span className="text-slate-500">Find&nbsp;</span>
+                    similar clients
+                  </>
+                )}
+              </motion.span>
+            </AnimatePresence>
+          </span>
+          <span
+            aria-hidden="true"
+            className={`grid size-8 shrink-0 place-items-center rounded-full transition-all ${
+              loading ? "bg-transparent" : "bg-lead text-white hover:bg-lead-mid"
+            }`}
+          >
+            {loading ? (
+              <span
+                className="size-4.5 animate-spin rounded-[4px] bg-lead shadow-[0_0_10px_var(--lead)]"
+                style={{ animationDuration: "2.5s" }}
+              />
+            ) : (
+              <ArrowRight className="size-4" />
+            )}
+          </span>
+        </button>
+
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              key="panel"
+              id={panelId}
+              className="relative z-10 px-4 pb-4"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, transition: { duration: 0.18, ease: EASE } }}
+              transition={
+                reduceMotion
+                  ? { duration: 0 }
+                  : { duration: 0.5, ease: EASE, delay: 0.2 }
+              }
+              aria-live="polite"
+            >
+              {loading && !preview ? (
+                <motion.ul
+                  className="flex flex-col gap-1"
+                  aria-label="Finding similar clients"
+                  variants={PANEL_STAGGER}
+                  initial="hidden"
+                  animate="show"
+                >
+                  {[0, 1, 2].map((index) => (
+                    <motion.li
+                      key={index}
+                      variants={GLASS_ITEM}
+                      className="flex items-center gap-3 rounded-2xl px-3 py-3"
+                    >
+                      <span className="h-4 w-6 animate-pulse rounded bg-slate-900/5" />
+                      <span className="h-4 flex-1 animate-pulse rounded bg-slate-900/5" />
+                      <span className="h-5 w-16 animate-pulse rounded-full bg-slate-900/5" />
+                    </motion.li>
+                  ))}
+                </motion.ul>
+              ) : preview?.status === "ok" ? (
+                <motion.div
+                  variants={PANEL_STAGGER}
+                  initial="hidden"
+                  animate="show"
+                >
+                  <motion.p
+                    variants={GLASS_ITEM}
+                    className="px-3 pb-2.5 text-[13px] leading-[1.55] text-slate-500"
                   >
-                    <span className="w-6 shrink-0 font-body text-[18px] leading-none font-light text-faint tabular-nums">
-                      {index + 1}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <Link
-                        href={`/clients/${match.id}`}
-                        className="text-sm font-semibold text-lead hover:underline"
-                      >
-                        {match.name}
-                      </Link>
-                      <p className="mt-0.5 text-[13px] leading-[1.55] text-dim">
-                        {match.reasons.join(", ")}.
-                      </p>
-                    </div>
-                    <span className="shrink-0 rounded-full bg-paper px-2 py-0.5 text-[11px] font-semibold text-ink tabular-nums">
-                      {match.percent}% similar
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <Link
-                href={`/clients?similar=${organisationId}`}
-                className="mt-1 inline-flex items-center gap-1.5 rounded-inset px-2 py-1 text-[13px] font-semibold text-lead transition-colors hover:bg-lead-wash focus-visible:ring-2 focus-visible:ring-lead/30 focus-visible:outline-none"
-              >
-                {preview.capped
-                  ? "View all similar clients"
-                  : `View all ${preview.total} similar client${preview.total === 1 ? "" : "s"}`}
-                <ArrowRight aria-hidden="true" className="size-3.5" />
-              </Link>
-            </div>
-          ) : preview?.status === "insufficient" ? (
-            <p className="mt-2 rounded-inset bg-paper px-3 py-2.5 text-[13px] leading-[1.55] text-dim">
-              {preview.message}
-            </p>
-          ) : preview?.status === "error" ? (
-            <div className="mt-2 rounded-inset bg-stop-wash px-3 py-2.5" role="alert">
-              <p className="text-[13px] font-semibold text-stop">{preview.message}</p>
-              <button
-                type="button"
-                onClick={() => void load()}
-                className="mt-1.5 cursor-pointer rounded-inset px-2 py-0.5 text-[13px] font-semibold text-stop underline"
-              >
-                Try again
-              </button>
-            </div>
-          ) : null}
-        </div>
+                    Ranked by {preview.basis.join(", ")} — the traits on record for this client.
+                  </motion.p>
+                  <motion.ul className="flex flex-col gap-1" variants={PANEL_STAGGER}>
+                    {preview.matches.map((match, index) => (
+                      <motion.li key={match.id} variants={GLASS_ITEM}>
+                        <Link
+                          href={`/clients/${match.id}`}
+                          className="flex items-start gap-3 rounded-2xl px-3 py-3 transition-colors hover:bg-slate-900/5 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-lime-600"
+                        >
+                          <span className="w-5 shrink-0 pt-0.5 font-body text-[16px] leading-none font-light text-slate-400 tabular-nums">
+                            {index + 1}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block font-body text-sm font-semibold text-slate-900">
+                              {match.name}
+                            </span>
+                            <span className="mt-0.5 block text-[13px] leading-[1.55] text-slate-500">
+                              {match.reasons.join(", ")}.
+                            </span>
+                          </span>
+                          <SimilarityBadge percent={match.percent} />
+                        </Link>
+                      </motion.li>
+                    ))}
+                  </motion.ul>
+                  <motion.div variants={GLASS_ITEM} className="mt-2 px-2">
+                    <Link
+                      href={`/clients?similar=${organisationId}`}
+                      className="inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[13px] font-semibold text-lead transition-colors hover:bg-slate-900/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime-600"
+                    >
+                      {preview.capped
+                        ? "View all similar clients"
+                        : `View all ${preview.total} similar client${preview.total === 1 ? "" : "s"}`}
+                      <ArrowRight aria-hidden="true" className="size-3.5" />
+                    </Link>
+                  </motion.div>
+                </motion.div>
+              ) : preview?.status === "insufficient" ? (
+                <motion.p
+                  variants={GLASS_ITEM}
+                  initial="hidden"
+                  animate="show"
+                  className="rounded-2xl bg-slate-900/5 px-4 py-3 text-[13px] leading-[1.55] text-slate-600"
+                >
+                  {preview.message}
+                </motion.p>
+              ) : preview?.status === "error" ? (
+                <motion.div
+                  variants={GLASS_ITEM}
+                  initial="hidden"
+                  animate="show"
+                  className="rounded-2xl bg-stop-wash px-4 py-3"
+                  role="alert"
+                >
+                  <p className="text-[13px] font-semibold text-stop">{preview.message}</p>
+                  <button
+                    type="button"
+                    onClick={() => void load()}
+                    className="mt-1.5 cursor-pointer rounded-full px-2 py-1 text-[13px] font-semibold text-stop underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stop"
+                  >
+                    Try again
+                  </button>
+                </motion.div>
+              ) : null}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
     </SectionCard>
   );

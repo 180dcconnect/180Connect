@@ -9,8 +9,8 @@ import {
 } from "@/lib/dashboard/system-health";
 
 /**
- * Admin and leadership only. Four short lists — AI and scoring, connected
- * services, scheduled jobs, and provider status — each row a mark, a name and
+ * Admin and leadership only. Four short lists — AI and scoring, scheduled
+ * jobs, connected services, and provider status — each row a mark, a name and
  * when it last proved itself. The card stays calm when everything is fine and
  * lists what needs a person at the top when something is not; it is not a
  * monitoring console.

@@ -7,8 +7,12 @@
  * owns the half that needs no database.
  */
 
-import { z } from "zod";
-import { nonEmptyTrimmed, safeValidate, uuidField } from "../validation.ts";
+import {
+  nonEmptyTrimmed,
+  objectSchema,
+  safeValidate,
+  uuidField,
+} from "../validation.ts";
 
 /**
  * Well above any real booklet — generations run to a few thousand characters,
@@ -18,11 +22,10 @@ import { nonEmptyTrimmed, safeValidate, uuidField } from "../validation.ts";
  */
 export const MAX_BOOKLET_EDIT_CHARS = 20_000;
 
-// Every field rule comes from `../validation.ts`; `z.object` is only the shape
-// they are assembled into, which is what the reference usage does too
-// (`auth/login.ts`). Both ids are client-supplied, so they are checked here
-// rather than handed to Postgres to cast.
-const EditInputSchema = z.object({
+// The fields and their object shape both come through `../validation.ts`.
+// Both ids are client-supplied, so they are checked here rather than handed to
+// Postgres to cast.
+const EditInputSchema = objectSchema({
   organisationId: uuidField(),
   baseVersionId: uuidField(),
   text: nonEmptyTrimmed(MAX_BOOKLET_EDIT_CHARS, "Write something first — an empty booklet cannot be saved."),

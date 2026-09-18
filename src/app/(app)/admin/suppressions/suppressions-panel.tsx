@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
-import { ChevronDown, Loader2 } from "lucide-react";
+import { ChevronDown, Lock, Loader2, Unlock } from "lucide-react";
 import { EASE } from "@/components/brand/motion";
+import { Switch } from "@/components/ui/material-design-3-switch";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   PagerRow,
@@ -12,10 +14,6 @@ import {
   PagingSummary,
   useListPager,
 } from "@/components/ui/list-pager";
-import {
-  ThanosSnapEffect,
-  type ThanosSnapEffectRef,
-} from "@/components/ui/thanos-snap-effect";
 import { Pill, SectionCard } from "@/app/(app)/clients/[id]/section-card";
 import type { SuppressionRow } from "@/lib/suppressions";
 import { NETWORK_ERROR_MESSAGE } from "@/lib/network-error";
@@ -39,11 +37,18 @@ type OrganisationOption = { id: string; legal_name: string };
  */
 const SUPPRESSION_PAGE_SIZES = [5, 10, 15, 20];
 
+type SuppressionTab = "requests" | "active" | "history";
+
+const SUPPRESSION_TABS: readonly { id: SuppressionTab; label: string }[] = [
+  { id: "requests", label: "Requests waiting for a decision" },
+  { id: "active", label: "Active suppressions" },
+  { id: "history", label: "Suppression history" },
+];
+
+const SUPPRESSION_TAB_ORDER: readonly SuppressionTab[] = ["requests", "active", "history"];
+
 const STOP_BUTTON =
   "inline-flex min-h-9 cursor-pointer items-center justify-center gap-1.5 rounded-inset border border-stop bg-stop px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-stop/90 focus-visible:ring-2 focus-visible:ring-stop/30 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50";
-
-const PRIMARY_BUTTON =
-  "inline-flex min-h-9 cursor-pointer items-center justify-center gap-1.5 rounded-inset border border-ink bg-ink px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-lead focus-visible:ring-2 focus-visible:ring-lead/30 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50";
 
 const SECONDARY_BUTTON =
   "inline-flex min-h-9 cursor-pointer items-center justify-center gap-1.5 rounded-inset border border-rule bg-white px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:border-lead/40 hover:bg-paper focus-visible:ring-2 focus-visible:ring-lead/30 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50";
@@ -105,6 +110,17 @@ export function SuppressionsPanel({
   organisationsUnavailable: boolean;
 }) {
   const [rows, setRows] = useState(initialSuppressions);
+  /**
+   * Which queue the reader is looking at. The block form above stays put —
+   * blocking is available from every tab, so the tabs only swap the lists
+   * below it. Land where the work is: an open request first, then the active
+   * register, otherwise the queue (which explains itself when empty).
+   */
+  const [activeTab, setActiveTab] = useState<SuppressionTab>(() => {
+    if (initialSuppressions.some((row) => row.status === "pending")) return "requests";
+    if (initialSuppressions.some((row) => row.status === "active")) return "active";
+    return "requests";
+  });
   const [organisationId, setOrganisationId] = useState("");
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -112,6 +128,8 @@ export function SuppressionsPanel({
   const [activeLiftId, setActiveLiftId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; tone: "success" | "error" } | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  /** A lifted row stays visible with its switch off until this page is left. */
+  const [locallyLiftedIds, setLocallyLiftedIds] = useState<Set<string>>(new Set());
   /**
    * The block form starts closed. Blocking a client is the exception on this
    * page — the state it leaves behind (who is blocked, who asked, what was
@@ -133,12 +151,6 @@ export function SuppressionsPanel({
    * button are one tap away, on the summary itself.
    */
   const [expandedActiveIds, setExpandedActiveIds] = useState<Set<string>>(new Set());
-  /** The lift that has had its reason written but not its confirming click. */
-  const [confirmingLiftId, setConfirmingLiftId] = useState<string | null>(null);
-  /** One dissolve per active card, so a lift plays out on the row it removes. */
-  const liftSnapRefs = useRef(new Map<string, ThanosSnapEffectRef | null>());
-  /** The button that opens the block form, so the reader gets their focus back. */
-  const openBlockFormRef = useRef<HTMLButtonElement | null>(null);
 
   const pending = rows.filter((row) => row.status === "pending");
   const active = rows.filter((row) => row.status === "active");
@@ -162,6 +174,8 @@ export function SuppressionsPanel({
   ];
   const isBusy = busyKey !== null;
   const dataUnavailable = suppressionsUnavailable || organisationsUnavailable;
+  const activeBlockedCount = active.filter((row) => !locallyLiftedIds.has(row.id)).length;
+  const pendingLiftRow = active.find((row) => row.id === activeLiftId) ?? null;
 
   // Every list on this page pages from the top, each with its own window.
   const requestsPager = useListPager(pending, 10, SUPPRESSION_PAGE_SIZES);
@@ -190,6 +204,33 @@ export function SuppressionsPanel({
     });
   }
 
+  function switchTab(tab: SuppressionTab) {
+    setActiveTab(tab);
+  }
+
+  function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    const at = SUPPRESSION_TAB_ORDER.indexOf(activeTab);
+    let nextTab: SuppressionTab | null = null;
+    if (event.key === "ArrowRight") nextTab = SUPPRESSION_TAB_ORDER[(at + 1) % SUPPRESSION_TAB_ORDER.length] ?? null;
+    if (event.key === "ArrowLeft")
+      nextTab =
+        SUPPRESSION_TAB_ORDER[(at - 1 + SUPPRESSION_TAB_ORDER.length) % SUPPRESSION_TAB_ORDER.length] ??
+        null;
+    if (event.key === "Home") nextTab = SUPPRESSION_TAB_ORDER[0] ?? null;
+    if (event.key === "End") nextTab = SUPPRESSION_TAB_ORDER[SUPPRESSION_TAB_ORDER.length - 1] ?? null;
+    if (!nextTab) return;
+
+    event.preventDefault();
+    switchTab(nextTab);
+    document.getElementById(`suppressions-tab-${nextTab}`)?.focus();
+  }
+
+  const tabCounts: Record<SuppressionTab, number> = {
+    requests: pending.length,
+    active: active.length,
+    history: history.length,
+  };
+
   async function submitCreate(event: React.FormEvent) {
     event.preventDefault();
     setBusyKey("create");
@@ -208,10 +249,7 @@ export function SuppressionsPanel({
         return;
       }
       setRows(result.suppressions);
-      // The form is on its way out and the reader's focus is inside it, so it goes
-      // back to the button that opened it rather than falling to the page body.
       closeBlockForm();
-      openBlockFormRef.current?.focus();
       setNotice({
         text: "Client suppressed. They are hidden from working lists and outreach is blocked.",
         tone: "success",
@@ -283,30 +321,63 @@ export function SuppressionsPanel({
         });
         return;
       }
-      // The card dissolves on its way out, then the list updates. The row is
-      // held until the dissolve finishes: refreshing the list first would
-      // unmount the card on the frame the snap starts, and nothing would be seen.
-      try {
-        await liftSnapRefs.current.get(suppressionId)?.snap();
-      } catch {
-        // The lift is already saved; a missed animation must not read as a
-        // failed decision.
-      }
-      liftSnapRefs.current.delete(suppressionId);
-      setRows(result.suppressions);
+      // Keep the row in this visit's active register with the switch off. A
+      // fresh visit reads the server state and places it in history instead.
+      setLocallyLiftedIds((current) => new Set(current).add(suppressionId));
       setActiveLiftId(null);
-      setConfirmingLiftId(null);
       setLiftReasons((current) => {
         const next = { ...current };
         delete next[suppressionId];
         return next;
       });
       setNotice({
-        text: "Suppression lifted. The client is visible in working lists and outreach is available again.",
+        text: "Suppression lifted. The client is back in working lists and outreach is available again. It stays here until you leave this page.",
         tone: "success",
       });
     } catch (error) {
       void reportError(error, { operation: "admin.suppressions.lift_client" });
+      setNotice({ text: NETWORK_ERROR_MESSAGE, tone: "error" });
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function resuppress(row: SuppressionRow) {
+    setBusyKey(`resuppress:${row.id}`);
+    setNotice(null);
+    // The switch acknowledges the click immediately. Keeping this row and id
+    // mounted also gives its 300ms spring time to finish instead of replacing
+    // it with the new server row halfway through the motion.
+    setLocallyLiftedIds((current) => {
+      const next = new Set(current);
+      next.delete(row.id);
+      return next;
+    });
+
+    const rollBackSwitch = () => {
+      setLocallyLiftedIds((current) => new Set(current).add(row.id));
+    };
+
+    try {
+      const result = await suppressClientAction({ organisationId: row.organisation_id, reason: row.reason });
+      if (!result.ok) {
+        rollBackSwitch();
+        setNotice({ text: result.error, tone: "error" });
+        return;
+      }
+      if (!result.suppressions) {
+        setNotice({
+          text: "The client was re-suppressed, but the page could not refresh its list. Refresh the page to see the latest status.",
+          tone: "error",
+        });
+        return;
+      }
+      // The optimistic row stays mounted for this visit. A fresh page load reads
+      // the new active suppression row from the server.
+      setNotice({ text: "Suppression restored. The client is blocked from outreach again.", tone: "success" });
+    } catch (error) {
+      rollBackSwitch();
+      void reportError(error, { operation: "admin.suppressions.resuppress_client" });
       setNotice({ text: NETWORK_ERROR_MESSAGE, tone: "error" });
     } finally {
       setBusyKey(null);
@@ -325,9 +396,9 @@ export function SuppressionsPanel({
             <span className="font-semibold text-ink">
               {suppressionsUnavailable
                 ? "Suppression status could not be loaded"
-                : active.length === 0
+                : activeBlockedCount === 0
                 ? "No clients are currently suppressed"
-                : `${active.length} ${active.length === 1 ? "client" : "clients"} blocked from outreach`}
+                : `${activeBlockedCount} ${activeBlockedCount === 1 ? "client" : "clients"} blocked from outreach`}
             </span>
             {!suppressionsUnavailable && pending.length > 0 && (
               <>
@@ -357,7 +428,7 @@ export function SuppressionsPanel({
       <SectionCard
         headingId="suppress-client-heading"
         title="Block a client now"
-        hint="The client disappears from standard working lists and nobody, including admins, can send outreach. You can lift the suppression from this page later."
+        hint="The client disappears from standard working lists and nobody, including admins, can send outreach. You can lift the suppression from the Active suppressions tab later."
         /*
          * The control that opens the form sits in the heading row, where the
          * card's other properties are, and turns into the way out of it. The
@@ -369,7 +440,6 @@ export function SuppressionsPanel({
             <Pill tone="stop">Takes effect immediately</Pill>
             {canManage && (
               <button
-                ref={openBlockFormRef}
                 aria-controls={isBlockFormOpen ? "block-client-form" : undefined}
                 aria-expanded={isBlockFormOpen}
                 /* One width for both labels: the pill beside it must not move when
@@ -495,18 +565,59 @@ export function SuppressionsPanel({
         </AnimatePresence>
       </SectionCard>
 
-      <section aria-labelledby="suppression-requests-heading">
-        <div className="mb-4">
-          <h2
-            id="suppression-requests-heading"
-            className="font-body text-[19px] leading-[1.3] font-semibold tracking-[-0.01em] text-ink"
-          >
-            Requests waiting for a decision
-          </h2>
-          <p className="mt-1.5 text-[13px] leading-[1.55] text-dim">
-            A CAM has asked for outreach to stop. Nothing changes until an admin approves the request.
-          </p>
-        </div>
+      {/*
+       * The block form above stays visible on every tab: blocking is available
+       * from wherever the reader is, and the tabs only swap the queues below.
+       * Same pattern as the approvals and review queues — a tablist with counts,
+       * one tabpanel per queue, keyboard arrow support in `handleTabKeyDown`.
+       */}
+      <div
+        className="flex items-end gap-6 border-b border-rule"
+        role="tablist"
+        aria-label="Suppression views"
+      >
+        {SUPPRESSION_TABS.map((tab) => {
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              id={`suppressions-tab-${tab.id}`}
+              onClick={() => switchTab(tab.id)}
+              onKeyDown={handleTabKeyDown}
+              tabIndex={isActive ? 0 : -1}
+              className={`relative inline-flex cursor-pointer items-center gap-2 pb-3 text-sm font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-lead/30 focus-visible:outline-none ${
+                isActive
+                  ? "text-lead after:absolute after:inset-x-0 after:bottom-[-1px] after:h-0.5 after:bg-lead"
+                  : "text-dim hover:text-ink"
+              }`}
+              aria-controls={`suppressions-panel-${tab.id}`}
+              aria-selected={isActive}
+              role="tab"
+            >
+              {tab.label}
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] tabular-nums ${
+                  isActive ? "bg-lead-wash text-lead" : "bg-paper-sunk text-dim"
+                }`}
+              >
+                {tabCounts[tab.id]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <section
+        id="suppressions-panel-requests"
+        role="tabpanel"
+        aria-labelledby="suppressions-tab-requests"
+        hidden={activeTab !== "requests"}
+      >
+        <p className="text-[13px] leading-[1.55] text-dim">
+          A CAM has asked for outreach to stop. Nothing changes until an admin approves the request.
+        </p>
+        <div className="mt-4">
 
         {suppressionsUnavailable ? (
           <SectionCard
@@ -565,7 +676,7 @@ export function SuppressionsPanel({
                             Decision note <span className="font-normal text-faint">(optional)</span>
                           </label>
                           <p className="mt-0.5 text-[12px] leading-[1.5] text-dim">
-                            Kept with the approval or decline in the history below.
+                            Kept with the approval or decline in the history tab.
                           </p>
                           <textarea
                             className={`${TEXTAREA} min-h-20`}
@@ -608,8 +719,15 @@ export function SuppressionsPanel({
             </ul>
           </>
         )}
+        </div>
       </section>
 
+      <section
+        id="suppressions-panel-active"
+        role="tabpanel"
+        aria-labelledby="suppressions-tab-active"
+        hidden={activeTab !== "active"}
+      >
       <SectionCard
         headingId="active-suppressions-heading"
         title="Active suppressions"
@@ -617,7 +735,9 @@ export function SuppressionsPanel({
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
             {active.length > 0 ? (
-              <Pill tone="stop">{active.length} blocked</Pill>
+              <Pill tone={activeBlockedCount > 0 ? "stop" : "go"}>
+                {activeBlockedCount > 0 ? `${activeBlockedCount} blocked` : "Restored this visit"}
+              </Pill>
             ) : (
               <Pill tone="go">None active</Pill>
             )}
@@ -651,27 +771,16 @@ export function SuppressionsPanel({
               )}
               <ul className="divide-y divide-rule-soft border-t border-rule-soft">
                 {activePager.items.map((row) => {
-                  const liftReasonId = `lift-reason-${row.id}`;
                   const detailsId = `active-suppression-${row.id}-details`;
                   const rowBusy = busyKey === `lift:${row.id}`;
+                  const resuppressBusy = busyKey === `resuppress:${row.id}`;
                   const isCollapsed = !expandedActiveIds.has(row.id);
-                  const isConfirmingLift = confirmingLiftId === row.id;
+                  const isLocallyLifted = locallyLiftedIds.has(row.id);
                   const clientName =
                     row.organisations?.legal_name?.trim() || "Unnamed client";
                   return (
                     <li key={row.id} className="py-4 first:pt-4 last:pb-0">
-                      {/* The dissolve plays on the card, not on the button that
-                          triggered it: what leaves this list is the whole
-                          suppression, so that is what should come apart. The
-                          list is only refreshed once the animation resolves. */}
-                      <ThanosSnapEffect
-                        className="block"
-                        triggerOnClick={false}
-                        ref={(instance) => {
-                          liftSnapRefs.current.set(row.id, instance);
-                        }}
-                      >
-                        {/* Tap anywhere on the summary to fold the card — same
+                      {/* Tap anywhere on the summary to fold the card — same
                             handle as the incomplete-records queue. Clicks that
                             belong to a link, a control or a text selection are
                             left alone so nothing is swallowed by the fold. */}
@@ -701,7 +810,32 @@ export function SuppressionsPanel({
                             </p>
                           </div>
                           <div className="flex shrink-0 items-center gap-2.5">
-                            <Pill tone="stop">Outreach blocked</Pill>
+                            <Pill tone={isLocallyLifted ? "go" : "stop"}>
+                              {isLocallyLifted ? "Outreach available" : "Outreach blocked"}
+                            </Pill>
+                            {canManage && (
+                              <span className={resuppressBusy ? "[&>label]:!opacity-100" : undefined}>
+                                <Switch
+                                role="switch"
+                                aria-label={`${isLocallyLifted ? "Keep" : "Lift"} suppression for ${clientName}`}
+                                checked={!isLocallyLifted}
+                                aria-busy={rowBusy || resuppressBusy || undefined}
+                                onCheckedChange={(nextChecked) => {
+                                  if (nextChecked && isLocallyLifted) {
+                                    void resuppress(row);
+                                  } else if (!nextChecked && !isLocallyLifted) {
+                                    setActiveLiftId(row.id);
+                                    setNotice(null);
+                                  }
+                                }}
+                                disabled={isBusy}
+                                variant="destructive"
+                                showIcons
+                                checkedIcon={<Lock aria-hidden="true" className="size-3" />}
+                                uncheckedIcon={<Unlock aria-hidden="true" className="size-3" />}
+                                />
+                              </span>
+                            )}
                             <button
                               type="button"
                               aria-expanded={!isCollapsed}
@@ -718,7 +852,7 @@ export function SuppressionsPanel({
                           </div>
                         </div>
 
-                        <div
+                      <div
                           className="card-collapse-grid"
                           data-expanded={!isCollapsed}
                           id={detailsId}
@@ -735,107 +869,13 @@ export function SuppressionsPanel({
                               </p>
                             )}
 
-                            {canManage && activeLiftId !== row.id && (
-                              <div className="mt-3">
-                                <button
-                                  className={SECONDARY_BUTTON}
-                                  disabled={isBusy}
-                                  onClick={() => {
-                                    setActiveLiftId(row.id);
-                                    setConfirmingLiftId(null);
-                                    setNotice(null);
-                                  }}
-                                  type="button"
-                                >
-                                  Lift suppression
-                                </button>
-                              </div>
-                            )}
-
-                            {canManage && activeLiftId === row.id && (
-                              <div className="mt-4 rounded-inset bg-paper px-4 py-3.5">
-                                <label className="text-[13px] font-medium text-ink" htmlFor={liftReasonId}>
-                                  Why this client can return
-                                </label>
-                                <p className="mt-0.5 text-[12px] leading-[1.5] text-dim">
-                                  Required and kept on file. Lifting restores the client to working lists and unblocks outreach.
-                                </p>
-                                <textarea
-                                  className={`${TEXTAREA} min-h-20`}
-                                  disabled={isBusy}
-                                  id={liftReasonId}
-                                  maxLength={2_000}
-                                  onChange={(event) =>
-                                    setLiftReasons((current) => ({ ...current, [row.id]: event.target.value }))
-                                  }
-                                  placeholder="For example: suppressed in error, or the client has asked to re-engage"
-                                  rows={2}
-                                  value={liftReasons[row.id] ?? ""}
-                                />
-
-                                {/* Lifting is the one action on this page that
-                                    undoes a decision someone else made, so the
-                                    reason is written first and then confirmed —
-                                    the second click is the one that saves. */}
-                                {isConfirmingLift ? (
-                                  <div className="mt-3">
-                                    <p className="text-[12px] leading-[1.5] text-dim">
-                                      Lift the suppression on {clientName}? They return to working lists and outreach
-                                      opens again immediately. The reason above is saved with the decision.
-                                    </p>
-                                    <div className="mt-2 flex flex-wrap gap-2">
-                                      <button
-                                        className={PRIMARY_BUTTON}
-                                        disabled={isBusy}
-                                        onClick={() => lift(row.id)}
-                                        type="button"
-                                      >
-                                        {rowBusy && <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />}
-                                        Yes, lift the suppression
-                                      </button>
-                                      <button
-                                        className={QUIET_BUTTON}
-                                        disabled={isBusy}
-                                        onClick={() => setConfirmingLiftId(null)}
-                                        type="button"
-                                      >
-                                        Keep {clientName} blocked
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="mt-3 flex flex-wrap gap-2">
-                                    <button
-                                      className={PRIMARY_BUTTON}
-                                      disabled={isBusy || !(liftReasons[row.id] ?? "").trim()}
-                                      onClick={() => setConfirmingLiftId(row.id)}
-                                      type="button"
-                                    >
-                                      Restore client and outreach
-                                    </button>
-                                    <button
-                                      className={QUIET_BUTTON}
-                                      disabled={isBusy}
-                                      onClick={() => {
-                                        setActiveLiftId(null);
-                                        setConfirmingLiftId(null);
-                                        setLiftReasons((current) => {
-                                          const next = { ...current };
-                                          delete next[row.id];
-                                          return next;
-                                        });
-                                      }}
-                                      type="button"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
+                            {canManage && isLocallyLifted && (
+                              <p className="mt-3 rounded-inset bg-go-wash px-3 py-2.5 text-[13px] leading-[1.55] text-go">
+                                Restored for this visit. Turn the switch back on to keep this client suppressed.
+                              </p>
                             )}
                           </div>
                         </div>
-                      </ThanosSnapEffect>
                     </li>
                   );
                 })}
@@ -844,7 +884,14 @@ export function SuppressionsPanel({
           </>
         )}
       </SectionCard>
+      </section>
 
+      <section
+        id="suppressions-panel-history"
+        role="tabpanel"
+        aria-labelledby="suppressions-tab-history"
+        hidden={activeTab !== "history"}
+      >
       <SectionCard
         headingId="suppression-history-heading"
         title="Suppression history"
@@ -910,6 +957,76 @@ export function SuppressionsPanel({
           </>
         )}
       </SectionCard>
+      </section>
+
+      {canManage &&
+        pendingLiftRow &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            role="region"
+            aria-label="Lift suppression confirmation"
+            className="fixed right-4 bottom-4 left-4 z-50 mx-auto grid max-h-[calc(100dvh-2rem)] max-w-3xl gap-3 overflow-y-auto rounded-panel border border-rule bg-white px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
+          >
+          <div className="min-w-0">
+            <label
+              className="text-[13px] font-medium text-ink"
+              htmlFor={`pending-lift-reason-${pendingLiftRow.id}`}
+            >
+              Lift suppression for {pendingLiftRow.organisations?.legal_name?.trim() || "this client"}?
+            </label>
+            <p aria-live="polite" className="mt-0.5 text-[12px] leading-[1.5] text-dim">
+              They will return to working lists and outreach. Give the reason that should be kept with this decision.
+            </p>
+            <textarea
+              autoFocus
+              className={`${TEXTAREA} min-h-16`}
+              disabled={isBusy}
+              id={`pending-lift-reason-${pendingLiftRow.id}`}
+              maxLength={2_000}
+              onChange={(event) =>
+                setLiftReasons((current) => ({
+                  ...current,
+                  [pendingLiftRow.id]: event.target.value,
+                }))
+              }
+              placeholder="For example: suppressed in error, or the client has asked to re-engage"
+              rows={2}
+              value={liftReasons[pendingLiftRow.id] ?? ""}
+            />
+          </div>
+          <span className="flex shrink-0 items-center justify-end gap-x-3 pb-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveLiftId(null);
+                setLiftReasons((current) => {
+                  const next = { ...current };
+                  delete next[pendingLiftRow.id];
+                  return next;
+                });
+              }}
+              disabled={isBusy}
+              className={QUIET_BUTTON}
+            >
+              Keep blocked
+            </button>
+            <button
+              type="button"
+              onClick={() => void lift(pendingLiftRow.id)}
+              disabled={isBusy || !(liftReasons[pendingLiftRow.id] ?? "").trim()}
+              aria-busy={busyKey === `lift:${pendingLiftRow.id}` || undefined}
+              className={`${STOP_BUTTON} whitespace-nowrap`}
+            >
+              {busyKey === `lift:${pendingLiftRow.id}` && (
+                <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+              )}
+              {busyKey === `lift:${pendingLiftRow.id}` ? "Lifting…" : "Yes, lift it"}
+            </button>
+          </span>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

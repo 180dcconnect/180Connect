@@ -177,7 +177,7 @@ export default async function DuplicatesPage() {
   const decidedRecords = decided.map(toQueueRecord);
 
   return (
-    <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+    <div className="min-h-screen bg-ground px-6 py-10 sm:px-10 sm:py-12">
       {/* No max-w-*: content fills the column and the page's side padding sets
           where it stops (docs/app-design-system.md §Width). */}
       <Stage className="w-full space-y-8">

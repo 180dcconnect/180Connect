@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
+  Building2,
   Check,
   ChevronDown,
   ChevronsUpDown,
@@ -44,10 +45,17 @@ const PROPOSER_FILTER_CATEGORY = "Filter by proposer";
 
 type AppliedSearchFilter = FilterOption & { category: string };
 import type { OrganisationSource } from "@/lib/organisation-source-links";
+import type { ManualEntryReviewRow } from "@/lib/manual-entry";
 import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import { decideEditSuggestionAction } from "./actions";
+import {
+  DecidedManualEntryCard,
+  PendingManualEntryCard,
+} from "./manual-entry-cards";
 
-type ApprovalTab = "pending" | "history";
+type ApprovalTab = "pending" | "new-clients" | "history";
+
+const APPROVAL_TAB_ORDER: readonly ApprovalTab[] = ["pending", "new-clients", "history"];
 type PillTone = "go" | "hold" | "stop" | "neutral";
 
 const STATUS_LABEL: Record<EditSuggestionRow["status"], string> = {
@@ -553,10 +561,13 @@ function DecidedSuggestionCard({
 
 export function ApprovalsPanel({
   initialSuggestions,
+  initialManualEntries,
   canDecide,
   sourceByOrganisation,
 }: {
   initialSuggestions: EditSuggestionRow[];
+  /** Whole new clients submitted by CAMs (F036) — the New clients tab. */
+  initialManualEntries: ManualEntryReviewRow[];
   /**
    * Whether this reader may decide anything. False for leadership, who read the
    * queue and are offered no control in it — see `approval:manage` in
@@ -579,6 +590,15 @@ export function ApprovalsPanel({
   const [decided, setDecided] = useState(() =>
     initialSuggestions.filter((row) => row.status !== "pending"),
   );
+  const [manualEntries, setManualEntries] = useState(initialManualEntries);
+  const [expandedManualIds, setExpandedManualIds] = useState<Set<string>>(new Set());
+
+  const pendingManual = manualEntries.filter((entry) => entry.review_status === "pending");
+  const decidedManual = manualEntries
+    .filter((entry) => entry.review_status !== "pending")
+    .sort((a, b) =>
+      (b.reviewed_at ?? b.created_at).localeCompare(a.reviewed_at ?? a.created_at),
+    );
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [rejectionTarget, setRejectionTarget] = useState<EditSuggestionRow | null>(null);
   const [rejectionError, setRejectionError] = useState<string | null>(null);
@@ -1023,15 +1043,72 @@ export function ApprovalsPanel({
   }
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    const at = APPROVAL_TAB_ORDER.indexOf(activeTab);
     let nextTab: ApprovalTab | null = null;
-    if (event.key === "ArrowLeft" || event.key === "Home") nextTab = "pending";
-    if (event.key === "ArrowRight" || event.key === "End") nextTab = "history";
+    if (event.key === "ArrowRight") nextTab = APPROVAL_TAB_ORDER[(at + 1) % APPROVAL_TAB_ORDER.length] ?? null;
+    if (event.key === "ArrowLeft")
+      nextTab =
+        APPROVAL_TAB_ORDER[(at - 1 + APPROVAL_TAB_ORDER.length) % APPROVAL_TAB_ORDER.length] ??
+        null;
+    if (event.key === "Home") nextTab = APPROVAL_TAB_ORDER[0] ?? null;
+    if (event.key === "End") nextTab = APPROVAL_TAB_ORDER[APPROVAL_TAB_ORDER.length - 1] ?? null;
     if (!nextTab) return;
 
     event.preventDefault();
     switchTab(nextTab);
     document.getElementById(`approvals-tab-${nextTab}`)?.focus();
   }
+
+  /**
+   * A manual entry was approved or rejected in the New clients tab. The audited
+   * RPC already ran inside the card — this just moves the row from the queue to
+   * the decided list, the same optimistic update `handleDecision` does for
+   * edits (without its undo window: creating a client cannot be uncreated).
+   */
+  const handleManualDecided = useCallback(
+    (result: {
+      entryId: string;
+      outcome: "approved" | "rejected";
+      organisationId: string | null;
+      notes: string;
+      clientName: string;
+    }) => {
+      setManualEntries((current) =>
+        current.map((entry) =>
+          entry.id === result.entryId
+            ? {
+                ...entry,
+                review_status: result.outcome,
+                reviewed_at: new Date().toISOString(),
+                review_notes: result.notes || null,
+                converted_to_organisation_id: result.organisationId,
+              }
+            : entry,
+        ),
+      );
+      showFeedback(
+        {
+          type: "success",
+          message:
+            result.outcome === "approved"
+              ? `${result.clientName} was approved and added to the client list.`
+              : `${result.clientName} was rejected and will not join the client list.`,
+          canUndo: false,
+        },
+        5000,
+      );
+    },
+    [],
+  );
+
+  const toggleManualExpand = (id: string) => {
+    setExpandedManualIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -1070,6 +1147,31 @@ export function ApprovalsPanel({
             }`}
           >
             {pending.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          id="approvals-tab-new-clients"
+          onClick={() => switchTab("new-clients")}
+          onKeyDown={handleTabKeyDown}
+          tabIndex={activeTab === "new-clients" ? 0 : -1}
+          className={`relative inline-flex cursor-pointer items-center gap-2 pb-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lead/30 ${
+            activeTab === "new-clients"
+              ? "text-lead after:absolute after:inset-x-0 after:bottom-[-1px] after:h-0.5 after:bg-lead"
+              : "text-dim hover:text-ink"
+          }`}
+          aria-controls="approvals-panel-new-clients"
+          aria-selected={activeTab === "new-clients"}
+          role="tab"
+        >
+          New clients
+          <span
+            className={`rounded-full px-2 py-0.5 text-[11px] tabular-nums ${
+              activeTab === "new-clients" ? "bg-lead-wash text-lead" : "bg-paper-sunk text-dim"
+            }`}
+          >
+            {pendingManual.length}
           </span>
         </button>
 
@@ -1190,6 +1292,69 @@ export function ApprovalsPanel({
               />
             ))}
           </ul>
+        )}
+      </section>
+
+      <section
+        id="approvals-panel-new-clients"
+        role="tabpanel"
+        aria-labelledby="approvals-tab-new-clients"
+        hidden={activeTab !== "new-clients"}
+      >
+        <p className="text-[13px] leading-[1.55] text-dim">
+          Whole organisations a CAM typed in by hand. Run the checks on each one, then
+          approve it onto the client list or reject it with a reason.
+        </p>
+
+        {pendingManual.length === 0 && decidedManual.length === 0 ? (
+          <div className="mt-4 rounded-panel border border-dashed border-rule bg-white px-6 py-12 text-center">
+            <Building2 className="mx-auto size-6 text-faint" aria-hidden="true" />
+            <h2 className="mt-3 font-body text-[18px] font-semibold tracking-[-0.01em] text-ink">
+              No new clients have been submitted
+            </h2>
+            <p className="mt-1 text-[13px] leading-[1.55] text-dim">
+              Organisations a CAM adds by hand will appear here for approval.
+            </p>
+          </div>
+        ) : (
+          <div className="mt-4 space-y-8">
+            {pendingManual.length > 0 && (
+              <ul className="space-y-4">
+                {pendingManual.map((entry) => (
+                  <PendingManualEntryCard
+                    key={entry.id}
+                    entry={entry}
+                    canDecide={canDecide}
+                    onDecided={handleManualDecided}
+                  />
+                ))}
+              </ul>
+            )}
+
+            {decidedManual.length > 0 && (
+              <div>
+                <h2
+                  id="decided-manual-entries-heading"
+                  className="font-body text-[18px] font-semibold tracking-[-0.01em] text-ink"
+                >
+                  Decided
+                </h2>
+                <p className="mt-0.5 text-[13px] leading-[1.55] text-dim">
+                  New clients already approved onto the list or rejected, most recent first.
+                </p>
+                <ul className="mt-4 space-y-3">
+                  {decidedManual.map((entry) => (
+                    <DecidedManualEntryCard
+                      key={entry.id}
+                      entry={entry}
+                      isExpanded={expandedManualIds.has(entry.id)}
+                      onToggle={() => toggleManualExpand(entry.id)}
+                    />
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         )}
       </section>
 

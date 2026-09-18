@@ -32,7 +32,7 @@ jobs:
                 mailer_secure_email_change_enabled: true,
                 smtp_admin_email: "180connect@steeze.ng",
                 smtp_host: "smtp.resend.com",
-                smtp_port: 587,
+                smtp_port: "587",
                 smtp_user: "resend",
                 smtp_pass: $password,
                 smtp_sender_name: "180 Connect"
@@ -51,7 +51,7 @@ jobs:
             .mailer_secure_email_change_enabled == true and
             .smtp_admin_email == "180connect@steeze.ng" and
             .smtp_host == "smtp.resend.com" and
-            .smtp_port == 587 and
+            .smtp_port == "587" and
             .smtp_user == "resend" and
             .smtp_sender_name == "180 Connect"
           ' <<<"$response" >/dev/null

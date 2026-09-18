@@ -429,3 +429,21 @@
 | trashed_at | timestamptz |  | Yes | When it was trashed | System | Set by trigger, never by the client | Orders both the cap and the 30-day purge. check that trashed_at is non-null exactly when is_trashed |
 | created_at | timestamptz |  | No | Row creation timestamp | System | Default now() | now() |
 | updated_at | timestamptz |  | No | Last updated timestamp | System | set_updated_at() trigger | now() |
+
+## CHARITY_REGISTER_COVERAGE
+
+| Field | Type | Foreign Key (Table Relation) | Nullable | Description | Collection Method | How | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| id | uuid |  | No | Primary key | System | Auto-generated gen_random_uuid() | PK |
+| coverage_kind | text |  | No | Which Charity Commission coverage card this row supplies | System | One seeded row per card | annual_return / profile / reach / company_number; unique |
+| charities | integer |  | Yes | Charity clients included in the last completed calculation | System | Calculated from charity identifiers on the client list | Blank until the first calculation; zero or more |
+| covered | integer |  | Yes | Charity clients that need nothing from this coverage job | System | Calculated by the matching register backfill finder | Blank until the first calculation; zero or more |
+| pending | integer |  | Yes | Charity clients the register can still add information to | System | Calculated by the matching register backfill finder | Blank until the first calculation; zero or more |
+| pending_items | integer |  | Yes | Individual filed years or profile fields still missing, where that card counts them | System | Calculated for annual-return and profile coverage | Blank for reach and company-number coverage |
+| register_built_on | date |  | Yes | Register-file build date used for this calculation | System | Read from the deployed Charity Commission register file | A different deployed register date makes the row stale |
+| calculated_at | timestamptz |  | Yes | When this row was last calculated successfully | System | Set after the full calculation succeeds | Blank until the first calculation |
+| stale_at | timestamptz |  | Yes | When a relevant client record change made this figure out of date | System | Set by database triggers; cleared by a successful refresh | The page may show the last figure while a refresh runs |
+| refresh_started_at | timestamptz |  | Yes | When a worker claimed this row for refresh | System | Set atomically before expensive work starts | A short lease prevents duplicate refreshes; cleared on success or failure |
+| refresh_failed_at | timestamptz |  | Yes | When the latest refresh attempt failed | System | Set when refresh work throws | No raw error is exposed to users; application error logs hold the detail |
+| created_at | timestamptz |  | No | Row creation timestamp | System | Default now() | now() |
+| updated_at | timestamptz |  | No | Last updated timestamp | System | set_updated_at() trigger | now() |

@@ -7,6 +7,12 @@ import {
   type BulkFinancialPeriodRow,
 } from "../financials/charity-financial-periods.ts";
 import { toExtractReturn } from "./import.ts";
+import {
+  chunkIds,
+  loadCharityIdentifiers,
+  mapPool,
+  type CharityIdentifierRow,
+} from "./coverage-reads.ts";
 import { lookupCharityReturns } from "./sqlite.ts";
 
 /**
@@ -196,10 +202,6 @@ export type AnnualReturnCoverage = {
   pendingPeriods: number;
 };
 
-/** Organisation ids per `in (...)` filter — same ceiling as the API refresh:
- *  a single list of a thousand uuids is a ~40KB query string and PostgREST
- *  answers that with a bare 400. */
-const ID_FILTER_CHUNK = 200;
 /** Period rows per upsert. Well inside what one PostgREST request carries. */
 const WRITE_CHUNK = 500;
 /**
@@ -251,22 +253,13 @@ export async function findBackfillTargets(
   /** Narrow to these organisations. The weekly refresh passes the charities it
    *  just wrote; the coverage card passes nothing and gets the whole book. */
   only?: ReadonlySet<string>,
+  /** A scan the caller already ran. The coverage cards share one across all
+   *  four finders rather than each scanning the same table. */
+  sharedIdentifiers?: readonly CharityIdentifierRow[],
 ): Promise<{ targets: BackfillTarget[]; coverage: AnnualReturnCoverage }> {
-  const identifiers = await readAll<{ organisation_id: string; identifier_value: string }>(
-    (from, to) =>
-      supabase
-        .from("organisation_identifiers")
-        .select("organisation_id, identifier_value")
-        .eq("identifier_type", "uk_charity")
-        // Ordered so the pages tile rather than overlap: without it the server
-        // is free to return rows in a different order per request, and paging
-        // an unordered read drops some rows and repeats others.
-        .order("organisation_id", { ascending: true })
-        .range(from, to)
-        .returns<{ organisation_id: string; identifier_value: string }[]>(),
-  );
+  const identifiers = sharedIdentifiers ?? (await loadCharityIdentifiers(supabase));
 
-  const charities = (identifiers ?? []).filter(
+  const charities = identifiers.filter(
     (row) =>
       row.organisation_id &&
       row.identifier_value?.trim() &&
@@ -281,9 +274,10 @@ export async function findBackfillTargets(
 
   const stored = new Map<string, StoredPeriod[]>();
   const ids = charities.map((row) => row.organisation_id);
-  for (let i = 0; i < ids.length; i += ID_FILTER_CHUNK) {
-    const slice = ids.slice(i, i + ID_FILTER_CHUNK);
-    const page = await readAll<PeriodRow>((from, to) =>
+  // Chunks run concurrently (bounded in `mapPool`): each is one small read,
+  // and awaiting them one at a time multiplied the wait by the chunk count.
+  const pages = await mapPool(chunkIds(ids), (slice) =>
+    readAll<PeriodRow>((from, to) =>
       supabase
         .from("financial_periods")
         .select(PERIOD_COLUMNS)
@@ -295,7 +289,9 @@ export async function findBackfillTargets(
         // The select string is assembled rather than a literal, and supabase-js
         // can only infer a row type from a literal — so the shape is named here.
         .returns<PeriodRow[]>(),
-    );
+    ),
+  );
+  for (const page of pages) {
     for (const row of page) {
       const list = stored.get(row.organisation_id);
       if (list) list.push(row);

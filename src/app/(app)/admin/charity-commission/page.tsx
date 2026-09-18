@@ -30,6 +30,8 @@
 // renders the `main` this is slotted into.
 
 import { redirect } from "next/navigation";
+import { after } from "next/server";
+import { Suspense } from "react";
 
 import { getViewingActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
@@ -39,27 +41,32 @@ import { hasPermission } from "@/lib/auth/permissions";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { parseFilters } from "@/lib/charity-register/filters";
-import { findBackfillTargets } from "@/lib/charity-register/annual-return-backfill";
-import { findProfileTargets } from "@/lib/charity-register/profile-backfill";
-import { findReachTargets } from "@/lib/charity-register/reach-backfill";
-import { findCompanyNumberTargets } from "@/lib/charity-register/company-number-backfill";
+import { loadCharityIdentifiers } from "@/lib/charity-register/coverage-reads";
+import {
+  coverageRefreshShouldStart,
+  coverageSnapshotsNeedRefresh,
+  hasAnyCalculatedCoverage,
+  readCoverageSnapshots,
+  refreshCharityCoverageSnapshots,
+} from "@/lib/charity-register/coverage-snapshots";
 import { labelValues, registerMeta } from "@/lib/charity-register/sqlite";
 import { LABEL_KIND } from "@/lib/charity-register/sqlite-query";
 import { DataImportsHeader } from "../data-imports-header";
-import { AnnualReturnCard } from "./annual-return-card";
-import { RegisterProfileCard } from "./profile-card";
-import { GeographicReachCard } from "./reach-card";
-import { CompanyNumberCard } from "./company-number-card";
+import {
+  AnnualReturnCoverageCard,
+  CompanyNumberCoverageCard,
+  CoverageCardFallback,
+  GeographicReachCoverageCard,
+  RegisterProfileCoverageCard,
+  SnapshotCoverageCards,
+} from "./coverage-cards";
+import { CoverageRefreshPoller } from "./coverage-refresh-poller";
 import { CharityLookupDialog } from "./lookup-dialog";
 import { FilterBuilder, type PresetSummary } from "./filter-builder";
 import { ImportConsole, NewImportButton } from "./import-console";
 import { PipelinesGuide } from "./pipelines-guide";
 import { RecentRuns } from "./recent-runs";
 import { RegisterRail } from "./register-rail";
-import { MAX_BACKFILL } from "@/lib/charity-register/annual-return-backfill";
-import { MAX_BACKFILL as MAX_PROFILE_BACKFILL } from "@/lib/charity-register/profile-backfill";
-import { MAX_BACKFILL as MAX_REACH_BACKFILL } from "@/lib/charity-register/reach-backfill";
-import { MAX_BACKFILL as MAX_COMPANY_BACKFILL } from "@/lib/charity-register/company-number-backfill";
 import type { CharityCommissionRun } from "./bulk-funnel";
 
 // The import runs inside a Server Action, not this page — but promotion of a
@@ -92,7 +99,7 @@ export default async function CharityCommissionPage() {
   const supabase = await createClient();
   const admin = createAdminClient();
 
-  const [runsResult, presetsResult] = await Promise.all([
+  const [runsResult, presetsResult, coverageRead] = await Promise.all([
     supabase
       .from("ingestion_runs")
       .select(
@@ -108,69 +115,8 @@ export default async function CharityCommissionPage() {
           .eq("source", "charity_commission")
           .order("name")
       : Promise.resolve({ data: [], error: null }),
+    readCoverageSnapshots(supabase),
   ]);
-
-  // What the register could still add to the client list. Cheap enough to read
-  // on every page load: the expensive half is the local file, and the Postgres
-  // half is two reads of a few thousand rows. Degrades to null rather than
-  // failing the page — the coverage card is the least important thing here, and
-  // a missing register file is its normal empty case, not an error.
-  //
-  // The reads run together. They are independent, and each is several
-  // thousand rows, so awaiting one before starting the next quadrupled the wait
-  // for no reason. `allSettled` keeps the "degrades to null" behaviour per
-  // read — one failing must not deny the others their cards.
-  let coverage = null;
-  let profileCoverage = null;
-  let reachCoverage = null;
-  let companyCoverage = null;
-  if (admin) {
-    const [backfill, profile, reach, company] = await Promise.allSettled([
-      findBackfillTargets(admin),
-      findProfileTargets(admin),
-      findReachTargets(admin),
-      findCompanyNumberTargets(admin),
-    ]);
-
-    if (backfill.status === "fulfilled") {
-      coverage = backfill.value.coverage;
-    } else {
-      await reportError(backfill.reason, {
-        operation: "admin.charity_commission.annual_return_coverage",
-      });
-    }
-
-    // The same read for the profile fields, degrading the same way and for the
-    // same reasons. Kept separate rather than folded into the one above: they
-    // answer different questions and either can be empty while the other is not.
-    if (profile.status === "fulfilled") {
-      profileCoverage = profile.value.coverage;
-    } else {
-      await reportError(profile.reason, {
-        operation: "admin.charity_commission.register_profile_coverage",
-      });
-    }
-
-    // And the same again for reach, which the register can only answer for a
-    // charity that declared its areas of operation.
-    if (reach.status === "fulfilled") {
-      reachCoverage = reach.value.coverage;
-    } else {
-      await reportError(reach.reason, {
-        operation: "admin.charity_commission.reach_coverage",
-      });
-    }
-
-    // And the second registration number, which only the charity register can
-    // supply and which mostly only hand-added clients are missing.
-    if (company.status === "fulfilled") {
-      companyCoverage = company.value.coverage;
-    } else {
-      await reportError(company.reason, {
-        operation: "admin.charity_commission.company_number_coverage",
-      });
-    }
-  }
 
   // The register is a file in the deployment, not a table — reading it is
   // synchronous and needs no await, and no Supabase round trip.
@@ -179,6 +125,11 @@ export default async function CharityCommissionPage() {
 
   if (runsResult.error) {
     await reportError(runsResult.error, { operation: "admin.charity_commission.list_runs" });
+  }
+  if (!coverageRead.available && !coverageRead.migrationMissing) {
+    await reportError(coverageRead.error, {
+      operation: "admin.charity_commission.read_coverage_snapshots",
+    });
   }
 
   const runs = (runsResult.data ?? []) as CharityCommissionRun[];
@@ -211,6 +162,29 @@ export default async function CharityCommissionPage() {
   // Read once here rather than at each render site: process.env is server-only,
   // and both branches below need the same answer.
   const lookupConfigured = Boolean(process.env.CHARITY_COMMISSION_API_KEY?.trim());
+
+  const coverageNeedsRefresh =
+    coverageRead.available && snapshotDate
+      ? coverageSnapshotsNeedRefresh(coverageRead.snapshots, snapshotDate)
+      : false;
+  const coverageRefreshCanStart =
+    coverageRead.available && snapshotDate
+      ? coverageRefreshShouldStart(coverageRead.snapshots, snapshotDate, now.getTime())
+      : false;
+  if (coverageRefreshCanStart && snapshotDate) {
+    // All request-bound values are captured before `after`: Server Components
+    // may not read request APIs inside this callback. Database leases make this
+    // safe when several visitors schedule the same stale refresh together.
+    after(() => refreshCharityCoverageSnapshots(snapshotDate));
+  }
+
+  // Mixed-version fallback only. A deployment can briefly serve this code
+  // before its additive migration reaches PostgREST; keep the old streamed path
+  // in that window instead of hiding the cards or failing the whole page.
+  const charityIdentifiers =
+    !coverageRead.available && coverageRead.migrationMissing && admin
+      ? loadCharityIdentifiers(admin)
+      : null;
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
@@ -282,47 +256,54 @@ export default async function CharityCommissionPage() {
                     />
                   )}
 
-                  {coverage && coverage.charities > 0 && (
-                    <AnnualReturnCard
-                      charities={coverage.charities}
-                      covered={coverage.covered}
-                      pending={coverage.pending}
-                      pendingPeriods={coverage.pendingPeriods}
-                      maxBatchSize={MAX_BACKFILL}
-                      readOnly={!canImport}
-                    />
-                  )}
-
-                  {profileCoverage && profileCoverage.charities > 0 && (
-                    <RegisterProfileCard
-                      charities={profileCoverage.charities}
-                      covered={profileCoverage.covered}
-                      pending={profileCoverage.pending}
-                      pendingFields={profileCoverage.pendingFields}
-                      maxBatchSize={MAX_PROFILE_BACKFILL}
-                      readOnly={!canImport}
-                    />
-                  )}
-
-                  {reachCoverage && reachCoverage.charities > 0 && (
-                    <GeographicReachCard
-                      charities={reachCoverage.charities}
-                      covered={reachCoverage.covered}
-                      pending={reachCoverage.pending}
-                      maxBatchSize={MAX_REACH_BACKFILL}
-                      readOnly={!canImport}
-                    />
-                  )}
-
-                  {companyCoverage && companyCoverage.charities > 0 && (
-                    <CompanyNumberCard
-                      charities={companyCoverage.charities}
-                      covered={companyCoverage.covered}
-                      pending={companyCoverage.pending}
-                      maxBatchSize={MAX_COMPANY_BACKFILL}
-                      readOnly={!canImport}
-                    />
-                  )}
+                  {coverageRead.available ? (
+                    <>
+                      {staged && (
+                        <SnapshotCoverageCards
+                          snapshots={coverageRead.snapshots}
+                          readOnly={!canImport}
+                        />
+                      )}
+                      {!hasAnyCalculatedCoverage(coverageRead.snapshots) && staged && (
+                        <InlineAlert
+                          variant="page"
+                          message="Coverage figures are being prepared. The rest of this page is ready to use, and the figures will appear here automatically."
+                        />
+                      )}
+                      {coverageNeedsRefresh && <CoverageRefreshPoller />}
+                    </>
+                  ) : admin && charityIdentifiers ? (
+                    <>
+                      <Suspense fallback={<CoverageCardFallback />}>
+                        <AnnualReturnCoverageCard
+                          admin={admin}
+                          identifiers={charityIdentifiers}
+                          readOnly={!canImport}
+                        />
+                      </Suspense>
+                      <Suspense fallback={<CoverageCardFallback />}>
+                        <RegisterProfileCoverageCard
+                          admin={admin}
+                          identifiers={charityIdentifiers}
+                          readOnly={!canImport}
+                        />
+                      </Suspense>
+                      <Suspense fallback={<CoverageCardFallback />}>
+                        <GeographicReachCoverageCard
+                          admin={admin}
+                          identifiers={charityIdentifiers}
+                          readOnly={!canImport}
+                        />
+                      </Suspense>
+                      <Suspense fallback={<CoverageCardFallback />}>
+                        <CompanyNumberCoverageCard
+                          admin={admin}
+                          identifiers={charityIdentifiers}
+                          readOnly={!canImport}
+                        />
+                      </Suspense>
+                    </>
+                  ) : null}
 
                   <PipelinesGuide />
                 </>

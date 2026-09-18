@@ -5657,6 +5657,132 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------------
+-- Charity register coverage: shared read, service-only refresh
+-- ---------------------------------------------------------------------------
+create or replace function tests.suite_charity_register_coverage()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_count       bigint;
+  v_stale_at    timestamptz;
+begin
+  if not tests.tables_exist('charity_register_coverage') then
+    return next skip(18, 'charity register coverage not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.charity_register_coverage;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 4::bigint, 'a CAM reads all four coverage figures');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.charity_register_coverage;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 4::bigint, 'an admin reads all four coverage figures');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.charity_register_coverage;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 4::bigint, 'a viewer reads all four coverage figures');
+
+  perform tests.login_as(v_deactivated);
+  select count(*) into v_count from public.charity_register_coverage;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a deactivated user reads no coverage figures');
+
+  return next ok(
+    not has_table_privilege('anon', 'public.charity_register_coverage', 'SELECT'),
+    'anonymous callers have no coverage table privilege'
+  );
+  return next ok(
+    has_table_privilege('authenticated', 'public.charity_register_coverage', 'SELECT'),
+    'authenticated callers have the coverage read privilege'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.charity_register_coverage', 'INSERT'),
+    'authenticated callers have no coverage insert privilege'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.charity_register_coverage', 'UPDATE'),
+    'authenticated callers have no coverage update privilege'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.charity_register_coverage', 'DELETE'),
+    'authenticated callers have no coverage delete privilege'
+  );
+  return next ok(
+    has_table_privilege('service_role', 'public.charity_register_coverage', 'SELECT')
+      and has_table_privilege('service_role', 'public.charity_register_coverage', 'UPDATE'),
+    'service role has the table privileges its invoker refresh RPCs require'
+  );
+
+  return next ok(
+    not has_function_privilege('authenticated',
+      'public.claim_charity_register_coverage_refreshes(date)', 'EXECUTE'),
+    'authenticated callers cannot claim a coverage refresh'
+  );
+  return next ok(
+    not has_function_privilege('authenticated',
+      'public.finish_charity_register_coverage_refresh(text,timestamptz,date,integer,integer,integer,integer)',
+      'EXECUTE'),
+    'authenticated callers cannot finish a coverage refresh'
+  );
+  return next ok(
+    not has_function_privilege('authenticated',
+      'public.fail_charity_register_coverage_refresh(text,timestamptz)', 'EXECUTE'),
+    'authenticated callers cannot fail a coverage refresh'
+  );
+  return next ok(
+    has_function_privilege('service_role',
+      'public.claim_charity_register_coverage_refreshes(date)', 'EXECUTE'),
+    'service role can claim a coverage refresh'
+  );
+  return next ok(
+    has_function_privilege('service_role',
+      'public.finish_charity_register_coverage_refresh(text,timestamptz,date,integer,integer,integer,integer)',
+      'EXECUTE'),
+    'service role can finish a coverage refresh'
+  );
+  return next ok(
+    has_function_privilege('service_role',
+      'public.fail_charity_register_coverage_refresh(text,timestamptz)', 'EXECUTE'),
+    'service role can record a failed coverage refresh'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      'update public.charity_register_coverage set stale_at = now()'),
+    '42501',
+    'a CAM cannot alter a coverage reading'
+  );
+
+  update public.charity_register_coverage
+     set stale_at = null
+   where coverage_kind = 'profile';
+  update public.organisations
+     set charity_activities = charity_activities
+   where id = '00000000-0000-4000-b000-000000000001';
+  select stale_at into v_stale_at
+    from public.charity_register_coverage
+   where coverage_kind = 'profile';
+  return next ok(
+    v_stale_at is not null,
+    'a relevant organisation write marks profile coverage stale'
+  );
+end;
+$$;
+
 select * from tests.suite_rls_initplan();
 select * from tests.suite_core();
 select * from tests.suite_viewer();
@@ -5692,6 +5818,7 @@ select * from tests.suite_onboarding();
 select * from tests.suite_outreach_preferences();
 select * from tests.suite_saved_views();
 select * from tests.suite_cycles();
+select * from tests.suite_charity_register_coverage();
 select * from tests.suite_client_criteria();
 select * from tests.suite_data_handling_rules();
 select * from tests.suite_personal_data_exclusion();

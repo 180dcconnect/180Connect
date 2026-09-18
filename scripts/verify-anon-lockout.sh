@@ -9,10 +9,9 @@
 # public by design — RLS is the only thing standing behind it.
 #
 # Every table must return either an empty array or a permission error. A single
-# non-empty array is a data leak. Privileged RPCs must also be absent from the
-# anon role's PostgREST OpenAPI document; checking only whether an RPC call is
-# refused is insufficient because a callable function can reject inside its
-# body and return the same HTTP status as a database privilege refusal.
+# non-empty array is a data leak. Function EXECUTE privileges are checked by
+# scripts/verify-anon-function-lockout.sql because hosted PostgREST projects can
+# disable anonymous OpenAPI access, making HTTP schema introspection return 401.
 #
 # Usage:
 #   scripts/verify-anon-lockout.sh <supabase-url> <anon-key>
@@ -41,26 +40,23 @@ TABLES=(
   cam_activity_summary pipeline_metrics sector_performance audit_log
 )
 
-# SECURITY DEFINER functions that are not anonymous APIs. PostgREST builds its
-# OpenAPI paths for the database role represented by the supplied JWT, so their
-# presence here proves anon still has EXECUTE even when the function body would
-# subsequently reject auth.uid() = null.
-PRIVATE_RPCS=(
-  check_allowed_email_domain
-  check_manual_entry_contact_email
-  schedule_outreach_send
-  suggest_organisation_edit
-)
-
 leaked=()
 pending=0
 checked=0
 
+# Legacy anon keys are JWTs and belong in both headers. Supabase's newer
+# sb_publishable_ keys are API keys, not JWTs: sending one as a Bearer token
+# makes the gateway return 401 before PostgREST/RLS is exercised, which would
+# turn every table check into a false pass.
+AUTH_HEADERS=(-H "apikey: ${KEY}")
+if [[ "$KEY" != sb_publishable_* ]]; then
+  AUTH_HEADERS+=(-H "Authorization: Bearer ${KEY}")
+fi
+
 for table in "${TABLES[@]}"; do
   response="$(curl -sS -w '\n%{http_code}' \
     "${URL}/rest/v1/${table}?select=*&limit=1" \
-    -H "apikey: ${KEY}" \
-    -H "Authorization: Bearer ${KEY}")"
+    "${AUTH_HEADERS[@]}")"
 
   status="$(tail -n1 <<<"$response")"
   body="$(sed '$d' <<<"$response")"
@@ -87,29 +83,11 @@ for table in "${TABLES[@]}"; do
   esac
 done
 
-openapi_response="$(curl -sS -w '\n%{http_code}' \
-  "${URL}/rest/v1/" \
-  -H "apikey: ${KEY}" \
-  -H "Authorization: Bearer ${KEY}")"
-
-openapi_status="$(tail -n1 <<<"$openapi_response")"
-openapi_body="$(sed '$d' <<<"$openapi_response")"
-
-if [[ "$openapi_status" != "200" ]]; then
-  leaked+=("PostgREST OpenAPI document (unexpected HTTP ${openapi_status})")
-else
-  for rpc in "${PRIVATE_RPCS[@]}"; do
-    if grep -Fq "\"/rpc/${rpc}\"" <<<"$openapi_body"; then
-      leaked+=("rpc/${rpc} (exposed to anon)")
-    fi
-  done
-fi
-
 if ((${#leaked[@]} > 0)); then
-  echo "FAIL: found ${#leaked[@]} anonymous data or RPC exposure(s):" >&2
+  echo "FAIL: found ${#leaked[@]} anonymous data exposure(s):" >&2
   printf '  - %s\n' "${leaked[@]}" >&2
   echo >&2
-  echo "The anon key is public. Tables must return no rows and private RPCs must not be exposed." >&2
+  echo "The anon key is public. Tables must return no rows." >&2
   exit 1
 fi
 

@@ -17,6 +17,7 @@ on:
       - 'supabase/**'
       - 'scripts/verify-rls-coverage.sql'
       - 'scripts/verify-anon-lockout.sh'
+      - 'scripts/verify-anon-function-lockout.sql'
       - 'scripts/verify-last-admin-guard.mts'
       - '.github/workflows/migrations.yml'
   pull_request:
@@ -24,6 +25,7 @@ on:
       - 'supabase/**'
       - 'scripts/verify-rls-coverage.sql'
       - 'scripts/verify-anon-lockout.sh'
+      - 'scripts/verify-anon-function-lockout.sql'
       - 'scripts/verify-last-admin-guard.mts'
       - '.github/workflows/migrations.yml'
   # Manual re-run, e.g. after fixing a failed apply.
@@ -123,6 +125,9 @@ jobs:
           ANON_KEY="$(supabase status -o json | jq -r '.ANON_KEY')"
           scripts/verify-anon-lockout.sh "http://127.0.0.1:54321" "$ANON_KEY"
 
+      - name: Anonymous function lockout probe
+        run: psql "$LOCAL_DB_URL" -v ON_ERROR_STOP=1 -f scripts/verify-anon-function-lockout.sql
+
       # Only meaningful when the stack was actually started — and the CLI only
       # exists once setup-cli has run. Gating on that step's conclusion stops a
       # job that failed before installation (e.g. the timestamp check above)
@@ -176,6 +181,9 @@ jobs:
             "${{ vars.SUPABASE_STAGING_URL }}" \
             "${{ vars.SUPABASE_STAGING_ANON_KEY }}"
 
+      - name: Anonymous function lockout probe (staging)
+        run: supabase db query --linked --file scripts/verify-anon-function-lockout.sql
+
   apply-prod:
     name: db push -> 180connect-production
     runs-on: ubuntu-latest
@@ -222,3 +230,6 @@ jobs:
           scripts/verify-anon-lockout.sh \
             "${{ vars.SUPABASE_PROD_URL }}" \
             "${{ vars.SUPABASE_PROD_ANON_KEY }}"
+
+      - name: Anonymous function lockout probe (production)
+        run: supabase db query --linked --file scripts/verify-anon-function-lockout.sql

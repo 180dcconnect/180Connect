@@ -148,8 +148,12 @@ export function incomeInRange(
 const BAND_EDGES: Record<IncomeBand, { lower: number; upper: number }> = {
   under_10k: { lower: 0, upper: 10_000 },
   "10k_100k": { lower: 10_000, upper: 100_000 },
-  "100k_1m": { lower: 100_000, upper: 1_000_000 },
-  over_1m: { lower: 1_000_000, upper: Number.POSITIVE_INFINITY },
+  "100k_500k": { lower: 100_000, upper: 500_000 },
+  "500k_1m": { lower: 500_000, upper: 1_000_000 },
+  "1m_10m": { lower: 1_000_000, upper: 10_000_000 },
+  "10m_50m": { lower: 10_000_000, upper: 50_000_000 },
+  "50m_100m": { lower: 50_000_000, upper: 100_000_000 },
+  over_100m: { lower: 100_000_000, upper: Number.POSITIVE_INFINITY },
 };
 
 /**

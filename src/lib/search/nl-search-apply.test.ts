@@ -5,7 +5,7 @@ import {
   visibleClients,
   type ClientListRow,
   type VisibleClient,
-} from "../../app/clients/visible-clients.ts";
+} from "../../app/(app)/clients/visible-clients.ts";
 import {
   applyNlPlan,
   filterByIncomeBands,

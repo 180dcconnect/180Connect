@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { ShieldAlert } from "lucide-react";
-import { RequestOwnershipForm } from "@/app/clients/[id]/request-ownership-form";
+import { RequestOwnershipForm } from "@/app/(app)/clients/[id]/request-ownership-form";
 import {
   getMyOwnershipRequest,
   takeOverClientOwnership,
   type MyOwnershipRequest,
-} from "@/app/inbox/actions";
+} from "@/app/(app)/inbox/actions";
 import type { AppRole } from "@/lib/auth/permissions";
 
 /**

@@ -90,6 +90,24 @@ describe("loadOperatingGeography", () => {
     assert.equal(result.totalAreaCount, 0);
   });
 
+  it("carries the address line, for the 998 records the register gives no town", () => {
+    // The shape that made the card say "Not on file (SN4 0BZ)": a postcode and
+    // a building name on file, city blank.
+    const org = baseOrg({
+      legal_name: "THE PAROCHIAL CHURCH COUNCIL OF ST ANDREW'S WANBOROUGH",
+      organisation_type: "other",
+      address_line_1: "ST ANDREW'S CHURCH",
+      city: "",
+      postcode: "SN4 0BZ",
+    });
+
+    const result = loadOperatingGeography(org, [], []);
+
+    assert.equal(result.registeredCity, null);
+    assert.equal(result.registeredAddressLine, "ST ANDREW'S CHURCH");
+    assert.equal(result.registeredPostcode, "SN4 0BZ");
+  });
+
   it("falls back to registered office when no specific registry areas are found", () => {
     const org = baseOrg({
       legal_name: "Unknown Entity XYZ",

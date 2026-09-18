@@ -60,15 +60,22 @@ describe("incomeInRange", () => {
 
 describe("bands, for the legacy column", () => {
   it("lists the bands a range overlaps", () => {
-    assert.deepEqual(bandsForIncomeRange({ min: 250_000, max: 2_000_000 }), ["100k_1m", "over_1m"]);
+    assert.deepEqual(bandsForIncomeRange({ min: 250_000, max: 2_000_000 }), [
+      "100k_500k",
+      "500k_1m",
+      "1m_10m",
+    ]);
     assert.deepEqual(bandsForIncomeRange({ min: 10_000, max: 100_000 }), ["10k_100k"]);
     assert.deepEqual(bandsForIncomeRange({ min: null, max: null }), []);
   });
 
   it("turns saved bands into the range they cover, matching the migration", () => {
-    assert.deepEqual(incomeRangeFromBands(["10k_100k", "100k_1m"]), { min: 10_000, max: 1_000_000 });
+    assert.deepEqual(incomeRangeFromBands(["10k_100k", "100k_500k"]), {
+      min: 10_000,
+      max: 500_000,
+    });
     assert.deepEqual(incomeRangeFromBands(["under_10k"]), { min: null, max: 10_000 });
-    assert.deepEqual(incomeRangeFromBands(["over_1m"]), { min: 1_000_000, max: null });
+    assert.deepEqual(incomeRangeFromBands(["over_100m"]), { min: 100_000_000, max: null });
     assert.deepEqual(incomeRangeFromBands([]), { min: null, max: null });
   });
 });

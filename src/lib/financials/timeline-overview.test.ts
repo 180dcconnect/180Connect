@@ -11,7 +11,7 @@ const mockYear = (label: string, income: number, expenditure: number, net: numbe
   income,
   expenditure,
   net,
-  incomeBand: "100k_1m",
+  incomeBand: "100k_500k",
   filedOn: null,
   grantTotal: 0,
   grantShare: 0,

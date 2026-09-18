@@ -588,6 +588,29 @@ describe("validateDecideEditInput (F181)", () => {
     }
   });
 
+  it("accepts valid approval with an edited proposed value", () => {
+    const result = validateDecideEditInput({
+      suggestionId: validUuid,
+      approve: true,
+      proposedValue: "  https://example.org  ",
+    });
+    assert.equal(result.success, true);
+    if (result.success) {
+      assert.equal(result.data.suggestionId, validUuid);
+      assert.equal(result.data.approve, true);
+      assert.equal(result.data.proposedValue, "https://example.org");
+    }
+  });
+
+  it("rejects an empty proposed value string when provided", () => {
+    const result = validateDecideEditInput({
+      suggestionId: validUuid,
+      approve: true,
+      proposedValue: "   ",
+    });
+    assert.equal(result.success, false);
+  });
+
   it("accepts valid rejection with trimmed reason", () => {
     const result = validateDecideEditInput({
       suggestionId: validUuid,

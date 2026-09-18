@@ -5,6 +5,7 @@ import type { DashboardOrgRow } from "../dashboard-metrics.ts";
 import type { CamReplyRow, SentMessageRow } from "../cam-analytics.ts";
 import {
   conversionsOverTime,
+  cycleTeamTotals,
   describeUncountedClients,
   perCamAnalytics,
   sortByNeed,
@@ -46,6 +47,14 @@ const owned = (owner: string, count: number, status: string) =>
 const NOW = new Date("2026-09-03T00:00:00.000Z");
 const NO_MESSAGES: SentMessageRow[] = [];
 const NO_REPLIES: CamReplyRow[] = [];
+
+/** `count` replies, spread across the given clients — the win rate's input. */
+const repliesFrom = (orgs: readonly DashboardOrgRow[], count: number): CamReplyRow[] =>
+  Array.from({ length: count }, (_, index) => ({
+    id: nextId("reply"),
+    organisation_id: orgs[index % orgs.length].id,
+    response_time_seconds: 3_600,
+  }));
 
 describe("conversionsOverTime (F210)", () => {
   it("emits one point per day across the window, zero on quiet days", () => {
@@ -143,28 +152,47 @@ describe("perCamAnalytics (F212)", () => {
     );
   });
 
-  it("flags a CAM converting at under half the team median", () => {
+  it("flags a CAM winning under half as many of the clients who replied", () => {
+    const ada = [...owned("cam-a", 8, "converted"), ...owned("cam-a", 2, "no_response")];
+    const blake = [...owned("cam-b", 1, "converted"), ...owned("cam-b", 9, "no_response")];
+    const rows = perCamAnalytics(
+      [...ada, ...blake],
+      NO_MESSAGES,
+      // Eight clients replied to each of them: Ada won every one, Blake one.
+      // Blake's replies land on the nine who did not convert (the converted one
+      // is first in the list), so the win rate is 1 of 9, not 1 of 8.
+      [...repliesFrom(ada, 8), ...repliesFrom(blake.slice(1), 8)],
+      cams,
+    );
+
+    const blakeRow = rows.find((row) => row.camId === "cam-b");
+    assert.ok(blakeRow);
+    assert.equal(blakeRow.totals.winRate, 1 / 9);
+    assert.ok(blakeRow.flags.some((flag) => flag.kind === "low_win_rate"));
+
+    const adaRow = rows.find((row) => row.camId === "cam-a");
+    assert.ok(adaRow);
+    assert.equal(adaRow.totals.winRate, 1);
+    assert.equal(adaRow.flags.length, 0);
+  });
+
+  it("does not flag a CAM who won nobody, when nobody replied either", () => {
+    // No replies and no conversions is not a bad win rate, it is no win rate.
+    // Reading it as 0% would flag a CAM who has only just started sending.
     const rows = perCamAnalytics(
       [
-        // Ada: 8 of 10 contacted convert.
-        ...owned("cam-a", 8, "converted"),
-        ...owned("cam-a", 2, "no_response"),
-        // Blake: 1 of 10.
-        ...owned("cam-b", 1, "converted"),
-        ...owned("cam-b", 9, "no_response"),
+        ...owned("cam-a", 10, "no_response"),
+        ...owned("cam-b", 10, "no_response"),
       ],
       NO_MESSAGES,
       NO_REPLIES,
       cams,
     );
 
-    const blake = rows.find((row) => row.camId === "cam-b");
-    assert.ok(blake);
-    assert.ok(blake.flags.some((flag) => flag.kind === "low_conversion"));
-
-    const ada = rows.find((row) => row.camId === "cam-a");
-    assert.ok(ada);
-    assert.equal(ada.flags.length, 0);
+    for (const row of rows) {
+      assert.equal(row.totals.winRate, null);
+      assert.deepEqual(row.flags, []);
+    }
   });
 
   it("does not judge a CAM who has barely started", () => {
@@ -244,15 +272,12 @@ describe("teamTotals and sortByNeed (F212)", () => {
   ];
 
   it("sums the per-CAM rows and counts who is flagged", () => {
+    const ada = [...owned("cam-a", 8, "converted"), ...owned("cam-a", 2, "no_response")];
+    const blake = [...owned("cam-b", 1, "converted"), ...owned("cam-b", 9, "no_response")];
     const rows = perCamAnalytics(
-      [
-        ...owned("cam-a", 8, "converted"),
-        ...owned("cam-a", 2, "no_response"),
-        ...owned("cam-b", 1, "converted"),
-        ...owned("cam-b", 9, "no_response"),
-      ],
+      [...ada, ...blake],
       NO_MESSAGES,
-      NO_REPLIES,
+      [...repliesFrom(ada, 8), ...repliesFrom(blake.slice(1), 8)],
       cams,
     );
 
@@ -262,30 +287,65 @@ describe("teamTotals and sortByNeed (F212)", () => {
     assert.equal(totals.clientsOwned, 20);
     assert.equal(totals.conversions, 9);
     assert.equal(totals.camsNeedingSupport, 1);
+    // 16 clients replied, 17 responded (replied ∪ converted), 20 were contacted.
+    assert.equal(totals.respondingClients, 16);
+    assert.equal(totals.respondedClients, 17);
+    assert.equal(totals.replyRate, 16 / 20);
+    assert.equal(totals.winRate, 9 / 17);
   });
 
   it("puts flagged CAMs at the top", () => {
+    const ada = [...owned("cam-a", 8, "converted"), ...owned("cam-a", 2, "no_response")];
+    const blake = [...owned("cam-b", 1, "converted"), ...owned("cam-b", 9, "no_response")];
     const rows = perCamAnalytics(
-      [
-        ...owned("cam-a", 8, "converted"),
-        ...owned("cam-a", 2, "no_response"),
-        ...owned("cam-b", 1, "converted"),
-        ...owned("cam-b", 9, "no_response"),
-      ],
+      [...ada, ...blake],
       NO_MESSAGES,
-      NO_REPLIES,
+      [...repliesFrom(ada, 8), ...repliesFrom(blake.slice(1), 8)],
       cams,
     );
 
     assert.equal(sortByNeed(rows)[0].camId, "cam-b");
   });
 
-  it("reports zeros for an empty team rather than throwing", () => {
+  it("reports zeros and null rates for an empty team rather than throwing", () => {
     const totals = teamTotals([]);
 
     assert.equal(totals.cams, 0);
     assert.equal(totals.conversions, 0);
     assert.equal(totals.camsNeedingSupport, 0);
+    assert.equal(totals.replyRate, null);
+    assert.equal(totals.winRate, null);
+  });
+});
+
+describe("cycleTeamTotals", () => {
+  it("counts clients, not events, with teamTotals' own rate definitions", () => {
+    const totals = cycleTeamTotals({
+      messages: [
+        { organisation_id: "org-1" },
+        { organisation_id: "org-1" },
+        { organisation_id: "org-2" },
+      ],
+      replies: [{ organisation_id: "org-1" }],
+      conversions: [{ organisation_id: "org-1" }, { organisation_id: "org-3" }],
+    });
+
+    assert.equal(totals.emailsSent, 3);
+    assert.equal(totals.contactedClients, 2);
+    assert.equal(totals.respondingClients, 1);
+    assert.equal(totals.conversions, 2);
+    assert.equal(totals.replyRate, 1 / 2);
+    // Replied ∪ converted is org-1 and org-3: 2 of 2 converted.
+    assert.equal(totals.winRate, 1);
+  });
+
+  it("reports zeros and null rates for a quiet cycle rather than throwing", () => {
+    const totals = cycleTeamTotals({ messages: [], replies: [], conversions: [] });
+
+    assert.equal(totals.emailsSent, 0);
+    assert.equal(totals.contactedClients, 0);
+    assert.equal(totals.replyRate, null);
+    assert.equal(totals.winRate, null);
   });
 });
 

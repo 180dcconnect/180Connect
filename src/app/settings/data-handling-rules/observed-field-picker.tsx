@@ -43,11 +43,11 @@ import {
  * occurs, never what it contains.
  */
 export function ObservedFieldPicker({
-  activeKeys,
+  existingKeys,
   onResult,
 }: {
-  /** `ruleKey`s of every protection currently on, to mark those fields. */
-  activeKeys: ReadonlySet<string>;
+  /** `ruleKey`s of every protection already in the list, on or off. */
+  existingKeys: ReadonlySet<string>;
   onResult: (result: ActionResult) => void;
 }) {
   const [source, setSource] = useState("");
@@ -76,8 +76,10 @@ export function ObservedFieldPicker({
   }
 
   function isProtected(path: string) {
-    return activeKeys.has(ruleKey(source, path, "field_path")) ||
-      activeKeys.has(ruleKey(null, path, "field_path"));
+    // Anything already in the list — on or off — stays there with its own
+    // toggle, so it is never offered again here.
+    return existingKeys.has(ruleKey(source, path, "field_path")) ||
+      existingKeys.has(ruleKey(null, path, "field_path"));
   }
 
   function nameFor(path: string) {
@@ -207,7 +209,7 @@ export function ObservedFieldPicker({
                       </span>
                       <span className="shrink-0 text-right text-[12.5px] text-dim">
                         {already
-                          ? "Already protected"
+                          ? "Already in the list"
                           : `In ${field.records_seen} of ${field.records_sampled} recent`}
                       </span>
                     </button>

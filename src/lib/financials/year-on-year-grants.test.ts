@@ -19,7 +19,7 @@ const mockSeries = (
     income: 100_000,
     expenditure: 90_000,
     net: 10_000,
-    incomeBand: "100k_1m",
+    incomeBand: "100k_500k",
     filingDate: null,
     source: null,
     grantTotal: y.grantTotal,

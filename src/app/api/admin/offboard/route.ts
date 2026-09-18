@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor, actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
@@ -40,7 +40,7 @@ function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
 }
 
 export async function GET(request: Request) {
-  const authorization = await getCurrentActor("ownership:reassign");
+  const authorization = await getViewingActor("ownership:reassign");
   if (!authorization.ok) return denied(authorization.reason);
 
   const parsed = previewSchema.safeParse({

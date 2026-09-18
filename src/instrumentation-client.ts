@@ -11,16 +11,24 @@
  * longer than 16ms — and wrapped so a reporting failure can never break the
  * page it is trying to observe.
  */
-import { reportError } from "@/lib/error-logging";
+import { isNextRouterError, reportError } from "@/lib/error-logging";
 
 try {
   window.addEventListener("error", (event) => {
+    if (isNextRouterError(event.error)) {
+      if (typeof event.preventDefault === "function") event.preventDefault();
+      return;
+    }
     void reportError(event.error ?? event.message, {
       context: { source: "window.error", url: window.location.pathname },
     });
   });
 
   window.addEventListener("unhandledrejection", (event) => {
+    if (isNextRouterError(event.reason)) {
+      if (typeof event.preventDefault === "function") event.preventDefault();
+      return;
+    }
     void reportError(event.reason, {
       context: { source: "unhandledrejection", url: window.location.pathname },
     });

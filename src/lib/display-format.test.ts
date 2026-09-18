@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   dayKeyOf,
+  formatCadence,
   formatDayLabel,
   formatDuration,
   formatRelativeTime,
@@ -121,5 +122,19 @@ describe("formatShortDate", () => {
     assert.equal(formatShortDate(null), "—");
     assert.equal(formatShortDate(undefined), "—");
     assert.equal(formatShortDate(""), "—");
+  });
+});
+
+describe("formatCadence", () => {
+  it("names minute, day and week cadences in plain words", () => {
+    assert.equal(formatCadence(5 * 60 * 1000), "every 5 minutes");
+    assert.equal(formatCadence(15 * 60 * 1000), "every 15 minutes");
+    assert.equal(formatCadence(24 * 60 * 60 * 1000), "every day");
+    assert.equal(formatCadence(7 * 24 * 60 * 60 * 1000), "every week");
+  });
+
+  it("keeps singular units singular", () => {
+    assert.equal(formatCadence(60 * 1000), "every 1 minute");
+    assert.equal(formatCadence(60 * 60 * 1000), "every 1 hour");
   });
 });

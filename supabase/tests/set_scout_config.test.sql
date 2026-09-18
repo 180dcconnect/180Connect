@@ -105,7 +105,7 @@ returns jsonb language sql as $$
       "Social Justice & Enterprise": 0.6, "Environment & Sustainability": 0.55, "Arts, Culture & Heritage": 0.45
     },
     "geography": {"priorityTowns": ["Leeds"], "insideScore": 0.9, "outsideScore": 0.2},
-    "sizeScores": {"under_10k": 0.8, "10k_100k": 0.6, "100k_1m": 0.4, "over_1m": 0.2}
+    "sizeScores": {"under_10k": 0.8, "10k_100k": 0.6, "100k_500k": 0.5, "500k_1m": 0.4, "1m_10m": 0.3, "10m_50m": 0.25, "50m_100m": 0.2, "over_100m": 0.1}
   }$j$::jsonb;
 $$;
 
@@ -168,7 +168,7 @@ select is(
 
 select is(
   tests.scout_sqlstate('00000000-0000-4000-a000-000000000501',
-    jsonb_set(tests.valid_config(), '{sizeScores,over_1m}', '1.5')),
+    jsonb_set(tests.valid_config(), '{sizeScores,over_10m}', '1.5')),
   '22023',
   'a size score above 1 is refused'
 );

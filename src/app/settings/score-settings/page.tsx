@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
@@ -7,7 +7,8 @@ import { DEFAULT_WEIGHTS, sanitizeWeights } from "@/lib/scoring/calculate-priori
 import { DEFAULT_SCORING_RULES, sanitizeScoringRules } from "@/lib/scoring/scout-config";
 import { inputFromStored } from "@/lib/scoring/scout-config-inputs";
 import { InlineAlert } from "@/components/ui/inline-alert";
-import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import { Rise, Stage } from "@/components/dashboard-stage";
+import { isViewOnly } from "@/lib/auth/permissions";
 import { ScoreSettingsPanel } from "./score-settings-panel";
 
 type VersionRow = {
@@ -16,14 +17,6 @@ type VersionRow = {
   created_at: string;
   created_by: { full_name: string | null; email: string } | null;
 };
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-}
 
 /**
  * F096 — Admin Score Settings: how much each check counts, and what each check
@@ -45,7 +38,7 @@ function formatDate(iso: string): string {
  * Filed Record (`docs/app-design-system.md`), as the other settings pages.
  */
 export default async function AdminScoreSettingsPage() {
-  const authorization = await getCurrentActor("platform-settings:manage", {
+  const authorization = await getViewingActor("platform-settings:manage", {
     route: "/settings/score-settings",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
@@ -97,30 +90,6 @@ export default async function AdminScoreSettingsPage() {
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
       <Stage className="w-full space-y-8">
-        <Rise>
-          <h1 className="font-body text-[clamp(2rem,4vw,2.75rem)] leading-[1] font-semibold tracking-[-0.03em] text-ink">
-            Score settings
-          </h1>
-          <p className="mt-5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-dim">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-lead" />
-            {degraded ? (
-              <span>The saved settings could not be read</span>
-            ) : changedBy ? (
-              <span>
-                Last changed on{" "}
-                <span className="font-semibold text-ink">{formatDate(data!.created_at)}</span> by{" "}
-                <span className="font-semibold text-ink">{changedBy}</span>
-              </span>
-            ) : (
-              <span>
-                <span className="font-semibold text-ink">Starting settings</span>
-                {" · "}
-                Nobody has changed these yet
-              </span>
-            )}
-          </p>
-        </Rise>
-
         {error && (
           <Rise>
             <InlineAlert
@@ -130,13 +99,15 @@ export default async function AdminScoreSettingsPage() {
           </Rise>
         )}
 
-        <Group className="space-y-4">
-          <ScoreSettingsPanel
-            initial={initial}
-            totalClients={totalClients}
-            staleClients={staleClients}
-          />
-        </Group>
+        <ScoreSettingsPanel
+          initial={initial}
+          totalClients={totalClients}
+          staleClients={staleClients}
+          readOnly={isViewOnly(authorization.actor.role)}
+          degraded={degraded}
+          changedBy={changedBy}
+          createdAt={data?.created_at ?? null}
+        />
       </Stage>
     </div>
   );

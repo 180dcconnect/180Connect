@@ -23,7 +23,9 @@ describe("scout config — defaults", () => {
       "Doncaster",
     ]);
     assert.equal(DEFAULT_SCORING_RULES.geography.insideScore, 0.8);
-    assert.equal(DEFAULT_SCORING_RULES.sizeScores.over_1m, 0.9);
+    assert.equal(DEFAULT_SCORING_RULES.sizeScores.over_100m, 0.4);
+    assert.equal(DEFAULT_SCORING_RULES.sizeScores["10m_50m"], 0.75);
+    assert.equal(DEFAULT_SCORING_RULES.sizeScores["1m_10m"], 0.85);
   });
 
   it("lists sectors in their default ranking order", () => {
@@ -49,7 +51,7 @@ describe("scout config — sanitizing a stored config", () => {
     assert.equal(rules.geography.insideScore, 1);
     assert.equal(rules.geography.outsideScore, 0.1);
     assert.equal(rules.sizeScores.under_10k, 0.7);
-    assert.equal(rules.sizeScores.over_1m, 0.9);
+    assert.equal(rules.sizeScores.over_100m, 0.4);
   });
 
   it("respects an explicitly empty town list", () => {

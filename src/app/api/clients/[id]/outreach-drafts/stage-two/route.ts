@@ -5,6 +5,7 @@ import { reportError } from "@/lib/error-logging";
 import { logSecurityEvent } from "@/lib/log-security-event";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { isUuid, safeValidate, uuidField } from "@/lib/validation";
 import {
   createStageTwoModelCall,
   generateStageTwoDraft,
@@ -35,6 +36,20 @@ import { resolveMissionText } from "@/lib/mission";
 // No maxDuration export — see the stage-one route: the 300s project default
 // applies, and a distinct value would cost a Vercel function.
 
+// Follow-up preferences, as the composer's panel sends them. Every field has a
+// default, so an absent body still parses. Field rules come from
+// @/lib/validation (uuidField for the echoed reply-event id); z.object here is
+// only the shape they are assembled into — the same split the reference usage
+// in lib/auth/login.ts uses. Validation runs through safeValidate below, so a
+// bad payload reports per-field rather than throwing.
+const bodySchema = z.object({
+  length: z.enum(EMAIL_LENGTHS).default("standard"),
+  register: z.enum(EMAIL_REGISTERS).default("professional"),
+  closing: z.enum(STAGE_TWO_CLOSINGS).default("soft_cta"),
+  replyEventId: uuidField().optional(),
+  skipNews: z.boolean().optional(),
+});
+
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
   if (!authorization.ok) {
@@ -45,7 +60,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const { id: organisationId } = await params;
-  if (!z.uuid().safeParse(organisationId).success) {
+  if (!isUuid(organisationId)) {
     return NextResponse.json({ error: "That client could not be found." }, { status: 400 });
   }
 
@@ -53,12 +68,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // Stage 1 (F103): the saved booklet (F085/F086) is read straight from
   // client_booklets below, so the text reaching the prompt is exactly what
   // RLS-protected storage holds, never a client-supplied string.
-  const parsed = z.object({
-    length: z.enum(EMAIL_LENGTHS).default("standard"),
-    register: z.enum(EMAIL_REGISTERS).default("professional"),
-    closing: z.enum(STAGE_TWO_CLOSINGS).default("soft_cta"),
-    replyEventId: z.uuid().optional(),
-  }).safeParse(await request.json().catch(() => ({})));
+  const parsed = safeValidate(bodySchema, await request.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json({ error: "Choose valid follow-up preferences and try again." }, { status: 400 });
   }
@@ -302,13 +312,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // precedence (it is the fresh evidence AC1 asks for); otherwise the stored
   // enrichment hooks keep the previous behaviour. newsSource/newsHook/newsUrl
   // are additive in the response so the review UI can show a verifiable link.
-  const liveNews = await lookupLiveNewsHook({
-    organisationId,
-    organisationName: organisation.legal_name,
-    tradingName: organisation.trading_name,
-    website: organisation.website,
-  });
-  const storedHooks = enrichment?.news_hooks?.filter(Boolean) ?? [];
+  const liveNews = parsed.data.skipNews
+    ? null
+    : await lookupLiveNewsHook({
+        organisationId,
+        organisationName: organisation.legal_name,
+        tradingName: organisation.trading_name,
+        website: organisation.website,
+        city: organisation.city,
+        countryCode: organisation.country_code,
+        geographicReach: organisation.geographic_reach,
+        sector: organisation.sector,
+      });
+  const storedHooks = parsed.data.skipNews
+    ? []
+    : (enrichment?.news_hooks?.filter(Boolean) ?? []);
   // The Source line persists the verification URL verbatim in
   // ai_generations.prompt_user (F112): outreach_messages has no vessel for it,
   // so without this the URL would exist only in the transient response below

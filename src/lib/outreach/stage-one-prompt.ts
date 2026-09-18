@@ -6,7 +6,16 @@ export type StageOneContext = {
   city?: string | null;
   countryCode?: string | null;
   geographicReach?: string | null;
-  incomeBand?: "under_10k" | "10k_100k" | "100k_1m" | "over_1m" | null;
+  incomeBand?:
+    | "under_10k"
+    | "10k_100k"
+    | "100k_500k"
+    | "500k_1m"
+    | "1m_10m"
+    | "10m_50m"
+    | "50m_100m"
+    | "over_100m"
+    | null;
   contactName?: string | null;
   contactJobTitle?: string | null;
   missionStatement?: string | null;
@@ -70,6 +79,23 @@ export const CLOSING_APPROACHES = ["soft_cta", "meeting_request", "open_question
 export type ClosingApproach = (typeof CLOSING_APPROACHES)[number];
 
 /**
+ * Plain-English names for the two approach dials, beside the enums they name
+ * so a screen can never invent its own wording for the same choice. The
+ * compose window reads these.
+ */
+export const OPENING_APPROACH_LABELS: Record<OpeningApproach, string> = {
+  mission_led: "Mission-led",
+  direct_intro: "Direct introduction",
+  news_hook: "Relevant news hook",
+};
+
+export const CLOSING_APPROACH_LABELS: Record<ClosingApproach, string> = {
+  soft_cta: "Soft invitation",
+  meeting_request: "Request a short call",
+  open_question: "Open question",
+};
+
+/**
  * Reply-shaped closings for Stage 2 (the reply composer), kept apart from
  * CLOSING_APPROACHES on purpose: those are first-contact moves — a "short
  * INTRODUCTORY call", "whether support could be useful" — and read wrong
@@ -91,6 +117,21 @@ export const REPLY_CLOSING_APPROACHES = [
   "referral_next_step",
 ] as const;
 export type ReplyClosingApproach = (typeof REPLY_CLOSING_APPROACHES)[number];
+
+/**
+ * Plain-English names for the reply closings, beside the enum. Deliberately
+ * different words from CLOSING_APPROACH_LABELS even where the value is the
+ * same: inside a conversation the client already joined, "Request a short
+ * introductory call" reads wrong. The reply composer reads these.
+ */
+export const REPLY_CLOSING_APPROACH_LABELS: Record<ReplyClosingApproach, string> = {
+  soft_cta: "Soft invitation",
+  answer_next_step: "Answer + next step",
+  clarifying_question: "Ask a question",
+  short_call: "Suggest a short call",
+  graceful_close: "Graceful close",
+  referral_next_step: "Follow up on referral",
+};
 
 /**
  * Who the sender is. The model cannot describe 180DC from its own knowledge —
@@ -296,10 +337,18 @@ const SIZE_TONE_INSTRUCTIONS: Record<NonNullable<StageOneContext["incomeBand"]>,
     "This organisation is very small. Be personal and practical, avoid corporate language, and assume little spare budget or staff time. Do not mention its size, income, or finances.",
   "10k_100k":
     "This organisation is small. Stay approachable and resource-conscious, with practical language and a low-pressure invitation. Do not mention its size, income, or finances.",
-  "100k_1m":
+  "100k_500k":
+    "This organisation is an emerging mid-sized charity. Be professional, practical, and collaborative, recognizing that they have established programmes and a small core team. Do not mention its size, income, or finances.",
+  "500k_1m":
     "This organisation is established and mid-sized. Be professional and collaborative, and assume it has defined priorities and several stakeholders. Do not mention its size, income, or finances.",
-  over_1m:
-    "This organisation is large and well established. Use a polished, structured approach suitable for a mature organisation, without assuming complex procurement. Do not mention its size, income, or finances.",
+  "1m_10m":
+    "This organisation is substantial and well established. Use a polished, structured approach suitable for a mature non-profit with dedicated leadership and multiple workstreams. Do not mention its size, income, or finances.",
+  "10m_50m":
+    "This organisation is a large regional anchor institution. Use a polished, highly professional approach suitable for a prominent regional non-profit with senior executive leadership. Do not mention its size, income, or finances.",
+  "50m_100m":
+    "This organisation is a major national non-profit. Use a formal, structured approach appropriate for a large national entity with established governance. Do not mention its size, income, or finances.",
+  over_100m:
+    "This organisation is a major global or national institution. Use a polished, strategic approach suitable for a large-scale institution, framing 180DC's local or youth-oriented impact. Do not mention its size, income, or finances.",
 };
 
 export function sizeToneFor(
@@ -317,14 +366,28 @@ export function sizeToneFor(
 }
 
 /** Mirrors public.income_band plus the explicit no-data fallback (F104). */
-export const SIZE_TEMPLATES = ["under_10k", "10k_100k", "100k_1m", "over_1m", "default"] as const;
+export const SIZE_TEMPLATES = [
+  "under_10k",
+  "10k_100k",
+  "100k_500k",
+  "500k_1m",
+  "1m_10m",
+  "10m_50m",
+  "50m_100m",
+  "over_100m",
+  "default",
+] as const;
 export type SizeTemplate = (typeof SIZE_TEMPLATES)[number];
 
 export const SIZE_TONE_LABELS: Record<SizeTemplate, string> = {
   under_10k: "Very small charity (under £10k)",
   "10k_100k": "Small charity (£10k – £100k)",
-  "100k_1m": "Medium charity (£100k – £1m)",
-  over_1m: "Large charity (over £1m)",
+  "100k_500k": "Emerging mid-size charity (£100k – £500k)",
+  "500k_1m": "Established mid-size charity (£500k – £1m)",
+  "1m_10m": "Large non-profit (£1m – £10m)",
+  "10m_50m": "Regional anchor institution (£10m – £50m)",
+  "50m_100m": "Major national non-profit (£50m – £100m)",
+  over_100m: "Mega-NGO / global institution (over £100m)",
   default: "Default — size not recorded",
 };
 

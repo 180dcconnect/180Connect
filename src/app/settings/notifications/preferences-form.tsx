@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition, type FormEvent } from "react";
 import { Check, Loader2 } from "lucide-react";
-import { Pill } from "@/app/clients/[id]/section-card";
+import { Pill } from "@/app/(app)/clients/[id]/section-card";
 import { FiledCheckbox } from "@/components/ui/filed-checkbox";
 import {
   NOTIFICATION_FREQUENCIES,

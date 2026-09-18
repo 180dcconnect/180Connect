@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor, actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import {
   EDIT_SUGGESTION_SELECT,
   decideEditRpcFailure,
@@ -34,7 +34,7 @@ function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
 }
 
 export async function GET() {
-  const authorization = await getCurrentActor("approval:manage", {
+  const authorization = await getViewingActor("approval:manage", {
     route: "/admin/edit-suggestions",
   });
   if (!authorization.ok) return denied(authorization.reason);

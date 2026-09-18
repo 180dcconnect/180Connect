@@ -1,6 +1,6 @@
 /**
  * F028 — Recent Updates: a platform-wide feed of what changed on clients,
- * for the CAM dashboard (src/app/dashboard/page.tsx).
+ * for the CAM dashboard (src/app/(app)/dashboard/page.tsx).
  *
  * Where F029's team-activity feed answers "what did my colleagues do" from
  * audit_log alone, this answers "what happened across the platform" by merging

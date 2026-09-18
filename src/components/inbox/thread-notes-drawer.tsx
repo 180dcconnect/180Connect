@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { ArrowLeft, Plus, StickyNote, X } from "lucide-react";
 import type { InboxThreadView } from "@/lib/inbox-thread-view";
+import { type AppRole, isViewOnly } from "@/lib/auth/permissions";
 import {
   applyMentionInsertion,
   filterMentionCandidates,
@@ -53,13 +54,17 @@ export function ThreadNotesDrawer({
   isOpen,
   onClose,
   thread,
+  viewerRole = null,
   onNotesCountChange,
 }: {
   isOpen: boolean;
   onClose: () => void;
   thread: InboxThreadView;
+  viewerRole?: AppRole | null;
   onNotesCountChange?: (count: number) => void;
 }) {
+  const isViewer = viewerRole !== null && viewerRole !== undefined && isViewOnly(viewerRole);
+  const canAddNote = !isViewer;
   const [notes, setNotes] = useState<ClientNote[]>([]);
   const [draftNote, setDraftNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -379,8 +384,9 @@ export function ThreadNotesDrawer({
       </div>
 
       {/* Add a note with @teammate mention support */}
-      <div className="shrink-0 border-b border-rule-soft px-6 py-4">
-        <div className="relative min-h-[5.5rem] rounded-inset border border-rule bg-paper">
+      {canAddNote && (
+        <div className="shrink-0 border-b border-rule-soft px-6 py-4">
+          <div className="relative min-h-[5.5rem] rounded-inset border border-rule bg-paper">
           {/* Overlay renders @mentions with blue highlight, matching AddNoteForm */}
           <div
             ref={overlayRef}
@@ -520,6 +526,7 @@ export function ThreadNotesDrawer({
           </button>
         </div>
       </div>
+      )}
 
       {/* Notes list */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -533,7 +540,9 @@ export function ThreadNotesDrawer({
             <StickyNote className="mb-3 h-10 w-10 text-faint stroke-[1.5]" />
             <p className="text-[13px] font-semibold text-ink">No notes yet</p>
             <p className="mt-1 text-[12px] text-dim">
-              Add the first note about {thread.orgName} above.
+              {canAddNote
+                ? `Add the first note about ${thread.orgName} above.`
+                : `No notes have been added for ${thread.orgName}.`}
             </p>
           </div>
         ) : (
@@ -555,7 +564,7 @@ export function ThreadNotesDrawer({
                     <span className="text-[11px] text-faint" suppressHydrationWarning>
                       {formatNoteDate(note.createdAt)}
                     </span>
-                    {note.canManage && (
+                    {note.canManage && !isViewer && (
                       <button
                         type="button"
                         onClick={() => void handleDeleteNote(note.id)}

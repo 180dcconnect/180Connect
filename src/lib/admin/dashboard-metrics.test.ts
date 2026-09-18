@@ -37,13 +37,16 @@ describe("buildFunnelMetrics", () => {
     assert.equal(m.totalCharities, 4);
     assert.equal(m.contacted, 3);
     assert.equal(m.converted, 1);
-    assert.equal(m.conversionRate, 1 / 3);
+    // The one converted client is the only one who responded, so the win rate
+    // is 1 of 1 — the funnel no longer adds its own converted ÷ contacted.
+    assert.equal(m.winRate, 1);
     assert.equal(m.noResponseRate, 1 / 3);
   });
 
-  it("returns 0 rates when nothing contacted", () => {
+  it("returns no rate at all when nothing contacted", () => {
     const m = buildFunnelMetrics([client()]);
-    assert.equal(m.conversionRate, 0);
+    assert.equal(m.winRate, null);
+    assert.equal(m.replyRate, null);
     assert.equal(m.noResponseRate, 0);
   });
 });

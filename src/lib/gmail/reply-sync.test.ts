@@ -313,14 +313,29 @@ describe("syncGmailReplies", () => {
     assert.ok(after >= before && after <= before + 5, `unexpected query ${listed[0]}`);
   });
 
-  it("throws when the reply sync is not configured", async () => {
-    // No config override: falls through to resolveGmailConfig() against the
-    // real (unset in tests) GMAIL_CLIENT_ID/SECRET/REFRESH_TOKEN env vars,
-    // same convention as client.test.ts's equivalent case.
-    await assert.rejects(
-      () => syncGmailReplies({ admin: fakeAdmin({}).admin, sender, tokenProvider } as Parameters<typeof syncGmailReplies>[0]),
-      /not configured/,
-    );
+  it("throws when the reply sync is not configured even with Gmail environment variables set", async () => {
+    const originalEnv = process.env;
+    process.env = {
+      ...originalEnv,
+      GMAIL_CLIENT_ID: "test-client",
+      GMAIL_CLIENT_SECRET: "test-secret",
+      GMAIL_REFRESH_TOKEN: "test-refresh",
+      GMAIL_SENDER_EMAIL: sender,
+    };
+    const fetchImpl = (async () => {
+      assert.fail("Unconfigured reply sync must not make network requests");
+    }) as typeof fetch;
+
+    try {
+      for (const missing of [{ config: null, sender }, { config, sender: null }]) {
+        await assert.rejects(
+          () => syncGmailReplies({ admin: fakeAdmin({}).admin, ...missing, tokenProvider, fetchImpl }),
+          /not configured/,
+        );
+      }
+    } finally {
+      process.env = originalEnv;
+    }
   });
 });
 

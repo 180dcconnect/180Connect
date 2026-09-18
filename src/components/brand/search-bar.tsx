@@ -305,7 +305,7 @@ const DEFAULT_PARAMS: Record<string, string> = {
  * it holds the first line instead of swapping under someone who asked for
  * stillness.
  */
-function StatusLine({ messages, tone = "dark" }: { messages: readonly string[]; tone?: SearchBarTone }) {
+function StatusLine({ messages, tone = "light" }: { messages: readonly string[]; tone?: SearchBarTone }) {
   const reducedMotion = useReducedMotionConfig();
   const [index, setIndex] = useState(0);
 
@@ -340,13 +340,14 @@ function StatusLine({ messages, tone = "dark" }: { messages: readonly string[]; 
 
 export function BrandSearchBar({
   className = "",
-  tone = "dark",
+  tone = "light",
   placeholder = "I want to learn about",
   subjects = DEFAULT_SUBJECTS,
   categories,
   params: paramNames,
    defaultQuery = "",
    defaultFilters = [],
+   filters: filtersProp,
    startOpen = false,
    frosted = false,
    clearRowOnOpen = false,
@@ -492,6 +493,8 @@ export function BrandSearchBar({
     * filters still surface at the bottom of the open dropdown instead.
     */
    chipsBelow?: boolean;
+   /** Controlled active filters to keep selection in sync. */
+   filters?: (FilterOption & { category: string })[];
    /**
     * Primary go action for the panel, rendered as the lime arrow disc beside
     * the open/close toggle — the search bar's own submit button, copied. Only
@@ -577,8 +580,15 @@ export function BrandSearchBar({
   const [subject, setSubject] = useState(0);
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [filterQuery, setFilterQuery] = useState("");
-  const [selectedFilters, setSelectedFilters] = useState<(FilterOption & { category: string })[]>(defaultFilters);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [selectedFilters, setSelectedFilters] = useState<(FilterOption & { category: string })[]>(
+    filtersProp ?? defaultFilters,
+  );
+  const [seenFiltersProp, setSeenFiltersProp] = useState(filtersProp);
+  if (seenFiltersProp !== filtersProp) {
+    setSeenFiltersProp(filtersProp);
+    if (filtersProp !== undefined) setSelectedFilters(filtersProp);
+  }
   // `askPending` is a real signal, not a timed animation: the ask submit waits on
   // the server round-trip that interprets the question, so the spinner should
   // last exactly as long as that does.
@@ -2125,7 +2135,7 @@ export function BrandSearchBar({
       </motion.div>
 
       {/* Active filter pills float UNDER the white card on a transparent background, not inside the card */}
-      {selectedFilters.length > 0 && (panelOut || !chipsBelow) && (
+      {selectedFilters.length > 0 && panelOut && !chipsBelow && (
         <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2 px-3 bg-transparent">
           <AnimatePresence>
             {selectedFilters.map((filter) => {

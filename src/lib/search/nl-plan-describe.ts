@@ -12,7 +12,7 @@
 import {
   priorityScoreFilterLabel,
   SECTOR_FILTER_LABELS,
-} from "../../app/clients/visible-clients.ts";
+} from "../../app/(app)/clients/visible-clients.ts";
 import { INCOME_BAND_LABELS, type IncomeBand } from "../income-band.ts";
 import { formatOrganisationType, formatOutreachStatus } from "../organisation-format.ts";
 import type { ResolvedNlPlan } from "./nl-search-apply.ts";

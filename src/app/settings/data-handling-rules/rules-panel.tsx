@@ -1,9 +1,11 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
-import { Check, ChevronRight, Loader2 } from "lucide-react";
+import { useId, useState, useTransition, type ReactNode } from "react";
+import { Check, ChevronRight, Loader2, Lock, TriangleAlert, Unlock } from "lucide-react";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { Switch } from "@/components/ui/material-design-3-switch";
 import { Rise } from "@/components/dashboard-stage";
-import { Pill } from "@/app/clients/[id]/section-card";
+import { Pill } from "@/app/(app)/clients/[id]/section-card";
 import {
   Select,
   SelectContent,
@@ -35,7 +37,6 @@ import {
   PRIMARY_BUTTON,
   QUIET_BUTTON,
   ROW,
-  ROW_ACTION,
   SELECT_CONTENT,
   SELECT_GROUP_LABEL,
   SELECT_ITEM,
@@ -82,20 +83,43 @@ function EffectPill({ rule }: { rule: RuleRow }) {
  * Plain names come from `src/lib/data-handling-catalogue.ts`. Turning a
  * protection off asks first, because it is the one action here that weakens
  * privacy: personal data starts being saved from the next import.
+ *
+ * ── The order of the cards ──
+ *
+ * The reader arrives with one question — "is our data handling right?" — so the
+ * two cards that answer it come first: what is protected, then what the
+ * protections have actually removed. The card that *changes* them sits last,
+ * under its own heading, and `removedSoFar` is a slot rather than a third card
+ * here for exactly that reason: the evidence card is the page's to render, and
+ * it has to land between the two. Putting the form in the middle split the
+ * reading and pushed the evidence below a developer form, which is the wrong
+ * way round for the job people come here to do.
  */
 export function RulesPanel({
   initialRules,
   initialVersion,
+  readOnly = false,
+  removedSoFar,
 }: {
   initialRules: RuleRow[];
   initialVersion: number;
+  readOnly?: boolean;
+  /** "What has been removed so far" — see the note above on card order. */
+  removedSoFar?: ReactNode;
 }) {
   const [rules, setRules] = useState(initialRules);
   const [version, setVersion] = useState(initialVersion);
   const [notice, setNotice] = useState<Notice>(null);
   const [isPending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  // Turning a protection off is the one action here that weakens privacy, so it
+  // waits in this pending slot until the admin confirms in the sticky bar at the
+  // bottom of the screen (the same position as the score settings save bar).
+  // The switch itself is controlled and stays visibly on until then — the
+  // turn-off animation plays when the save lands and the row refreshes. The row
+  // never leaves the list: off protections stay where they are with their switch
+  // off, so turning one back on is the same toggle.
+  const [pendingOffId, setPendingOffId] = useState<string | null>(null);
   const [chosenKey, setChosenKey] = useState("");
   const [devSource, setDevSource] = useState(GLOBAL_SOURCE);
   const [devAction, setDevAction] = useState<"deny" | "allow">("deny");
@@ -103,12 +127,14 @@ export function RulesPanel({
   const devSourceId = useId();
   const devActionId = useId();
 
-  const activeRules = rules.filter((rule) => rule.is_active);
-  const inactiveRules = rules.filter((rule) => !rule.is_active);
-  const activeKeys = new Set(
-    activeRules.map((rule) => ruleKey(rule.source, rule.field_path, rule.rule_kind)),
+  const activeCount = rules.filter((rule) => rule.is_active).length;
+  // Every rule ever added stays in the main list, on or off — so the picker and
+  // the dropdown below only offer what is not already there.
+  const existingKeys = new Set(
+    rules.map((rule) => ruleKey(rule.source, rule.field_path, rule.rule_kind)),
   );
-  const available = RULE_CATALOGUE.filter((entry) => !activeKeys.has(catalogueKey(entry)));
+  const available = RULE_CATALOGUE.filter((entry) => !existingKeys.has(catalogueKey(entry)));
+  const pendingRule = rules.find((rule) => rule.id === pendingOffId) ?? null;
   const chosen = available.find((entry) => catalogueKey(entry) === chosenKey) ?? null;
 
   async function refresh() {
@@ -129,7 +155,7 @@ export function RulesPanel({
     startTransition(async () => {
       const result = await toggleRuleActive(rule.id, isActive);
       report(result);
-      setConfirmingId(null);
+      setPendingOffId(null);
       setBusyId(null);
       if (result.ok) await refresh();
     });
@@ -139,8 +165,10 @@ export function RulesPanel({
     setNotice(null);
     // Turning a known protection back on reuses its old row, so its history stays
     // in one place rather than starting a second copy.
-    const previous = inactiveRules.find(
-      (rule) => ruleKey(rule.source, rule.field_path, rule.rule_kind) === catalogueKey(entry),
+    const previous = rules.find(
+      (rule) =>
+        !rule.is_active &&
+        ruleKey(rule.source, rule.field_path, rule.rule_kind) === catalogueKey(entry),
     );
     if (previous) {
       toggle(previous, true);
@@ -209,79 +237,132 @@ export function RulesPanel({
             next import.
           </p>
 
-          {activeRules.length === 0 ? (
+          {rules.length === 0 ? (
             <p className={`mt-4 ${ROW} text-[13px] text-stop`}>
               No protections are on — personal details from imports are being saved.
               Turn protections on below.
             </p>
           ) : (
-            groupBySource(activeRules, (rule) => rule.source).map(([group, groupRules]) => (
-              <div key={group} className="mt-5">
-                <h3 className="text-[13px] font-medium text-ink">From {group}</h3>
-                <ul className="mt-1">
-                  {groupRules.map((rule) => {
-                    const { label, description } = ruleName(rule);
-                    const confirming = confirmingId === rule.id;
-                    return (
-                      <li key={rule.id} className={`${ROW} items-start`}>
-                        <div className="min-w-0 flex-1">
-                          <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-ink">
-                            {label}
-                            <EffectPill rule={rule} />
-                          </p>
-                          <p className="mt-1 text-[13px] leading-[1.55] text-dim">{description}</p>
-                          {confirming && (
-                            <div className="mt-3 rounded-inset bg-stop-wash px-3 py-2.5">
-                              <p className="text-[13px] leading-[1.55] text-stop">
-                                Turn this off? From the next import, {label.toLowerCase()} will be
-                                saved again.
-                              </p>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => toggle(rule, false)}
-                                  disabled={isPending}
-                                  className="inline-flex items-center gap-1.5 rounded-inset border border-stop bg-stop px-2.5 py-1 text-[13px] font-medium text-white disabled:opacity-50"
-                                >
-                                  {busyId === rule.id && (
-                                    <Loader2 aria-hidden="true" className="size-3 animate-spin" />
-                                  )}
-                                  Yes, turn it off
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmingId(null)}
-                                  disabled={isPending}
-                                  className={QUIET_BUTTON}
-                                >
-                                  Keep it on
-                                </button>
-                              </div>
-                            </div>
+            <>
+              {activeCount === 0 && (
+                <p className="mt-4 rounded-inset bg-stop-wash px-3 py-2.5 text-[13px] font-medium text-stop">
+                  No protections are on — personal details from imports are being saved.
+                  Turn one back on below.
+                </p>
+              )}
+              {groupBySource(rules, (rule) => rule.source).map(([group, groupRules]) => (
+                <div key={group} className="mt-5">
+                  <h3 className="text-[13px] font-medium text-ink">From {group}</h3>
+                  <ul className="mt-1">
+                    {groupRules.map((rule) => {
+                      const { label, description } = ruleName(rule);
+                      const turnOffNote = `From the next import, ${label.toLowerCase()} will be saved again.`;
+                      const turnOnNote = `From the next import, ${label.toLowerCase()} will be removed again.`;
+                      // The note is real text in the row, not just tooltip copy: a
+                      // tooltip is only announced while it is open, so the switch
+                      // points at this instead. `aria-description` would be shorter
+                      // and is not yet supported on `role="switch"`.
+                      const turnNoteId = `protection-note-${rule.id}`;
+                      return (
+                        <li key={rule.id} className={`${ROW} items-start`}>
+                          <div className="min-w-0 flex-1">
+                            <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-ink">
+                              {label}
+                              <EffectPill rule={rule} />
+                              {!rule.is_active && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-paper px-2 py-0.5 text-[11px] font-medium text-dim">
+                                  Off
+                                </span>
+                              )}
+                            </p>
+                            <p className="mt-1 text-[13px] leading-[1.55] text-dim">{description}</p>
+                          </div>
+                          {!readOnly && (
+                            // A switch has no room to say what it does, and this is
+                            // the control that decides whether a personal detail is
+                            // saved. The sentence below is the confirmation's own
+                            // wording, so the hover and the bottom bar agree.
+                            <>
+                              <span id={turnNoteId} className="sr-only">
+                                {rule.is_active ? turnOffNote : turnOnNote}
+                              </span>
+                              <InfoTooltip
+                                title={rule.is_active ? "Turning this off" : "Turning this on"}
+                                content={rule.is_active ? turnOffNote : turnOnNote}
+                                side="top"
+                                align="end"
+                              >
+                                <span className="inline-flex">
+                                  <Switch
+                                    role="switch"
+                                    aria-label={`${label} protection from ${group}`}
+                                    aria-describedby={turnNoteId}
+                                    checked={rule.is_active}
+                                    onCheckedChange={(nextChecked) => {
+                                      if (nextChecked) {
+                                        if (!rule.is_active) toggle(rule, true);
+                                      } else if (rule.is_active) {
+                                        // The switch stays on until the bottom bar
+                                        // confirms — flipping it here would lie
+                                        // about what is saved.
+                                        setNotice(null);
+                                        setPendingOffId(rule.id);
+                                      }
+                                    }}
+                                    disabled={isPending}
+                                    variant="destructive"
+                                    showIcons
+                                    checkedIcon={<Lock aria-hidden="true" className="size-3" />}
+                                    uncheckedIcon={<Unlock aria-hidden="true" className="size-3" />}
+                                  />
+                                </span>
+                              </InfoTooltip>
+                            </>
                           )}
-                        </div>
-                        {!confirming && (
-                          <button
-                            type="button"
-                            onClick={() => setConfirmingId(rule.id)}
-                            disabled={isPending}
-                            className={`${ROW_ACTION} disabled:pointer-events-none disabled:opacity-50`}
-                          >
-                            Turn off<span className="sr-only"> {label}</span>
-                          </button>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+            </>
           )}
         </section>
       </Rise>
 
-      <Rise>
-        <section aria-labelledby="turn-on-heading" className={CARD}>
+      {removedSoFar}
+
+      {!readOnly && (
+        <>
+        {/* The one screen in Settings where a non-technical admin can do real
+            damage without any visible sign: a protection that quietly matches
+            nothing looks exactly like one that works, and the list above says
+            "on" either way. So the section is labelled as a developer's job
+            before anyone starts choosing from it — as a heading rather than a
+            tinted card, since most of what is under it is ordinary. */}
+        <Rise>
+          <section aria-labelledby="danger-zone-heading">
+            <div className="flex items-baseline gap-2">
+              <TriangleAlert
+                aria-hidden="true"
+                className="size-[15px] shrink-0 self-center text-stop/70"
+                strokeWidth={2.2}
+              />
+              <h2
+                id="danger-zone-heading"
+                className="font-body text-[19px] leading-[1.3] font-normal tracking-[-0.01em] text-stop"
+              >
+                Danger zone
+              </h2>
+            </div>
+            <p className="mt-1.5 text-[13px] leading-[1.55] text-dim">
+              If something here needs changing, it is better to ask a developer than
+              to guess.
+            </p>
+          </section>
+        </Rise>
+        <Rise>
+          <section aria-labelledby="turn-on-heading" className={CARD}>
           <h2 id="turn-on-heading" className={CARD_TITLE}>
             Turn a protection on
           </h2>
@@ -346,42 +427,12 @@ export function RulesPanel({
           )}
 
           <ObservedFieldPicker
-            activeKeys={activeKeys}
+            existingKeys={existingKeys}
             onResult={(result) => {
               report(result);
               if (result.ok) void refresh();
             }}
           />
-
-          {inactiveRules.length > 0 && (
-            <div className="mt-6">
-              <h3 className="text-[13px] font-medium text-ink">Turned off</h3>
-              <ul className="mt-1">
-                {inactiveRules.map((rule) => {
-                  const { label } = ruleName(rule);
-                  return (
-                    <li key={rule.id} className={`${ROW} items-start`}>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm text-ink">{label}</p>
-                        <p className="mt-1 text-[13px] text-dim">From {sourceLabel(rule.source)}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => toggle(rule, true)}
-                        disabled={isPending}
-                        className={`${ROW_ACTION} inline-flex items-center gap-1.5 disabled:pointer-events-none disabled:opacity-50`}
-                      >
-                        {busyId === rule.id && (
-                          <Loader2 aria-hidden="true" className="size-3 animate-spin" />
-                        )}
-                        Turn back on<span className="sr-only"> {label}</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
 
           {/* The escape hatch for a field no catalogue entry names. Collapsed and
               labelled for developers: it needs the exact name a source's API uses,
@@ -482,6 +533,42 @@ export function RulesPanel({
           </p>
         </section>
       </Rise>
+        </>
+      )}
+
+      {/* Turning a protection off confirms here, at the bottom of the screen —
+          the same position as the score settings save bar — so the toggle in the
+          list never moves and the row stays where it is, on or off. */}
+      {!readOnly && pendingRule && (
+        <div className="sticky bottom-4 z-10 mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-2 rounded-panel border border-rule bg-white px-4 py-3 sm:flex-nowrap">
+          <p aria-live="polite" className="mr-auto min-w-0 flex-1 text-[13px] leading-[1.55] text-ink">
+            Turn off {ruleName(pendingRule).label.toLowerCase()}? New imports will save
+            it.
+          </p>
+          <span className="flex shrink-0 items-center gap-x-3">
+            <button
+              type="button"
+              onClick={() => setPendingOffId(null)}
+              disabled={isPending}
+              className={QUIET_BUTTON}
+            >
+              Keep it on
+            </button>
+            <button
+              type="button"
+              onClick={() => toggle(pendingRule, false)}
+              disabled={isPending}
+              aria-busy={isPending || undefined}
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-inset border border-stop bg-stop px-2.5 py-1 whitespace-nowrap text-[13px] font-medium text-white transition-colors hover:bg-stop/90 focus-visible:ring-2 focus-visible:ring-stop/30 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+            >
+              {busyId === pendingRule.id && (
+                <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+              )}
+              {busyId === pendingRule.id ? "Turning off…" : "Yes, turn it off"}
+            </button>
+          </span>
+        </div>
+      )}
     </>
   );
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor, actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import {
   restrictedFieldRpcFailure,
   validateDeactivateRestrictedFieldInput,
@@ -27,7 +27,7 @@ function denied(reason: Parameters<typeof actorFailureMessage>[0]) {
 }
 
 export async function GET() {
-  const authorization = await getCurrentActor("approval:manage", {
+  const authorization = await getViewingActor("approval:manage", {
     route: "/settings/restricted-fields",
   });
   if (!authorization.ok) return denied(authorization.reason);

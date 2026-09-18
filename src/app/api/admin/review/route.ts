@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor, actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { excludeResolvedReviewFlags } from "@/lib/gmail/reply-message";
 import { logSecurityEvent } from "@/lib/log-security-event";
@@ -39,7 +39,7 @@ function rpcFailure(error: { code?: string; message?: string }): { status: numbe
 }
 
 export async function GET() {
-  const authorization = await getCurrentActor("user:manage", { route: "/admin/review" });
+  const authorization = await getViewingActor("user:manage", { route: "/admin/review" });
   if (!authorization.ok) return denied(authorization.reason);
 
   const supabase = await createClient();
@@ -57,7 +57,7 @@ export async function GET() {
     supabase
       .from("organisation_status_flags")
       .select(
-        "id, organisation_id, company_number, previous_status, new_status, " +
+        "id, organisation_id, source, company_number, previous_status, new_status, " +
           "detected_at, resolved, resolved_at, organisations ( legal_name )",
       )
       .order("detected_at", { ascending: false })

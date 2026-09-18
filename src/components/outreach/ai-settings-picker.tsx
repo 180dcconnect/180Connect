@@ -65,7 +65,7 @@ function AiCategoryPage({
       initial="hidden"
       animate="show"
       exit={{ opacity: 0, transition: { duration: 0.15 } }}
-      className={`absolute inset-0 flex h-full flex-col gap-1 overflow-y-auto px-4 pt-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] ${hasFooter ? "pb-16" : "pb-3"}`}
+      className={`absolute inset-0 flex h-full flex-col gap-1 overflow-y-auto px-4 pt-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] ${hasFooter ? "pb-20" : "pb-3"}`}
     >
       {rows.map((row) => (
         <motion.li key={row.key} variants={AI_ROW}>
@@ -96,6 +96,11 @@ function AiOptionPage({
   selected,
   onSelect,
   onBack,
+  hasFooter = false,
+  newsPreview,
+  useNewsHook,
+  onToggleUseNewsHook,
+  clientName,
 }: {
   title: string;
   hint?: string;
@@ -103,6 +108,11 @@ function AiOptionPage({
   selected: string;
   onSelect: (value: string) => void;
   onBack: () => void;
+  hasFooter?: boolean;
+  newsPreview?: { loading: boolean; hook: { text: string; url: string | null } | null; error?: string | null } | null;
+  useNewsHook?: boolean;
+  onToggleUseNewsHook?: () => void;
+  clientName?: string | null;
 }) {
   return (
     <motion.div
@@ -128,10 +138,13 @@ function AiOptionPage({
 
       <motion.ul
         variants={AI_OPTION_LIST}
-        className="flex-1 flex flex-col gap-1 overflow-y-auto px-4 pb-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+        className={`flex-1 flex flex-col gap-1 overflow-y-auto px-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] ${
+          hasFooter ? "pb-20" : "pb-3"
+        }`}
       >
         {options.map((option, index) => {
           const isSelected = option.value === selected;
+          const isNewsOption = option.value === "news_hook";
           return (
             <motion.li key={option.value} variants={AI_OPTION_ROWS} custom={index}>
               <button
@@ -147,6 +160,53 @@ function AiOptionPage({
                 <span>{option.label}</span>
                 {isSelected && <Check className="h-4 w-4 text-lime-800" />}
               </button>
+
+              {/* Subsection for Relevant News Hook */}
+              {isNewsOption && isSelected && (
+                <div className="mt-2 rounded-2xl border border-slate-900/10 bg-white/90 p-3 shadow-xs">
+                  {newsPreview?.loading ? (
+                    <p className="font-body text-[13px] leading-[1.55] text-slate-500">
+                      Checking recent news stories{clientName ? ` for ${clientName}` : ""}…
+                    </p>
+                  ) : newsPreview?.hook ? (
+                    <div className="space-y-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <label className="flex items-start gap-2.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={useNewsHook !== false}
+                            onChange={() => onToggleUseNewsHook?.()}
+                            className="mt-0.5 size-4 rounded accent-lead cursor-pointer"
+                          />
+                          <span className="font-body text-[13px] font-medium leading-[1.5] text-slate-900">
+                            {newsPreview.hook.text}
+                          </span>
+                        </label>
+                      </div>
+                      {newsPreview.hook.url && (
+                        <div className="flex justify-end pt-0.5">
+                          <a
+                            href={newsPreview.hook.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-body inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-lead hover:bg-slate-200 transition-colors"
+                          >
+                            View article ↗
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  ) : !clientName ? (
+                    <p className="font-body text-[13px] leading-[1.55] text-slate-500">
+                      Pick a recipient above to check for available news stories.
+                    </p>
+                  ) : (
+                    <p className="font-body text-[13px] leading-[1.55] text-slate-500">
+                      No recent news found for this client. The draft will open with their mission instead.
+                    </p>
+                  )}
+                </div>
+              )}
             </motion.li>
           );
         })}
@@ -167,6 +227,10 @@ export function AiSettingsPicker({
   settings,
   disabled = false,
   footer,
+  newsPreview,
+  useNewsHook,
+  onToggleUseNewsHook,
+  clientName,
 }: {
   settings: readonly AiSettingEntry[];
   disabled?: boolean;
@@ -179,6 +243,10 @@ export function AiSettingsPicker({
    * click-through to the list underneath; each button re-enables its own.
    */
   footer?: React.ReactNode;
+  newsPreview?: { loading: boolean; hook: { text: string; url: string | null } | null; error?: string | null } | null;
+  useNewsHook?: boolean;
+  onToggleUseNewsHook?: () => void;
+  clientName?: string | null;
 }) {
   const [drillSetting, setDrillSetting] = useState<string | null>(null);
   const activeDrill = drillSetting
@@ -201,6 +269,7 @@ export function AiSettingsPicker({
       <AnimatePresence>
         {activeDrill ? (
           <AiOptionPage
+            hasFooter={Boolean(footer)}
             key={activeDrill.key}
             title={activeDrill.label}
             hint={activeDrill.hint}
@@ -211,6 +280,10 @@ export function AiSettingsPicker({
               setDrillSetting(null);
             }}
             onBack={() => setDrillSetting(null)}
+            newsPreview={activeDrill.key === "opening" ? newsPreview : undefined}
+            useNewsHook={useNewsHook}
+            onToggleUseNewsHook={onToggleUseNewsHook}
+            clientName={clientName}
           />
         ) : (
           <AiCategoryPage

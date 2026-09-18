@@ -245,6 +245,59 @@ export function checkManualEntryCriteria(
   };
 }
 
+/**
+ * Full row shape behind the admin review queue. Joins mirror the
+ * EDIT_SUGGESTION_SELECT alias style; FK hint names are Postgres's own
+ * auto-names for the inline references in
+ * 20260817130000_create_manual_entry_records.sql.
+ */
+export type ManualEntryReviewRow = {
+  id: string;
+  legal_name: string;
+  mission_statement: string;
+  organisation_type: "charity" | "cio" | "cic" | "social_enterprise" | "ngo" | "company" | "both" | "other";
+  address_line_1: string;
+  city: string;
+  postcode: string;
+  country_code: string;
+  website: string | null;
+  contact_email: string | null;
+  contact_email_role_confirmed_for: string | null;
+  contact_email_role_confirmed_at: string | null;
+  role_confirmer: { full_name: string | null } | { full_name: string | null }[] | null;
+  registry_name: string | null;
+  registry_number: string | null;
+  /** The register's second number, when the charity is also a company (20261005120000). */
+  company_number: string | null;
+  reason_for_manual_entry: string;
+  sector: string | null;
+  geographic_reach: string | null;
+  latest_income: number | null;
+  accounts_year_end: string | null;
+  staff_count: number | null;
+  volunteer_count: number | null;
+  review_status: string;
+  created_at: string;
+  converted_to_organisation_id: string | null;
+  reviewed_at: string | null;
+  review_notes: string | null;
+  submitter: { full_name: string | null } | { full_name: string | null }[] | null;
+  reviewed_by: { full_name: string | null } | { full_name: string | null }[] | null;
+};
+
+/** Shared PostgREST select for the approvals page's manual-entry queue. */
+export const MANUAL_ENTRY_REVIEW_SELECT = `
+  id, legal_name, mission_statement, organisation_type, address_line_1, city, postcode,
+  country_code, website, contact_email, contact_email_role_confirmed_for,
+  contact_email_role_confirmed_at,
+  role_confirmer:users!manual_entry_records_contact_email_role_confirmed_by_fkey ( full_name ),
+  registry_name, registry_number, company_number, reason_for_manual_entry, sector,
+  geographic_reach, latest_income, accounts_year_end, staff_count, volunteer_count,
+  review_status, created_at, converted_to_organisation_id, reviewed_at, review_notes,
+  submitter:users!manual_entry_records_submitted_by_user_id_fkey ( full_name ),
+  reviewed_by:users!manual_entry_records_reviewed_by_user_id_fkey ( full_name )
+`;
+
 /** Approval fails closed when F042 or F047 requires a human decision. */
 export async function canApproveManualEntry(
   input: ManualEntryInput,

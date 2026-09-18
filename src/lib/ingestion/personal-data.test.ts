@@ -450,6 +450,10 @@ describe("containsRedactionPlaceholder", () => {
   it("recognises a value that is nothing but a placeholder", () => {
     assert.equal(containsRedactionPlaceholder(REDACTED_EMAIL), true);
     assert.equal(containsRedactionPlaceholder(REDACTED_PHONE), true);
+    assert.equal(containsRedactionPlaceholder("[redacted]"), true);
+    assert.equal(containsRedactionPlaceholder("[redacted:personal-address]"), true);
+    assert.equal(containsRedactionPlaceholder("redacted"), true);
+    assert.equal(containsRedactionPlaceholder("REDACTED"), true);
   });
 
   it("recognises a placeholder sitting inside surrounding text", () => {
@@ -457,6 +461,7 @@ describe("containsRedactionPlaceholder", () => {
       containsRedactionPlaceholder(`Email ${REDACTED_EMAIL} or call ${REDACTED_PHONE}`),
       true,
     );
+    assert.equal(containsRedactionPlaceholder("Details: [redacted]"), true);
   });
 
   it("leaves a real value, an empty string and a nullish one alone", () => {

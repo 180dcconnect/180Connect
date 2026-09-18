@@ -30,10 +30,12 @@ describe("computeDashboardMetrics", () => {
       contacted: 0,
       responsesReceived: 0,
       respondingClients: 0,
+      respondedClients: 0,
       converted: 0,
       contactRate: 0,
-      replyRate: 0,
-      conversionRate: 0,
+      // No denominator, so no rate. 0% would claim we tried and got nothing.
+      replyRate: null,
+      winRate: null,
     });
   });
 
@@ -53,9 +55,50 @@ describe("computeDashboardMetrics", () => {
 
   it("counts actual linked reply events rather than inferring replies from status", () => {
     const rows = [org({ id: "a", outreach_status: "responded" })];
-    const metrics = computeDashboardMetrics(rows, { totalReplies: 3, respondingClients: 1 });
+    const metrics = computeDashboardMetrics(rows, {
+      totalReplies: 3,
+      respondingClients: 1,
+      byClient: new Map([["a", 3]]),
+    });
     assert.equal(metrics.responsesReceived, 3);
     assert.equal(metrics.respondingClients, 1);
+  });
+
+  it("builds both rates from clients, not from reply counts", () => {
+    const rows = [
+      org({ id: "a", outreach_status: "responded" }),
+      org({ id: "b", outreach_status: "initial_outreach_sent" }),
+      org({ id: "c", outreach_status: "converted" }),
+    ];
+    // Three replies from client a, one from c: four replies, two clients.
+    const metrics = computeDashboardMetrics(rows, {
+      totalReplies: 4,
+      respondingClients: 2,
+      byClient: new Map([
+        ["a", 3],
+        ["c", 1],
+      ]),
+    });
+
+    assert.equal(metrics.responsesReceived, 4);
+    assert.equal(metrics.replyRate, 2 / 3); // 2 replied clients ÷ 3 contacted
+    assert.equal(metrics.respondedClients, 2);
+    assert.equal(metrics.winRate, 1 / 2); // c converted, of the two who responded
+  });
+
+  it("ignores replies belonging to records the caller did not load", () => {
+    const rows = [org({ id: "a", outreach_status: "responded" })];
+    const metrics = computeDashboardMetrics(rows, {
+      totalReplies: 2,
+      respondingClients: 2,
+      byClient: new Map([
+        ["a", 1],
+        ["suppressed-or-elsewhere", 1],
+      ]),
+    });
+
+    assert.equal(metrics.respondingClients, 1);
+    assert.equal(metrics.replyRate, 1);
   });
 
   it("counts converted only", () => {
@@ -319,6 +362,7 @@ describe("filterActiveSuppressed (F022 AC3)", () => {
     const metrics = computeDashboardMetrics(activeRows, {
       totalReplies: 1,
       respondingClients: 1,
+      byClient: new Map([["b", 1]]),
     });
     assert.equal(metrics.totalCharities, 2);
     assert.equal(metrics.responsesReceived, 1);

@@ -15,6 +15,7 @@
 // Relative imports: runs under `node --test`, which does not read tsconfig aliases.
 import { CLIENT_CRITERIA } from "../client-criteria-config.ts";
 import { INCOME_BAND_OPTIONS, type IncomeBand } from "../income-band.ts";
+import { normalisePlaceName } from "../place-name.ts";
 import { DEFAULT_GEOGRAPHY_SCORES } from "./score-by-geography.ts";
 import { DEFAULT_SIZE_BAND_SCORES } from "./score-by-organisation-size.ts";
 import { DEFAULT_SECTOR_CATEGORY_SCORES, type SectorCategory } from "./score-by-sector.ts";
@@ -147,7 +148,12 @@ export function sectorRankingFrom(scores: Record<SectorCategory, number>): Secto
   );
 }
 
-/** The town list in the lowercase form the client criteria check compares against. */
+/** The town list in the lowercase normalised form the client criteria check compares against. */
 export function townsForCriteria(rules: ScoringRules): string[] {
-  return rules.geography.priorityTowns.map((town) => town.toLowerCase());
+  const set = new Set<string>();
+  for (const town of rules.geography.priorityTowns) {
+    set.add(town.toLowerCase());
+    set.add(normalisePlaceName(town));
+  }
+  return Array.from(set);
 }

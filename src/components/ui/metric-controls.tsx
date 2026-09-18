@@ -183,9 +183,16 @@ function CustomRangeEditor({
 export function ViewToggle({
   value,
   onChange,
+  layoutId = "view-toggle-pill",
 }: {
   value: ChartView;
   onChange: (view: ChartView) => void;
+  /**
+   * The moving pill's shared-layout identity. Two toggles on one page that
+   * share it hand the pill back and forth as it flies across the screen, so a
+   * page with more than one chart gives each its own.
+   */
+  layoutId?: string;
 }) {
   const item = (view: ChartView, Icon: typeof Activity, label: string) => {
     const isSelected = value === view;
@@ -203,7 +210,7 @@ export function ViewToggle({
       >
         {isSelected && (
           <motion.div
-            layoutId="view-toggle-pill"
+            layoutId={layoutId}
             className="absolute inset-0 rounded-full bg-white dark:bg-card shadow-sm"
             transition={{ type: "spring", stiffness: 450, damping: 30 }}
           />

@@ -50,7 +50,7 @@ import type { AddressableClient } from "@/lib/inbox/real-threads";
 import type { InboxThreadTag } from "@/lib/inbox-thread-view";
 import { attachmentFileTypeFromFilename } from "@/lib/inbox-thread-view";
 import { InboxAttachmentCard } from "./inbox-attachment-card";
-import { attachDraftFile } from "@/app/clients/[id]/outreach-actions";
+import { attachDraftFile } from "@/app/(app)/clients/[id]/outreach-actions";
 import {
   assignTagsBatchAction,
   createAndAssignTagAction,
@@ -75,10 +75,13 @@ import {
   startOfNextMinute,
 } from "@/lib/outreach/send-reviewed";
 import {
+  EMAIL_LENGTH_LABELS,
   EMAIL_LENGTHS,
   EMAIL_REGISTER_LABELS,
   EMAIL_REGISTERS,
+  OPENING_APPROACH_LABELS,
   OPENING_APPROACHES,
+  CLOSING_APPROACH_LABELS,
   CLOSING_APPROACHES,
   type EmailLength,
   type EmailRegister,
@@ -242,7 +245,7 @@ type ContextPanel = "booklet" | "profile" | null;
 
 /** The things the AI needs to write the email — the same five dials the client
     record's outreach tab offers for its Stage 1 email, plus the booklet and
-    profile it reads as context (see src/app/clients/[id]/compose-button.tsx).
+    profile it reads as context (see src/app/(app)/clients/[id]/compose-button.tsx).
     Kept as one record so a selection is never left half-updated. */
 type AiOptions = {
   length: EmailLength;
@@ -308,7 +311,7 @@ function AiCategoryPage({
       initial="hidden"
       animate="show"
       exit={{ opacity: 0, transition: { duration: 0.15 } }}
-      className="absolute inset-0 flex h-full flex-col gap-1 overflow-y-auto px-4 pt-3 pb-16 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+      className="absolute inset-0 flex h-full flex-col gap-1 overflow-y-auto px-4 pt-3 pb-20 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
     >
       {rows.map((row) => (
         <motion.li key={row.key} variants={AI_ROW}>
@@ -343,12 +346,20 @@ function AiOptionPage({
   selected,
   onSelect,
   onBack,
+  newsPreview,
+  useNewsHook,
+  onToggleUseNewsHook,
+  clientName,
 }: {
   title: string;
   options: ReadonlyArray<{ value: string; label: string }>;
   selected: string;
   onSelect: (value: string) => void;
   onBack: () => void;
+  newsPreview?: { loading: boolean; hook: { text: string; url: string | null } | null; error?: string | null } | null;
+  useNewsHook?: boolean;
+  onToggleUseNewsHook?: () => void;
+  clientName?: string | null;
 }) {
   return (
     <motion.div
@@ -374,10 +385,11 @@ function AiOptionPage({
 
       <motion.ul
         variants={AI_OPTION_LIST}
-        className="flex-1 flex flex-col gap-1 overflow-y-auto px-4 pb-16 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+        className="flex-1 flex flex-col gap-1 overflow-y-auto px-4 pb-20 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
       >
         {options.map((option, index) => {
           const isSelected = option.value === selected;
+          const isNewsOption = option.value === "news_hook";
           return (
             <motion.li key={option.value} variants={AI_OPTION_ROWS} custom={index}>
               <button
@@ -393,6 +405,53 @@ function AiOptionPage({
                 <span>{option.label}</span>
                 {isSelected && <Check className="h-4 w-4 text-lime-800" />}
               </button>
+
+              {/* Subsection for Relevant News Hook */}
+              {isNewsOption && isSelected && (
+                <div className="mt-2 rounded-2xl border border-slate-900/10 bg-white/90 p-3 shadow-xs">
+                  {newsPreview?.loading ? (
+                    <p className="font-body text-[13px] leading-[1.55] text-slate-500">
+                      Checking recent news stories{clientName ? ` for ${clientName}` : ""}…
+                    </p>
+                  ) : newsPreview?.hook ? (
+                    <div className="space-y-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <label className="flex items-start gap-2.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={useNewsHook !== false}
+                            onChange={() => onToggleUseNewsHook?.()}
+                            className="mt-0.5 size-4 rounded accent-lead cursor-pointer"
+                          />
+                          <span className="font-body text-[13px] font-medium leading-[1.5] text-slate-900">
+                            {newsPreview.hook.text}
+                          </span>
+                        </label>
+                      </div>
+                      {newsPreview.hook.url && (
+                        <div className="flex justify-end pt-0.5">
+                          <a
+                            href={newsPreview.hook.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-body inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-lead hover:bg-slate-200 transition-colors"
+                          >
+                            View article ↗
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  ) : !clientName ? (
+                    <p className="font-body text-[13px] leading-[1.55] text-slate-500">
+                      Pick a recipient above to check for available news stories.
+                    </p>
+                  ) : (
+                    <p className="font-body text-[13px] leading-[1.55] text-slate-500">
+                      No recent news found for this client. The draft will open with their mission instead.
+                    </p>
+                  )}
+                </div>
+              )}
             </motion.li>
           );
         })}
@@ -441,7 +500,7 @@ function AiContextPage({
 
       <motion.ul
         variants={AI_OPTION_LIST}
-        className="flex-1 flex flex-col gap-1 overflow-y-auto px-4 pb-16 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+        className="flex-1 flex flex-col gap-1 overflow-y-auto px-4 pb-20 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
       >
         <motion.li variants={AI_OPTION_ROWS} custom={0}>
           <button
@@ -511,23 +570,6 @@ const DEFAULT_AI_OPTIONS: AiOptions = {
   closing: "soft_cta",
 };
 
-const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
-  short: "Short",
-  standard: "Standard",
-  detailed: "Detailed",
-};
-
-const OPENING_APPROACH_LABELS: Record<OpeningApproach, string> = {
-  mission_led: "Mission-led",
-  direct_intro: "Direct introduction",
-  news_hook: "Relevant news hook",
-};
-
-const CLOSING_APPROACH_LABELS: Record<ClosingApproach, string> = {
-  soft_cta: "Soft invitation",
-  meeting_request: "Request a short call",
-  open_question: "Open question",
-};
 
 /** The gooey capsule's own merge takes `duration` ms; the saved chip waits it
     out so the pill is back in one piece before it turns navy. */
@@ -752,6 +794,13 @@ export function GmailComposeModal({
   // Which drill page the picker shows: null = the settings list, otherwise the
   // tapped setting (or context) — mirrors the search bar's filter drill.
   const [drillSetting, setDrillSetting] = useState<AiSettingKey | "context" | null>(null);
+  const [newsPreviewResult, setNewsPreviewResult] = useState<{
+    clientId: string;
+    loading: boolean;
+    hook: { text: string; url: string | null } | null;
+    error?: string | null;
+  } | null>(null);
+  const [useNewsHook, setUseNewsHook] = useState(true);
   const [errors, setErrors] = useState<{ to?: string; subject?: string }>({});
   const [panel, setPanel] = useState<ContextPanel>(null);
   const [isScheduleMenuOpen, setIsScheduleMenuOpen] = useState(false);
@@ -969,6 +1018,18 @@ export function GmailComposeModal({
       : bookletResult.failed
         ? "failed"
         : "loaded";
+
+  const newsPreview = useMemo(() => {
+    if (aiOptions.opening !== "news_hook" || !clientId) return null;
+    if (newsPreviewResult?.clientId !== clientId) {
+      return { loading: true, hook: null };
+    }
+    return {
+      loading: newsPreviewResult.loading,
+      hook: newsPreviewResult.hook,
+      error: newsPreviewResult.error,
+    };
+  }, [aiOptions.opening, clientId, newsPreviewResult]);
   // A whole address that resolves to nobody in the register is rejected
   // here, at the arrow, rather than saved and left to die at Send (which
   // requires a sendable client). The lookup is synchronous over the loaded
@@ -1084,6 +1145,49 @@ export function GmailComposeModal({
     },
     [],
   );
+
+  useEffect(() => {
+    if (aiOptions.opening !== "news_hook" || !clientId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { lookupClientNewsCandidate } = await import(
+          "@/app/(app)/clients/[id]/outreach-actions"
+        );
+        if (cancelled) return;
+        const result = await lookupClientNewsCandidate(clientId);
+        if (cancelled) return;
+        if (result.ok) {
+          setNewsPreviewResult({
+            clientId,
+            loading: false,
+            hook: result.hook,
+          });
+          setUseNewsHook(Boolean(result.hook));
+        } else {
+          setNewsPreviewResult({
+            clientId,
+            loading: false,
+            hook: null,
+            error: result.error,
+          });
+          setUseNewsHook(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setNewsPreviewResult({
+            clientId,
+            loading: false,
+            hook: null,
+          });
+          setUseNewsHook(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [aiOptions.opening, clientId]);
 
   if (!isOpen) return null;
 
@@ -1460,7 +1564,7 @@ export function GmailComposeModal({
     setIsSavingDraft(true);
     try {
       const { saveEmailDraft } = await import(
-        "@/app/clients/[id]/outreach-actions"
+        "@/app/(app)/clients/[id]/outreach-actions"
       );
       const result = await saveEmailDraft({
         organisationId,
@@ -1768,12 +1872,17 @@ export function GmailComposeModal({
     // needed to pick the settings.
     setShowAiOptions(false);
     try {
+      const effectiveOpening =
+        aiOptions.opening === "news_hook" && !useNewsHook
+          ? "mission_led"
+          : aiOptions.opening;
+
       const outcome = await draftStream.start({
         organisationId: sendableClient.id,
         ...(generatedDraft ? { draftId: generatedDraft.id } : {}),
         length: aiOptions.length,
         register: aiOptions.register,
-        opening: aiOptions.opening,
+        opening: effectiveOpening,
         closing: aiOptions.closing,
         attachFlyer,
       });
@@ -2363,6 +2472,10 @@ export function GmailComposeModal({
                         selected={activeDrill.selected}
                         onSelect={activeDrill.onSelect}
                         onBack={() => setDrillSetting(null)}
+                        newsPreview={activeDrill.key === "opening" ? newsPreview : undefined}
+                        useNewsHook={useNewsHook}
+                        onToggleUseNewsHook={() => setUseNewsHook((prev) => !prev)}
+                        clientName={sendableClient?.orgName ?? null}
                       />
                     ) : null}
                   </AnimatePresence>

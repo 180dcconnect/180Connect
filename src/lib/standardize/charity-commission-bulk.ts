@@ -11,7 +11,7 @@
 // Pure, no I/O, same as every other mapper here.
 
 import { normalizeCity } from "../city.ts";
-import { CLASSIFICATION_TO_SECTOR } from "../ingestion/sources/charity-commission-bulk-config.ts";
+import { sectorForClassifications } from "../charity-register/sector-map.ts";
 import { computeCompletenessScore, type StandardOrganisation } from "./types.ts";
 
 /** The payload shape the bulk adapter writes into raw_source_records. */
@@ -54,8 +54,13 @@ const ASSUMED_COUNTRY_CODE = "GB";
  * The register prints an address across five numbered lines with no field
  * saying which is the town. The last populated line is it — that is how the
  * register orders them, and how the API mapper reads its equivalent.
+ *
+ * Exported for F042's review screen (dedup/register-record.ts), which shows the
+ * incoming record's address beside the client's. It reuses this rather than
+ * ordering the lines again: a second opinion on which line is the street would
+ * make every pair look like it disagreed on the address.
  */
-function splitBulkAddress(charity: RawCharityCommissionBulkRecord["charity"]): {
+export function splitBulkAddress(charity: RawCharityCommissionBulkRecord["charity"]): {
   addressLine1: string;
   city: string;
 } {
@@ -113,12 +118,7 @@ export function bulkOrganisationType(
 export function bulkSector(
   matchedClassifications: readonly string[] | undefined,
 ): string | null {
-  for (const description of Object.keys(CLASSIFICATION_TO_SECTOR)) {
-    if (matchedClassifications?.includes(description)) {
-      return CLASSIFICATION_TO_SECTOR[description];
-    }
-  }
-  return null;
+  return sectorForClassifications(matchedClassifications);
 }
 
 export function standardizeCharityCommissionBulkRecord(

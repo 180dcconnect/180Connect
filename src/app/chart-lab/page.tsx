@@ -3,7 +3,7 @@ import {
   buildFundFlows,
   type FinancialPeriodInput,
 } from "@/lib/financials/financial-series";
-import { FundFlowSankey } from "../clients/[id]/financials/fund-flow-sankey";
+import { FundFlowSankey } from "../(app)/clients/[id]/financials/fund-flow-sankey";
 import {
   HourglassStream,
   RungWaterfall,

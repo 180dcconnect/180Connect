@@ -169,7 +169,7 @@ out to every CAM at once.
 
 Recorded here because this is where people come looking, and because the shape of
 the outreach mailbox is not what earlier drafts of the PRD assumed. The code is
-`src/lib/gmail/` (transport) and `src/app/clients/[id]/outreach-actions.ts`
+`src/lib/gmail/` (transport) and `src/app/(app)/clients/[id]/outreach-actions.ts`
 (the send action).
 
 **One shared branch mailbox, not one per CAM.** All client outreach leaves from

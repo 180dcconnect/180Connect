@@ -136,15 +136,20 @@ test("a field the register has no value for is not a gap this job can fill", () 
   assert.equal(patchSize(patch), 3);
 });
 
-test("a classification outside the accepted five leaves sector alone", () => {
-  // bulkSector maps only the five imported classifications; anything else is
-  // null, which is not a value and must not become an empty write.
+test("an unmapped classification leaves sector alone", () => {
+  // bulkSector returns null for unmapped classifications; null is not a value
+  // and must not become an empty write.
   const patch = patchFor(
     stored(),
-    fromRegister({ classifications: ["Arts/culture/heritage/science"] }),
+    fromRegister({ classifications: ["General Charitable Purposes"] }),
   );
 
   assert.equal(patch.sector, undefined);
+  assert.equal("sector" in patch, false);
+});
+
+test("an ambiguous classification leaves sector alone", () => {
+  const patch = patchFor(stored(), fromRegister({ classifications: ["General Charitable Purposes"] }));
   assert.equal("sector" in patch, false);
 });
 

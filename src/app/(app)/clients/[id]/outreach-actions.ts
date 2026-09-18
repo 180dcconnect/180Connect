@@ -1,0 +1,1427 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+/**
+ * Every action here revalidates three paths, not one: the client page that owns
+ * the outreach section, the inbox thread for the same organisation, and the
+ * inbox list whose row summarises it. The thread view writes as well as reads
+ * now (its reply drawer calls these actions), so a reply sent from it would
+ * otherwise not appear in the thread it was sent from.
+ */
+import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { attachmentRpcFailure, MAX_COMBINED_ATTACHMENT_SIZE_BYTES } from "@/lib/attachments";
+import { canSendClientOutreach, onFileEmail } from "@/lib/client-email-validation";
+import { reportError } from "@/lib/error-logging";
+import { sendBranchOutreach } from "@/lib/gmail/branch-sender";
+import { dailySendLimitMessage } from "@/lib/outreach/daily-send-limit";
+import { discardDraftSchema } from "@/lib/outreach/discard-draft";
+import { draftAttachmentSchema } from "@/lib/outreach/draft-attachments";
+import { flyerAttachment } from "@/lib/outreach/flyer";
+import { emailHtmlToPlainText, sanitizeEmailHtml } from "@/lib/outreach/email-html";
+import { HUMAN_REVIEW_REQUIRED_MESSAGE, humanReviewDecision } from "@/lib/outreach/human-review";
+import { assertContactPermission } from "@/lib/outreach/contact-permission";
+import { logSecurityEvent } from "@/lib/log-security-event";
+import { saveDraftSchema } from "@/lib/outreach/save-draft";
+import {
+  isScheduleTimeAllowed,
+  reviewedEmailSchema,
+  SCHEDULE_MIN_LEAD_MESSAGE,
+  scheduleSchema,
+} from "@/lib/outreach/send-reviewed";
+import { emailLimitMessage, resolveEmailSendLimit } from "@/lib/outreach/send-rate-limit";
+import { checkScheduledAttachmentSet } from "@/lib/outreach/scheduled-worker";
+import { checkSuppressionBeforeSend, suppressionBlockedMessage } from "@/lib/outreach/suppression-check";
+import { buildScoreSnapshot } from "@/lib/scoring/build-score-snapshot";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
+import { safeValidate } from "@/lib/validation";
+import {
+  createDefaultScrapeDependencies,
+  fetchWebsiteContext,
+} from "@/lib/booklet/scrape-website";
+import { lookupLiveNewsHook, resolveNewsProvider } from "@/lib/outreach/news-hook";
+import { z } from "zod";
+
+export type ReviewedSendResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
+
+
+/**
+ * F217: the attach_flyer column write for an optional composer toggle. Absent
+ * writes nothing, so callers without a toggle never clear a row's flyer.
+ */
+function flyerUpdate(attachFlyer: boolean | undefined): { attach_flyer?: boolean } {
+  return attachFlyer === undefined ? {} : { attach_flyer: attachFlyer };
+}
+
+/**
+ * Releases an outreach_send claim after a definite, pre-Gmail-call refusal —
+ * nothing was attempted with the provider, so unlike the post-send failure
+ * path (see sendReviewedEmail's own comment on `sent.retryable`), it is
+ * always safe to let a clean retry happen. Extracted since F217 added several
+ * new attachment-validation exits that all need the same release.
+ */
+async function releaseClaimAfterDefiniteRefusal(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  messageId: string,
+): Promise<void> {
+  const { error: unclaimError } = await supabase
+    .from("outreach_messages")
+    .update({ send_claimed_at: null })
+    .eq("id", messageId)
+    .eq("send_status", "draft");
+  if (unclaimError) {
+    await reportError(unclaimError, { operation: "outreach.send.unclaim", messageId });
+  }
+}
+
+/**
+ * F126 (#122): queue a reviewed email for future delivery. Same review gate as
+ * sendReviewedEmail — the approval checkbox is required either way — and the
+ * same audited-RPC pattern as F123's send path: schedule_outreach_send
+ * re-checks authorisation and suppression inside its SECURITY DEFINER body and
+ * records the draft→scheduled transition in audit_log in the same transaction.
+ */
+export async function scheduleReviewedEmail(input: unknown): Promise<ReviewedSendResult> {
+  const parsed = safeValidate(scheduleSchema, input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: Object.values(parsed.fieldErrors).flat().find(Boolean) ?? "Check the schedule and try again.",
+    };
+  }
+
+  // F121: the human-review checkpoint — scheduling is a commitment to deliver
+  // this exact content later, so an unapproved email never gets this far.
+  const review = humanReviewDecision("scheduled", parsed.data.explicitlyApproved);
+  if (!review.allowed) return { ok: false, message: review.message };
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const isAdmin = authorization.actor.role === "admin";
+  const supabase = await createClient();
+
+  // explicitlyApproved has been consumed by the F121 checkpoint above.
+  const { organisationId, messageId, subject } = parsed.data;
+
+  // F018 (#21) AC1: the contact-permission rule at the point of scheduling —
+  // the same check generation ran, re-run here because ownership may have
+  // changed since the draft was generated. This is also the grandfather gate:
+  // per PM decision, a schedule permitted here is delivered by the worker even
+  // if ownership changes before it fires.
+  const permission = await assertContactPermission(supabase, {
+    organisationId,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
+  if (!permission.allowed) return { ok: false, message: permission.message };
+
+  // F117: never trust client-side sanitization alone — identical rule to the
+  // send path, since what is stored here is exactly what the cron worker will
+  // deliver later.
+  const body = sanitizeEmailHtml(parsed.data.body);
+  if (emailHtmlToPlainText(body).length === 0) {
+    return { ok: false, message: "Add email content before scheduling." };
+  }
+
+  // F123 AC4's ownership assertion, before the RPC gives a database-shaped error:
+  // RLS lets every active user READ every draft, so ownership has to be asserted
+  // here for an honest UI message (the RPC re-checks it regardless).
+  const { data: draft } = await supabase
+    .from("outreach_messages")
+    .select("send_status, sent_by_user_id")
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  if (!draft || draft.send_status !== "draft") {
+    return { ok: false, message: "This email is no longer an unsent draft." };
+  }
+  if (!isAdmin && draft.sent_by_user_id !== authorization.actor.id) {
+    return { ok: false, message: "You can only schedule drafts you generated yourself." };
+  }
+
+  // Attachments CAN be scheduled now: the worker downloads the linked bytes
+  // after claiming (scheduled-worker.ts loadAttachments) and fails the
+  // message visibly if a file is missing — the silent-send-without-files case
+  // this refusal used to guard against is unrepresentable there. What remains
+  // here is the set-level caps check, so an over-cap set is refused at
+  // schedule time with an immediate answer instead of failing on the run.
+  // The branch flyer is not counted: it ships with the code, so the worker
+  // attaches it with no download at all (scheduled-worker.ts deliver()).
+  const { data: attachmentLinks, error: attachmentLinksError } = await supabase
+    .from("outreach_message_attachments")
+    .select("attachments(size_bytes)")
+    .eq("outreach_message_id", messageId);
+  if (attachmentLinksError) {
+    await reportError(attachmentLinksError, {
+      operation: "outreach.schedule.check_attachments",
+      messageId,
+    });
+    return { ok: false, message: "Attachments could not be checked. Nothing was scheduled." };
+  }
+  type LinkedAttachmentSize = { size_bytes: number | null };
+  const linkedSizes = (attachmentLinks ?? [])
+    .map((row) => (Array.isArray(row.attachments) ? row.attachments[0] : row.attachments) as LinkedAttachmentSize | null)
+    .filter((row): row is LinkedAttachmentSize => row != null);
+  const attachmentViolation = checkScheduledAttachmentSet(
+    linkedSizes.map((row) => ({ sizeBytes: row.size_bytes })),
+  );
+  if (attachmentViolation) {
+    return { ok: false, message: attachmentViolation };
+  }
+
+  // Suppression at point-of-scheduling — the worker re-checks at point-of-send,
+  // but refusing here gives the CAM an immediate answer instead of a silent skip.
+  const suppression = await checkSuppressionBeforeSend(organisationId, async (id) => {
+    const { data, error } = await supabase
+      .from("suppressions")
+      .select("id, reason")
+      .eq("organisation_id", id)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  });
+  if (!suppression.allowed) {
+    return {
+      ok: false,
+      message: suppression.kind === "suppressed"
+        ? suppressionBlockedMessage(suppression.reason)
+        : "Suppression status could not be verified. Nothing was scheduled.",
+    };
+  }
+
+  // Re-checked at commit time, not just at the schema boundary: whole
+  // database round trips sit between validation and this line, and a time
+  // that was a minute out can be the current minute by now.
+  const scheduledAtIso = new Date(parsed.data.scheduledAt);
+  if (!isScheduleTimeAllowed(scheduledAtIso)) {
+    return { ok: false, message: SCHEDULE_MIN_LEAD_MESSAGE };
+  }
+
+  // Save the exact reviewed content FIRST, through the app's sanitizing write
+  // path, and REQUIRE the write to have matched. The RPC deliberately takes no
+  // content parameters (F227-review hardening): a caller that bypasses the app
+  // and invokes it directly can only schedule what these paths already saved —
+  // never inject raw markup for the cron worker to deliver.
+  const { data: saved, error: saveError } = await supabase
+    .from("outreach_messages")
+    .update({ subject, body, sent_by_user_id: authorization.actor.id, ...flyerUpdate(parsed.data.attachFlyer) })
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .eq("send_status", "draft")
+    .select("id")
+    .single();
+  if (saveError || !saved) {
+    await reportError(saveError ?? new Error("Draft save matched no rows."), { operation: "outreach.schedule.save_review", messageId });
+    return { ok: false, message: "This email is no longer an unsent draft." };
+  }
+
+  const { data: scheduled, error } = await supabase.rpc("schedule_outreach_send", {
+    p_message_id: messageId,
+    p_scheduled_at: scheduledAtIso.toISOString(),
+  });
+  if (error || !scheduled) {
+    await reportError(error ?? new Error("Schedule matched no rows."), { operation: "outreach.schedule", messageId });
+    return { ok: false, message: "The email could not be scheduled. Try again." };
+  }
+
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath("/inbox");
+  return { ok: true, message: `Email scheduled for ${scheduledAtIso.toLocaleString("en-GB")}.` };
+}
+
+/**
+ * F126 AC: cancel a pending schedule. Goes through cancel_outreach_schedule
+ * because RLS pins every direct outreach_messages UPDATE to draft rows — a
+ * plain client update could never un-schedule anything. The RPC re-checks
+ * authorisation and audits scheduled→draft in the same transaction.
+ */
+export async function cancelScheduledEmail(input: unknown): Promise<ReviewedSendResult> {
+  const parsed = safeValidate(z.object({ organisationId: z.uuid(), messageId: z.uuid() }), input);
+  if (!parsed.success) {
+    return { ok: false, message: "That scheduled email could not be identified." };
+  }
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const supabase = await createClient();
+  const { data: cancelled, error } = await supabase.rpc("cancel_outreach_schedule", {
+    p_message_id: parsed.data.messageId,
+  });
+  if (error || !cancelled) {
+    await reportError(error ?? new Error("Cancel matched no rows."), {
+      operation: "outreach.schedule.cancel",
+      messageId: parsed.data.messageId,
+    });
+    return { ok: false, message: "The scheduled email could not be cancelled." };
+  }
+
+  revalidatePath(`/clients/${parsed.data.organisationId}`, "layout");
+  revalidatePath("/inbox");
+  return { ok: true, message: "Scheduled send cancelled. The email is a draft again." };
+}
+
+/**
+ * Changing a scheduled email from inside its thread — the time alone
+ * (rescheduleEmail) or the content and time together (updateScheduledEmail).
+ *
+ * ── Why there is no dedicated RPC ──
+ *
+ * Both are built from the two audited transitions that already exist:
+ * cancel_outreach_schedule (scheduled→draft), then, for a content edit, the
+ * sanitizing draft write, then schedule_outreach_send (draft→scheduled). So
+ * every authorisation, suppression and claim check still runs inside those
+ * functions, and the audit log records a cancel and a schedule.
+ *
+ * The cost is that the steps are not one transaction. The row is a draft for
+ * the moment between them — the worker only picks up scheduled rows, so it can
+ * never send a half-edited email — and if a later step fails, the original
+ * schedule is put back before anything is reported. What a person is told
+ * always matches what the row now holds.
+ *
+ * ── Why the schedule stays live while editing ──
+ *
+ * The old Edit cancelled first and reopened the text in Compose: close that
+ * window without rescheduling and the email quietly never went out. Now the
+ * schedule is only touched at the moment of saving. If the time arrives while
+ * someone is still typing, the cancel refuses (the send claim is held) or finds
+ * the row already sent, and the person is told it went out.
+ */
+type ServerSupabase = Awaited<ReturnType<typeof createClient>>;
+
+/** cancel_outreach_schedule's refusals, in the words of someone editing. */
+function scheduledChangeRefusal(error: unknown): string {
+  const message = error && typeof error === "object" && "message" in error ? String(error.message) : "";
+  if (message.includes("being delivered right now")) {
+    return "This email is being sent right now, so it can no longer be changed.";
+  }
+  if (message.includes("no longer scheduled")) {
+    return "This email is no longer scheduled — it may have just gone out.";
+  }
+  if (message.includes("only the client")) {
+    return "Only the client's owner or an admin can change this scheduled email.";
+  }
+  return "The scheduled email could not be changed. Nothing was altered.";
+}
+
+async function loadScheduledRow(supabase: ServerSupabase, organisationId: string, messageId: string) {
+  const { data } = await supabase
+    .from("outreach_messages")
+    .select("send_status, scheduled_at, sent_by_user_id")
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  return data?.send_status === "scheduled" && data.scheduled_at ? data : null;
+}
+
+/** Puts a just-cancelled email back on its original time. False if it could not. */
+async function restoreSchedule(
+  supabase: ServerSupabase,
+  messageId: string,
+  originalAt: string,
+): Promise<boolean> {
+  if (new Date(originalAt).getTime() <= Date.now()) return false;
+  const { data, error } = await supabase.rpc("schedule_outreach_send", {
+    p_message_id: messageId,
+    p_scheduled_at: originalAt,
+  });
+  if (error || !data) {
+    await reportError(error ?? new Error("Restore matched no rows."), {
+      operation: "outreach.schedule.restore",
+      messageId,
+    });
+    return false;
+  }
+  return true;
+}
+
+const KEPT_AS_DRAFT =
+  "It could not be put back on its schedule, so it is now a draft — schedule it again from the thread.";
+
+/** Moves a scheduled email to a new time. Content is untouched, so no re-approval. */
+export async function rescheduleEmail(input: unknown): Promise<ReviewedSendResult> {
+  const parsed = safeValidate(
+    z.object({ organisationId: z.uuid(), messageId: z.uuid(), scheduledAt: z.iso.datetime() }),
+    input,
+  );
+  if (!parsed.success) {
+    return { ok: false, message: "That scheduled email could not be identified." };
+  }
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const { organisationId, messageId } = parsed.data;
+  const when = new Date(parsed.data.scheduledAt);
+  if (when.getTime() <= Date.now()) {
+    return { ok: false, message: "Choose a future date and time." };
+  }
+
+  const supabase = await createClient();
+  const permission = await assertContactPermission(supabase, {
+    organisationId,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
+  if (!permission.allowed) return { ok: false, message: permission.message };
+
+  const row = await loadScheduledRow(supabase, organisationId, messageId);
+  if (!row) return { ok: false, message: "This email is no longer scheduled — it may have just gone out." };
+  const originalAt = row.scheduled_at as string;
+
+  const { error: cancelError } = await supabase.rpc("cancel_outreach_schedule", { p_message_id: messageId });
+  if (cancelError) return { ok: false, message: scheduledChangeRefusal(cancelError) };
+
+  const { data: scheduled, error } = await supabase.rpc("schedule_outreach_send", {
+    p_message_id: messageId,
+    p_scheduled_at: when.toISOString(),
+  });
+  if (error || !scheduled) {
+    await reportError(error ?? new Error("Reschedule matched no rows."), { operation: "outreach.reschedule", messageId });
+    const restored = await restoreSchedule(supabase, messageId, originalAt);
+    revalidatePath(`/clients/${organisationId}`, "layout");
+    revalidatePath("/inbox");
+    return {
+      ok: false,
+      message: restored
+        ? "The new time could not be set. The email still goes out at its original time."
+        : `The new time could not be set. ${KEPT_AS_DRAFT}`,
+    };
+  }
+
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath("/inbox");
+  return { ok: true, message: "Rescheduled." };
+}
+
+/**
+ * Saves edited content (and optionally a new time) to a scheduled email. The
+ * content changed, so it goes through the same F121 review gate as scheduling.
+ */
+export async function updateScheduledEmail(input: unknown): Promise<ReviewedSendResult> {
+  const parsed = safeValidate(scheduleSchema, input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: Object.values(parsed.fieldErrors).flat().find(Boolean) ?? "Check the email and try again.",
+    };
+  }
+
+  const review = humanReviewDecision("scheduled", parsed.data.explicitlyApproved);
+  if (!review.allowed) return { ok: false, message: review.message };
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const isAdmin = authorization.actor.role === "admin";
+  const { organisationId, messageId, subject } = parsed.data;
+
+  const body = sanitizeEmailHtml(parsed.data.body);
+  if (emailHtmlToPlainText(body).length === 0) {
+    return { ok: false, message: "Add email content before saving." };
+  }
+  const when = new Date(parsed.data.scheduledAt);
+  if (!isScheduleTimeAllowed(when)) {
+    return { ok: false, message: SCHEDULE_MIN_LEAD_MESSAGE };
+  }
+
+  const supabase = await createClient();
+  const permission = await assertContactPermission(supabase, {
+    organisationId,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
+  if (!permission.allowed) return { ok: false, message: permission.message };
+
+  const row = await loadScheduledRow(supabase, organisationId, messageId);
+  if (!row) return { ok: false, message: "This email is no longer scheduled — it may have just gone out." };
+  if (!isAdmin && row.sent_by_user_id !== authorization.actor.id) {
+    return { ok: false, message: "You can only edit emails you scheduled yourself." };
+  }
+  const originalAt = row.scheduled_at as string;
+
+  // Checked before anything moves, so a suppressed client is refused with the
+  // email still on its schedule rather than after it has been cancelled.
+  const suppression = await checkSuppressionBeforeSend(organisationId, async (id) => {
+    const { data, error } = await supabase
+      .from("suppressions")
+      .select("id, reason")
+      .eq("organisation_id", id)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  });
+  if (!suppression.allowed) {
+    return {
+      ok: false,
+      message: suppression.kind === "suppressed"
+        ? suppressionBlockedMessage(suppression.reason)
+        : "Suppression status could not be verified. Nothing was changed.",
+    };
+  }
+
+  const { error: cancelError } = await supabase.rpc("cancel_outreach_schedule", { p_message_id: messageId });
+  if (cancelError) return { ok: false, message: scheduledChangeRefusal(cancelError) };
+
+  const finish = () => {
+    revalidatePath(`/clients/${organisationId}`, "layout");
+    revalidatePath("/inbox");
+  };
+
+  const { data: saved, error: saveError } = await supabase
+    .from("outreach_messages")
+    .update({ subject, body, sent_by_user_id: authorization.actor.id, ...flyerUpdate(parsed.data.attachFlyer) })
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .eq("send_status", "draft")
+    .select("id")
+    .single();
+  if (saveError || !saved) {
+    await reportError(saveError ?? new Error("Scheduled edit save matched no rows."), {
+      operation: "outreach.schedule.update_content",
+      messageId,
+    });
+    const restored = await restoreSchedule(supabase, messageId, originalAt);
+    finish();
+    return {
+      ok: false,
+      message: restored
+        ? "Your changes could not be saved. The email is still scheduled, unchanged."
+        : `Your changes could not be saved. ${KEPT_AS_DRAFT}`,
+    };
+  }
+
+  const { data: scheduled, error } = await supabase.rpc("schedule_outreach_send", {
+    p_message_id: messageId,
+    p_scheduled_at: when.toISOString(),
+  });
+  if (error || !scheduled) {
+    await reportError(error ?? new Error("Scheduled edit reschedule matched no rows."), {
+      operation: "outreach.schedule.update_time",
+      messageId,
+    });
+    const restored = await restoreSchedule(supabase, messageId, originalAt);
+    finish();
+    return {
+      ok: false,
+      message: restored
+        ? "Your changes were saved, but the new time could not be set. It still goes out at its original time."
+        : `Your changes were saved. ${KEPT_AS_DRAFT}`,
+    };
+  }
+
+  finish();
+  return { ok: true, message: "Changes saved. The email is still scheduled." };
+}
+
+/** F123/F250: the sole deliberate, human-approved outreach send action. */
+export async function sendReviewedEmail(input: unknown): Promise<ReviewedSendResult> {
+  const parsed = safeValidate(reviewedEmailSchema, input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: Object.values(parsed.fieldErrors).flat().find(Boolean) ?? "Check the email and try again.",
+    };
+  }
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const isAdmin = authorization.actor.role === "admin";
+
+  // F121: the human-review checkpoint. The gate itself runs before anything
+  // else; the stage label resolves from the client's pipeline position after
+  // the draft loads, so Stage 2 follow-ups are recorded as what they are.
+  const { organisationId, messageId, recipient, subject, explicitlyApproved } = parsed.data;
+  if (!explicitlyApproved) {
+    return { ok: false, message: HUMAN_REVIEW_REQUIRED_MESSAGE };
+  }
+  // F117: never trust client-side sanitization alone — this is the one place
+  // that decides what actually gets stored and sent, regardless of what
+  // reached this action. Re-checked for real content after sanitizing, not
+  // just after the schema's own check on the raw input: a body built entirely
+  // out of disallowed markup (never producible by the editor itself, but not
+  // ruled out for a request built by hand) could pass schema validation and
+  // still sanitize down to nothing.
+  const body = sanitizeEmailHtml(parsed.data.body);
+  if (emailHtmlToPlainText(body).length === 0) {
+    return { ok: false, message: "Add email content before sending." };
+  }
+  const supabase = await createClient();
+  const { data: draft, error: draftError } = await supabase
+    .from("outreach_messages")
+    .select("id, organisation_id, contact_id, send_status, sent_by_user_id, attach_flyer, organisations(outreach_status)")
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  if (draftError || !draft) {
+    if (draftError) await reportError(draftError, { operation: "outreach.send.load_draft", messageId });
+    return { ok: false, message: "That draft could not be loaded. Refresh and try again." };
+  }
+  // The composer's toggle at Send wins, and is persisted with the reviewed
+  // content below. Without one (a retry arrives here with no UI behind it),
+  // the row's own value stands.
+  const wantsFlyer = parsed.data.attachFlyer ?? draft.attach_flyer === true;
+  // F121 stage label: the pipeline position decides whether this send is a
+  // Stage 1 first contact or a Stage 2 follow-up — same rule the pipeline
+  // advance at the end of this action uses.
+  const organisation = Array.isArray(draft.organisations) ? draft.organisations[0] : draft.organisations;
+  const review = humanReviewDecision(
+    organisation?.outreach_status === "not_contacted" ? "stage_one" : "stage_two",
+    explicitlyApproved,
+  );
+  if (!review.allowed) return { ok: false, message: review.message };
+  if (draft.send_status !== "draft") {
+    return { ok: false, message: "This email is no longer an unsent draft." };
+  }
+
+  // F123 AC4 — the "unauthorised sender" case: RLS lets every active user READ
+  // every draft, and would only silently no-op a foreign UPDATE, so ownership has
+  // to be asserted here before anything is sent. The RPCs below re-check it
+  // inside their SECURITY DEFINER bodies regardless; this early return just gives
+  // the honest UI error instead of a confusing later one.
+  if (!isAdmin && draft.sent_by_user_id !== authorization.actor.id) {
+    return { ok: false, message: "You can only send drafts you generated yourself." };
+  }
+
+  // F018 (#21) AC1: the contact-permission rule at the point of sending. The
+  // draft-authorship check above only proves who wrote this draft; a client
+  // reassigned to another CAM after generation would still pass it. The action
+  // itself is blocked here with the owner-naming conflict copy (AC2) — admins
+  // pass (AC3); their last-resort confirmation lives in ComposeButton.
+  // retryFailedEmail reaches Gmail only through this action, so retries are
+  // covered by the same rule.
+  const permission = await assertContactPermission(supabase, {
+    organisationId,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
+  if (!permission.allowed) return { ok: false, message: permission.message };
+
+  const suppression = await checkSuppressionBeforeSend(organisationId, async (id) => {
+    const { data, error } = await supabase
+      .from("suppressions")
+      .select("id, reason")
+      .eq("organisation_id", id)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  });
+  if (!suppression.allowed) {
+    return {
+      ok: false,
+      message: suppression.kind === "suppressed"
+        ? suppressionBlockedMessage(suppression.reason)
+        : "Suppression status could not be verified. Nothing was sent.",
+    };
+  }
+
+  // F116: the recipient is whatever the CAM reviewed and approved, not a value
+  // re-derived from the contact/organisation record — same rule subject and body
+  // already follow. The editor warns on a mismatch against the record but does
+  // not block one; this is the only server-side gate, re-checking the exact
+  // format rule F045 uses regardless of what the client-side check already did.
+  const decision = canSendClientOutreach(recipient, explicitlyApproved);
+  if (!decision.allowed) return { ok: false, message: decision.warning };
+
+  // F227: fixed-window per-CAM send limit, counted from the audited sent_at.
+  // Fail-closed — if the count cannot be verified, nothing is sent.
+  const sendLimit = resolveEmailSendLimit();
+  const windowStart = new Date(Date.now() - sendLimit.windowSeconds * 1000).toISOString();
+  const { count: recentSendCount, error: limitError } = await supabase
+    .from("outreach_messages")
+    .select("id", { count: "exact", head: true })
+    .eq("sent_by_user_id", authorization.actor.id)
+    .eq("send_status", "sent")
+    .gte("sent_at", windowStart);
+  if (limitError || recentSendCount === null) {
+    if (limitError) await reportError(limitError, { operation: "outreach.send.rate_limit", messageId });
+    logSecurityEvent("outreach.send_rate_limit_unavailable", {
+      userId: authorization.actor.id,
+      cause: limitError?.message ?? "no count returned",
+    });
+    return { ok: false, message: "The sending limit could not be checked. Nothing was sent." };
+  }
+  if (recentSendCount >= sendLimit.maximum) {
+    logSecurityEvent("outreach.send_rate_limited", {
+      userId: authorization.actor.id,
+      windowSeconds: sendLimit.windowSeconds,
+      sentInWindow: recentSendCount,
+    });
+    return { ok: false, message: emailLimitMessage(sendLimit.windowSeconds) };
+  }
+
+  // Save the exact reviewed content first, and REQUIRE the write to have matched:
+  // `.eq(send_status)` + `.single()` turns a raced or already-sent draft into an
+  // error here rather than a silent zero-row update that Gmail then makes real.
+  // A failed provider call leaves an editable draft containing precisely what the
+  // CAM attempted, never the earlier AI output. The reviewed recipient is saved
+  // alongside (F119 AC1), so a sent row records who the email actually went to.
+  //
+  // sent_by_user_id deliberately records whoever actually hit Send, including an
+  // admin sending another CAM's generated draft — "who sent an email is a fact
+  // about the email" (create_outreach.sql), and the audit_log row written by
+  // mark_outreach_sent carries the same actor.
+  //
+  // sent_to_email (F116 review follow-up): persist exactly who this attempt
+  // targets alongside the reviewed content, so even a failed or ambiguous send
+  // leaves a trace of who the CAM aimed at rather than only the on-file record.
+  const { data: saved, error: saveError } = await supabase
+    .from("outreach_messages")
+    .update({
+      subject,
+      body,
+      sent_to_email: decision.recipient,
+      sent_by_user_id: authorization.actor.id,
+      ...flyerUpdate(parsed.data.attachFlyer),
+    })
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .eq("send_status", "draft")
+    .select("id")
+    .single();
+  if (saveError || !saved) {
+    await reportError(saveError ?? new Error("Draft save matched no rows."), { operation: "outreach.send.save_review", messageId });
+    return { ok: false, message: "This email is no longer an unsent draft." };
+  }
+
+  // Atomic claim (F123): exactly one concurrent sender may proceed to Gmail for
+  // this draft; everyone else gets refused before any provider call. The claim
+  // self-expires after send_claim_staleness_window(), so a crashed tab cannot lock
+  // a draft forever.
+  //
+  // F128: the branch-wide daily cap is enforced inside this same RPC, under a
+  // lock that serializes every concurrent claim attempt — two CAMs racing to
+  // send the mailbox's last slot cannot both win, unlike the plain read-then-
+  // send count this used to be. A reached cap surfaces as errcode P0003 rather
+  // than a plain `false`, so it can be told apart from an ordinary lost claim.
+  const { data: claimed, error: claimError } = await supabase
+    .rpc("claim_outreach_send", { p_message_id: messageId });
+  if (claimError) {
+    if ((claimError as { code?: string }).code === "P0003") {
+      await reportError(claimError, {
+        operation: "outreach.send.daily_limit_reached",
+        messageId,
+        userId: authorization.actor.id,
+      });
+      logSecurityEvent("outreach.daily_send_limit_reached", { userId: authorization.actor.id });
+      return { ok: false, message: dailySendLimitMessage() };
+    }
+    await reportError(claimError, { operation: "outreach.send.claim", messageId });
+    return { ok: false, message: "The send could not be started safely. Nothing was sent. Try again." };
+  }
+  if (claimed !== true) {
+    return { ok: false, message: "This email is already being sent, or was just sent. Refresh to see its current state." };
+  }
+
+  // F217 AC2: whatever the CAM attached must actually leave with the email —
+  // not just be visible in the editor. A linked attachment whose bytes can no
+  // longer be found (deleted from Storage, or some other integrity gap) fails
+  // the send outright rather than going out silently short a file (F118's own
+  // testing note: "broken or missing attachment reference shows a clear
+  // error"). The claim above is already taken at this point; a failure here
+  // still releases it below via the same non-retryable path as any other
+  // definite refusal.
+  const { data: attachmentLinks, error: attachmentLinksError } = await supabase
+    .from("outreach_message_attachments")
+    .select("attachments(filename, storage_path, content_type, size_bytes)")
+    .eq("outreach_message_id", messageId);
+  if (attachmentLinksError) {
+    await reportError(attachmentLinksError, { operation: "outreach.send.load_attachments", messageId });
+    await releaseClaimAfterDefiniteRefusal(supabase, messageId);
+    return { ok: false, message: "The attached files could not be verified. Nothing was sent." };
+  }
+
+  type LinkedAttachment = { filename: string; storage_path: string; content_type: string | null; size_bytes: number | null };
+  const linked = (attachmentLinks ?? [])
+    .map((row) => (Array.isArray(row.attachments) ? row.attachments[0] : row.attachments) as LinkedAttachment | null)
+    .filter((row): row is LinkedAttachment => row != null);
+
+  let attachments: { filename: string; contentType: string | null; content: Buffer }[] | undefined;
+  if (linked.length > 0) {
+    const totalSize = linked.reduce((sum, row) => sum + (row.size_bytes ?? 0), 0);
+    if (totalSize > MAX_COMBINED_ATTACHMENT_SIZE_BYTES) {
+      // Defense in depth: attach_file_to_draft already enforces this at attach
+      // time, re-checked here in case the set changed between attaching and
+      // sending in some way that RPC didn't see (it cannot, today, but a
+      // limit that's only ever checked once is a latent gap the next change
+      // to either side could reopen silently).
+      await releaseClaimAfterDefiniteRefusal(supabase, messageId);
+      return { ok: false, message: "These attachments are too large to send together (25MB email limit)." };
+    }
+
+    const admin = createAdminClient();
+    if (!admin) {
+      await reportError(new Error("No admin client available for attachment download"), {
+        operation: "outreach.send.attachments_no_admin_client",
+        messageId,
+      });
+      await releaseClaimAfterDefiniteRefusal(supabase, messageId);
+      return { ok: false, message: "The attached files could not be sent. Nothing was sent." };
+    }
+
+    attachments = [];
+    for (const row of linked) {
+      const { data: bytes, error: downloadError } = await admin.storage
+        .from("client-attachments")
+        .download(row.storage_path);
+      if (downloadError || !bytes) {
+        await reportError(downloadError ?? new Error("Attachment download returned no data"), {
+          operation: "outreach.send.attachment_download_failed",
+          messageId,
+          storagePath: row.storage_path,
+        });
+        await releaseClaimAfterDefiniteRefusal(supabase, messageId);
+        return { ok: false, message: "One of the attached files could not be found. Nothing was sent." };
+      }
+      attachments.push({
+        filename: row.filename,
+        contentType: row.content_type,
+        content: Buffer.from(await bytes.arrayBuffer()),
+      });
+    }
+  }
+
+  // The branch flyer, when this message was composed to carry one. It is not a
+  // linked attachment — it ships with the code rather than living in Storage
+  // (src/lib/outreach/flyer.ts) — so it is added here rather than being loaded
+  // with the client's own files above, and it does not count against the
+  // per-draft attachment limits, which govern what a CAM uploads.
+  //
+  // A missing flyer file does not fail the send. The draft may mention it, which
+  // is a real cost, but an introductory email that goes out without its flyer is
+  // a far smaller failure than one that does not go out at all — and unlike a
+  // linked attachment, nothing here implies the CAM chose a specific file that
+  // has since vanished.
+  if (wantsFlyer) {
+    const flyer = await flyerAttachment();
+    if (flyer) attachments = [...(attachments ?? []), flyer];
+    else await reportError(new Error("Outreach flyer missing from deployment"), {
+      operation: "outreach.send.flyer_unavailable",
+      messageId,
+    });
+  }
+
+  const sent = await sendBranchOutreach({
+    to: decision.recipient,
+    subject,
+    text: emailHtmlToPlainText(body),
+    html: body,
+    attachments,
+  });
+
+  if (!sent.ok) {
+    // F129 AC2: persist the failed attempt against the message itself, so the
+    // CAM and any later diagnosis can see what happened and when — the
+    // transport's own reportError/API-health logging covers ERROR_LOG and
+    // API_HEALTH_LOGS; this row is the per-message record. Best-effort: a
+    // logging outage must not mask the failure message below.
+    const failureLogger = createAdminClient();
+    if (failureLogger) {
+      const { error: failureEventError } = await failureLogger.from("send_events").insert({
+        outreach_message_id: messageId,
+        event_type: "failed",
+        occurred_at: new Date().toISOString(),
+        metadata: {
+          provider: "gmail",
+          reason: sent.reason,
+          retryable: sent.retryable,
+        },
+      });
+      if (failureEventError) {
+        await reportError(failureEventError, { operation: "outreach.send.record_failure", messageId });
+      }
+    }
+
+    // Definite refusal (bad credentials, suppressed-at-provider, malformed
+    // request): nothing went out, so release the claim for a clean retry. An
+    // ambiguous failure (timeout/5xx — the email may actually have been delivered)
+    // deliberately KEEPS the claim: auto-retrying an unknown-outcome send risks a
+    // duplicate email to the client, which is worse than asking a human to check
+    // the mailbox. Stale claims expire via send_claim_staleness_window().
+    if (!sent.retryable) {
+      await releaseClaimAfterDefiniteRefusal(supabase, messageId);
+    } else {
+      await reportError(new Error(`Gmail send failed with retryable outcome (${sent.reason}).`), {
+        operation: "outreach.send.ambiguous_failure",
+        messageId,
+      });
+    }
+    return { ok: false, message: sent.retryable
+      ? `${sent.reason} If you are unsure whether it went out, check the mailbox before retrying.`
+      : sent.reason };
+  }
+
+  // Audited draft→sent transition (F123/audit-log pattern §1): the RPC flips the
+  // status conditionally on still-draft and writes the audit_log row in the same
+  // transaction, so a lost race raises instead of double-recording. The reviewed
+  // recipient is passed explicitly (F116 review follow-up) so the audited fact is
+  // exactly what the transport was given, not a value re-derived at recordal time.
+  // F157: the SAME transaction also advances the client's pipeline status (first
+  // send initial_outreach_sent, later sends follow_up_sent) and records its own
+  // status_changed audit row — no separate best-effort step that could fail and
+  // leave the dashboard stale.
+  //
+  // F097: the point-in-time scoring vector is captured BEFORE this call so the
+  // factors describe pre-send state, then inserted by the same transaction. A
+  // failed build logs and passes null rather than blocking the send.
+  const scoreSnapshot = await buildScoreSnapshot(organisationId);
+  const { error: markError } = await supabase.rpc("mark_outreach_sent", {
+    p_message_id: messageId,
+    p_provider_message_id: sent.providerMessageId,
+    p_provider_thread_id: sent.providerThreadId,
+    p_recipient_email: decision.recipient,
+    p_score_snapshot: scoreSnapshot,
+  });
+  if (markError) {
+    // The email IS out; this must stay visible even though the request succeeds
+    // overall — the DoD requires failures to reach ERROR_LOG. The pipeline was
+    // not advanced either: the whole recordal rolled back together.
+    await reportError(markError, { operation: "outreach.send.record_sent", messageId });
+    return { ok: false, message: "The email was sent, but its status could not be recorded. Contact an administrator." };
+  }
+
+  const admin = createAdminClient();
+  if (admin) {
+    // Best-effort delivery record: the send itself is already durable in
+    // outreach_messages + audit_log above; this enriches the timeline only.
+    const { error: eventError } = await admin.from("send_events").insert({
+      outreach_message_id: messageId,
+      event_type: "sent",
+      occurred_at: new Date().toISOString(),
+      metadata: {
+        provider: "gmail",
+        message_id: sent.providerMessageId,
+        thread_id: sent.providerThreadId,
+        recipient: decision.recipient,
+      },
+    });
+    if (eventError) await reportError(eventError, { operation: "outreach.send.record_event", messageId });
+  }
+
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath("/inbox");
+  return { ok: true, message: "Email sent from the Sheffield outreach mailbox." };
+}
+
+export type RetryFailedResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
+
+/**
+ * F129 AC3: retry a failed scheduled delivery without recreating the draft.
+ *
+ * The content being retried is exactly what the CAM reviewed and approved when
+ * they scheduled it (schedule_outreach_send stores the sanitised body and
+ * required the approval checkbox), so this action re-sends that same content
+ * rather than asking for it again. Every gate the original send had is re-run,
+ * not assumed: actor authorisation, admin-or-sender ownership, suppression at
+ * point-of-send, recipient validity and the F227 send limit all apply to the
+ * retry through the ordinary sendReviewedEmail path.
+ */
+export async function retryFailedEmail(input: unknown): Promise<RetryFailedResult> {
+  const parsed = safeValidate(z.object({ organisationId: z.uuid(), messageId: z.uuid() }), input);
+  if (!parsed.success) {
+    return { ok: false, message: "That failed email could not be identified." };
+  }
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const isAdmin = authorization.actor.role === "admin";
+
+  const { organisationId, messageId } = parsed.data;
+  const supabase = await createClient();
+  const { data: failed, error: loadError } = await supabase
+    .from("outreach_messages")
+    .select(
+      "id, subject, body, send_status, sent_by_user_id, sent_to_email, contacts(email), organisations(contact_email)",
+    )
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  if (loadError || !failed) {
+    if (loadError) await reportError(loadError, { operation: "outreach.retry.load", messageId });
+    return { ok: false, message: "That email could not be loaded. Refresh and try again." };
+  }
+  if (failed.send_status !== "failed") {
+    return { ok: false, message: "This email is not waiting to be retried." };
+  }
+  // Same ownership rule as sending: RLS lets every active user READ every row,
+  // so the line is drawn here before anything moves.
+  if (!isAdmin && failed.sent_by_user_id !== authorization.actor.id) {
+    return { ok: false, message: "You can only retry emails you scheduled yourself." };
+  }
+
+  // F129 recovery transition (audited in the RPC): failed→draft, so the retry
+  // flows through the one audited send path instead of a parallel one.
+  const { data: reopened, error: reopenError } = await supabase.rpc("reopen_outreach_draft", {
+    p_message_id: messageId,
+  });
+  if (reopenError || !reopened) {
+    await reportError(reopenError ?? new Error("Reopen matched no rows."), {
+      operation: "outreach.retry.reopen",
+      messageId,
+    });
+    return { ok: false, message: "This email is no longer waiting to be retried." };
+  }
+  // The row just changed state regardless of how the resend below goes.
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath("/inbox");
+
+  // The reviewed recipient wins; fall back to the on-file record only for rows
+  // that predate recipient review (F116). With neither, the draft is reopened
+  // but nothing can be addressed — say so rather than guessing.
+  const contact = Array.isArray(failed.contacts) ? failed.contacts[0] : failed.contacts;
+  const organisation = Array.isArray(failed.organisations) ? failed.organisations[0] : failed.organisations;
+  const recipient =
+    failed.sent_to_email?.trim() || contact?.email?.trim() || onFileEmail(organisation?.contact_email) || "";
+  if (!recipient) {
+    return {
+      ok: false,
+      message:
+        "Moved back to drafts, but no recipient address is on file. Add one to the client record first.",
+    };
+  }
+
+  return await sendReviewedEmail({
+    organisationId,
+    messageId,
+    recipient,
+    subject: failed.subject,
+    body: failed.body,
+    explicitlyApproved: true,
+  });
+}
+
+export type ValidateWebsiteResult =
+  | { ok: true; hostname: string }
+  | { ok: false; message: string };
+
+/**
+ * Live verdict for the booklet composer's website field. Runs the exact
+ * `fetchWebsiteContext` the booklet route runs — format, robots, DNS, HTTP,
+ * readable text — so the droplet's tick means "generate will use this", not
+ * merely "this parses". A well-formed URL to a dead or refusing site ticks
+ * under a format check and then gets skipped on generate; this cannot.
+ *
+ * Gated on client:contact like every sibling action: settled keystrokes now
+ * trigger real outbound fetches, which must stay behind the same actors
+ * allowed to generate. The shared transport's ERROR_LOG rows on fetch
+ * failures apply here too — a pause on a half-typed host leaves a row, the
+ * price of verifying for real, kept small by the caller's debounce.
+ */
+export async function validateBookletWebsiteUrl(
+  input: unknown,
+): Promise<ValidateWebsiteResult> {
+  const parsed = safeValidate(z.object({ websiteUrl: z.string().max(2048) }), input);
+  if (!parsed.success) {
+    return { ok: false, message: "That doesn't look like a website address." };
+  }
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const result = await fetchWebsiteContext(
+    parsed.data.websiteUrl,
+    createDefaultScrapeDependencies(),
+  );
+  if (result.status === "used") return { ok: true, hostname: result.hostname };
+  return { ok: false, message: result.reason };
+}
+
+export type SaveDraftResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
+
+/**
+ * F119: saves the CAM's in-progress edits without sending. Deliberately
+ * lighter than sendReviewedEmail — no recipient validation, no approval, no
+ * suppression check, no Gmail call — this only ever writes subject/body/
+ * recipient to a still-draft row so a CAM can return to exactly what they
+ * left, per F070's client profile reopening it. The recipient is persisted
+ * verbatim (F119 AC1): a manually overridden address must survive the
+ * save/reopen round-trip instead of being recomputed from contacts.email.
+ */
+export async function saveEmailDraft(input: unknown): Promise<SaveDraftResult> {
+  const parsed = safeValidate(saveDraftSchema, input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: Object.values(parsed.fieldErrors).flat().find(Boolean) ?? "Check the draft and try again.",
+    };
+  }
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const isAdmin = authorization.actor.role === "admin";
+
+  const { organisationId, messageId, subject } = parsed.data;
+  // Same reasoning as sendReviewedEmail: never trust client-side sanitization
+  // alone for what actually lands in the database.
+  const body = sanitizeEmailHtml(parsed.data.body);
+  const recipient = parsed.data.recipient?.trim() || null;
+
+  const supabase = await createClient();
+  const { data: draft, error: draftError } = await supabase
+    .from("outreach_messages")
+    .select("id, send_status, sent_by_user_id")
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  if (draftError || !draft) {
+    if (draftError) await reportError(draftError, { operation: "outreach.save_draft.load", messageId });
+    return { ok: false, message: "That draft could not be loaded. Refresh and try again." };
+  }
+  if (draft.send_status !== "draft") {
+    return { ok: false, message: "This email is no longer an unsent draft." };
+  }
+  // Same ownership rule as sending (F123 AC4): RLS lets every active user READ
+  // every draft, so write access is asserted here, not left to a silent no-op.
+  if (!isAdmin && draft.sent_by_user_id !== authorization.actor.id) {
+    return { ok: false, message: "You can only edit drafts you generated yourself." };
+  }
+
+  // Same raced-send guard as sending: require the row to still be a draft when
+  // the UPDATE lands — a concurrent send flipping the status between the load
+  // check above and this write must surface as an error, not a silent zero-row
+  // update that still tells the user "Draft saved."
+  const { error: saveError } = await supabase
+    .from("outreach_messages")
+    .update({ subject, body, sent_to_email: recipient, ...flyerUpdate(parsed.data.attachFlyer) })
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .eq("send_status", "draft")
+    .select("id")
+    .single();
+  if (saveError) {
+    // `.single()` reports a zero-row match as PGRST116, so this is where the
+    // raced-send case actually lands: the draft was sent or removed between
+    // the load check above and this write. Distinguish it from a transient DB
+    // failure — "try again" would be a lie when the draft is simply gone.
+    if ((saveError as { code?: string }).code === "PGRST116") {
+      await reportError(saveError, { operation: "outreach.save_draft.write", messageId });
+      return { ok: false, message: "This email is no longer an unsent draft." };
+    }
+    await reportError(saveError, { operation: "outreach.save_draft.write", messageId });
+    return { ok: false, message: "The draft could not be saved. Try again." };
+  }
+
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath("/inbox");
+  return { ok: true, message: "Draft saved." };
+}
+
+export type DiscardDraftResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
+
+/**
+ * F120: removes an unsent draft outright. The confirmation step lives in the
+ * UI (compose-button.tsx), since the content is genuinely lost once this
+ * runs — this action itself does exactly one thing once called.
+ *
+ * Goes through the discard_outreach_draft RPC rather than a plain row delete
+ * (PR #493 review): docs/audit-log-pattern.md §1 requires status-changing or
+ * destructive writes to land an audit_log entry in the same transaction, and a
+ * bare DELETE would leave nothing to answer "what happened to that draft?" —
+ * the ai_generations cascade goes with it. The RPC (20260902130000) re-checks
+ * active user + admin/ownership inside its SECURITY DEFINER body, writes the
+ * outreach_email_draft_discarded audit row, then deletes — mirroring F042's
+ * discard_manual_entry_draft precedent. The RLS delete policies stay enabled
+ * as defense-in-depth for direct SQL.
+ */
+export async function discardEmailDraft(input: unknown): Promise<DiscardDraftResult> {
+  const parsed = safeValidate(discardDraftSchema, input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: Object.values(parsed.fieldErrors).flat().find(Boolean) ?? "Check the draft and try again.",
+    };
+  }
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+  const isAdmin = authorization.actor.role === "admin";
+
+  const { organisationId, messageId } = parsed.data;
+  const supabase = await createClient();
+  const { data: draft, error: draftError } = await supabase
+    .from("outreach_messages")
+    .select("id, send_status, sent_by_user_id")
+    .eq("id", messageId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  if (draftError || !draft) {
+    if (draftError) await reportError(draftError, { operation: "outreach.discard_draft.load", messageId });
+    return { ok: false, message: "That draft could not be loaded. Refresh and try again." };
+  }
+  if (draft.send_status !== "draft") {
+    return { ok: false, message: "This email is no longer an unsent draft." };
+  }
+  // Same ownership rule as saving and sending (F123 AC4): RLS lets every
+  // active user READ every draft, so write access is asserted here too.
+  if (!isAdmin && draft.sent_by_user_id !== authorization.actor.id) {
+    return { ok: false, message: "You can only discard drafts you generated yourself." };
+  }
+
+  // Collected BEFORE the discard below: the RPC deletes the draft row and
+  // its link rows cascade with it, so afterwards there is nothing left to
+  // enumerate. Needed by the orphan sweep at the end.
+  const linkedAttachments = await listDraftAttachments(messageId);
+
+  const { error: rpcError } = await supabase.rpc("discard_outreach_draft", { p_message_id: messageId });
+  if (rpcError) {
+    await reportError(rpcError, { operation: "outreach.discard_draft.write", messageId });
+    // A 42501 from the RPC means the authoritative re-check refused: raced send,
+    // removed elsewhere, or lost an ownership race. Say that, not "try again" —
+    // retrying can never succeed.
+    if ((rpcError as { code?: string }).code === "42501") {
+      return { ok: false, message: "This email is no longer an unsent draft." };
+    }
+    return { ok: false, message: "The draft could not be discarded. Refresh and try again." };
+  }
+
+  // Orphan sweep: the RPC deletes the draft row (link rows cascade), but the
+  // attachment rows it pointed at and their Storage bytes survive — a draft
+  // discarded after Send uploaded its files would otherwise leak both into
+  // the quotas forever. Best-effort and strictly after the discard: a failure
+  // here is logged, never surfaced, because the draft itself is already gone.
+  // A file still linked to another draft is left alone — shared rows are
+  // somebody else's attachment.
+  await removeOrphanedDraftAttachments(messageId, linkedAttachments);
+
+  revalidatePath(`/clients/${organisationId}`, "layout");
+  revalidatePath("/inbox");
+  return { ok: true, message: "Draft discarded." };
+}
+
+/**
+ * The draft's linked attachment rows, enumerated before a discard deletes the
+ * draft (and its link rows with it). Admin-read: the caller may own the draft
+ * without being able to read every linked row, and this list only ever feeds
+ * the post-discard sweep below, never the UI.
+ */
+async function listDraftAttachments(
+  messageId: string,
+): Promise<ReadonlyArray<{ id: string; storage_path: string }>> {
+  const admin = createAdminClient();
+  if (!admin) {
+    await reportError(new Error("No admin client available for attachment cleanup"), {
+      operation: "outreach.discard_draft.cleanup_no_admin_client",
+      messageId,
+    });
+    return [];
+  }
+  const { data: links, error: linksError } = await admin
+    .from("outreach_message_attachments")
+    .select("attachment:attachments(id, storage_path)")
+    .eq("outreach_message_id", messageId);
+  if (linksError) {
+    await reportError(linksError, { operation: "outreach.discard_draft.cleanup_links", messageId });
+    return [];
+  }
+  type LinkedRow = { id: string; storage_path: string };
+  return (links ?? [])
+    .map((row) => (Array.isArray(row.attachment) ? row.attachment[0] : row.attachment) as LinkedRow | null)
+    .filter((row): row is LinkedRow => row != null);
+}
+
+/**
+ * Deletes the attachment rows — and their Storage objects — that a discarded
+ * draft was the last to reference. Skips anything still linked elsewhere.
+ */
+async function removeOrphanedDraftAttachments(
+  messageId: string,
+  linked: ReadonlyArray<{ id: string; storage_path: string }>,
+): Promise<void> {
+  if (linked.length === 0) return;
+  const admin = createAdminClient();
+  if (!admin) {
+    await reportError(new Error("No admin client available for attachment cleanup"), {
+      operation: "outreach.discard_draft.cleanup_no_admin_client",
+      messageId,
+    });
+    return;
+  }
+  // Dedupe: one file attached twice links twice but cleans once.
+  const byId = new Map(linked.map((row) => [row.id, row]));
+  for (const row of byId.values()) {
+    const { count, error: countError } = await admin
+      .from("outreach_message_attachments")
+      .select("attachment_id", { count: "exact", head: true })
+      .eq("attachment_id", row.id);
+    if (countError) {
+      await reportError(countError, {
+        operation: "outreach.discard_draft.cleanup_link_count",
+        messageId,
+        attachmentId: row.id,
+      });
+      continue;
+    }
+    if ((count ?? 1) > 0) continue;
+    const { error: removeError } = await admin.storage
+      .from("client-attachments")
+      .remove([row.storage_path]);
+    if (removeError) {
+      await reportError(removeError, {
+        operation: "outreach.discard_draft.cleanup_storage",
+        messageId,
+        attachmentId: row.id,
+      });
+    }
+    const { error: rowError } = await admin.from("attachments").delete().eq("id", row.id);
+    if (rowError) {
+      await reportError(rowError, {
+        operation: "outreach.discard_draft.cleanup_row",
+        messageId,
+        attachmentId: row.id,
+      });
+    }
+  }
+}
+
+export type DraftAttachmentResult =
+  | { ok: true }
+  | { ok: false; message: string };
+
+/**
+ * F217: links an existing (or just-uploaded) client attachment to a draft.
+ * No manual ownership/status pre-check here — unlike sendReviewedEmail's
+ * multi-step gauntlet, attach_file_to_draft (20260913090000) already does the
+ * full authoritative check (admin or the draft's own owner, still a draft,
+ * same client, count/size caps) inside its SECURITY DEFINER body — same
+ * "go straight to the RPC" shape as discardEmailDraft above.
+ */
+export async function attachDraftFile(input: unknown): Promise<DraftAttachmentResult> {
+  const parsed = safeValidate(draftAttachmentSchema, input);
+  if (!parsed.success) {
+    return { ok: false, message: "That attachment could not be identified." };
+  }
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+
+  const { organisationId, messageId, attachmentId } = parsed.data;
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("attach_file_to_draft", {
+    p_message_id: messageId,
+    p_attachment_id: attachmentId,
+  });
+  if (error) {
+    await reportError(error, { operation: "outreach.attach_draft_file", messageId, attachmentId });
+    return { ok: false, message: attachmentRpcFailure(error).error };
+  }
+
+  revalidatePath(`/clients/${organisationId}`);
+  return { ok: true };
+}
+
+/**
+ * F217: removes a file from a draft before it is sent — the minimum "undo an
+ * attach" a CAM needs while composing. The full attachment review experience
+ * (list before the final send click, broken-reference handling) is F118's
+ * ticket, not this one.
+ */
+export async function detachDraftFile(input: unknown): Promise<DraftAttachmentResult> {
+  const parsed = safeValidate(draftAttachmentSchema, input);
+  if (!parsed.success) {
+    return { ok: false, message: "That attachment could not be identified." };
+  }
+
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return { ok: false, message: actorFailureMessage(authorization.reason) };
+  }
+
+  const { organisationId, messageId, attachmentId } = parsed.data;
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("detach_file_from_draft", {
+    p_message_id: messageId,
+    p_attachment_id: attachmentId,
+  });
+  if (error) {
+    await reportError(error, { operation: "outreach.detach_draft_file", messageId, attachmentId });
+    return { ok: false, message: attachmentRpcFailure(error).error };
+  }
+
+  revalidatePath(`/clients/${organisationId}`);
+  return { ok: true };
+}
+
+export type ClientNewsCandidateResult =
+  | { ok: true; hook: { text: string; url: string | null } | null }
+  | { ok: false; error: string };
+
+/**
+ * Looks up one recent news item for the client on demand (for pre-generation preview).
+ * Returns null hook when lookups are disabled or nothing relevant was found.
+ */
+export async function lookupClientNewsCandidate(
+  organisationId: unknown,
+): Promise<ClientNewsCandidateResult> {
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) return { ok: false, error: actorFailureMessage(authorization.reason) };
+
+  const parsed = safeValidate(z.uuid(), organisationId);
+  if (!parsed.success) return { ok: false, error: "That client could not be found." };
+
+  if (resolveNewsProvider() === "none") {
+    return { ok: true, hook: null };
+  }
+
+  const supabase = await createClient();
+  const { data: organisation, error } = await supabase
+    .from("organisations")
+    .select("legal_name, trading_name, website, city, country_code, geographic_reach, sector")
+    .eq("id", parsed.data)
+    .maybeSingle<{
+      legal_name: string;
+      trading_name: string | null;
+      website: string | null;
+      city: string | null;
+      country_code: string | null;
+      geographic_reach: string | null;
+      sector: string | null;
+    }>();
+
+  if (error || !organisation) {
+    if (error) await reportError(error, { operation: "outreach.news_candidate_lookup", organisationId: parsed.data });
+    return { ok: false, error: "That client could not be loaded." };
+  }
+
+  const hook = await lookupLiveNewsHook({
+    organisationId: parsed.data,
+    organisationName: organisation.legal_name,
+    tradingName: organisation.trading_name,
+    website: organisation.website,
+    city: organisation.city,
+    countryCode: organisation.country_code,
+    geographicReach: organisation.geographic_reach,
+    sector: organisation.sector,
+  });
+
+  return { ok: true, hook };
+}

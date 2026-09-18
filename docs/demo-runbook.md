@@ -225,8 +225,9 @@ waiting on a decision.*
 The line: *an admin sees the whole pipeline, the app points at what has gone
 quiet, and any client's history is auditable field by field.*
 
-1. **`/admin/dashboard` (F180)** — team-wide activity, funnel, sector
-   performance. The map before the detail.
+1. **`/dashboard`, then Team analytics (`/admin/analytics`)** (F180) — the
+   admin's duty queue and data health on the dashboard, then pipeline stages,
+   ownership and sectors under Team analytics. The map before the detail.
 
 2. **F183, stall detection — `?stalled=1`, or the Stalled filter.**
    **Wearside Youth Music Trust** is flagged: 24 days since the last thing that

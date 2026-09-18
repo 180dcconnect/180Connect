@@ -8,6 +8,7 @@ import {
   type ReplyTrackingSummary,
   type ResponseTimeAggregate,
 } from "./reply-analytics.ts";
+import { outreachRates } from "./outreach-rates.ts";
 
 /**
  * F206/F207/F208 — one CAM's own outreach, as opposed to the platform-wide
@@ -80,11 +81,17 @@ export type CamOutreachTotals = {
   /** Sent to your clients by someone else — i.e. before a handover. */
   emailsSentBeforeHandover: number;
   repliesReceived: number;
+  /** Clients of yours that replied at least once — not replies, and not every
+   *  client on the platform. */
   respondingClients: number;
-  /** Responding clients over contacted clients. Null rather than NaN when nothing was contacted. */
+  /** Replied ∪ converted — win rate's denominator, as a count. */
+  respondedClients: number;
+  /** Replied clients ÷ contacted clients. Null rather than NaN when nothing was
+   *  contacted. See `lib/outreach-rates.ts` for why this is clients, not emails. */
   replyRate: number | null;
   conversions: number;
-  conversionRate: number | null;
+  /** Converted clients ÷ responded clients (replied ∪ converted). */
+  winRate: number | null;
 };
 
 /**
@@ -92,24 +99,39 @@ export type CamOutreachTotals = {
  * rather than being recounted here, the same arrangement computeDashboardMetrics
  * uses — the counts must agree with the dashboard's.
  *
- * Reply rate is responding *clients* over contacted clients, not replies over
- * emails: a four-message thread with one charity is one responding client, and
- * counting messages would report 400%.
+ * Both rates come from `outreachRates`, which counts *clients* rather than
+ * messages: a four-message thread with one charity is one responding client,
+ * and counting messages would report 400%.
+ *
+ * The reply figures are folded back to this CAM's own book, which the summary
+ * they arrive in is not — `byClient` covers every client on the platform, and
+ * dividing a platform-wide responding count by one CAM's contacted count is how
+ * a rate ends up over 100%.
  */
 export function computeCamOutreach(
   mine: readonly DashboardOrgRow[],
   sentMessages: readonly SentMessageRow[],
-  replies: Pick<ReplyTrackingSummary, "totalReplies" | "respondingClients">,
+  replies: Pick<ReplyTrackingSummary, "totalReplies" | "respondingClients" | "byClient">,
   actorId: string,
 ): CamOutreachTotals {
   const mineIds = new Set(mine.map((row) => row.id));
 
-  let contacted = 0;
-  let conversions = 0;
-  for (const row of mine) {
-    if (isContacted(row.outreach_status)) contacted += 1;
-    if (isConverted(row.outreach_status)) conversions += 1;
-  }
+  // Client ids, not counts: both rates are ratios of clients and win rate's
+  // denominator is a union, which totals cannot express.
+  const contactedClients = new Set(
+    mine.filter((row) => isContacted(row.outreach_status)).map((row) => row.id),
+  );
+  const convertedClients = new Set(
+    mine.filter((row) => isConverted(row.outreach_status)).map((row) => row.id),
+  );
+  const repliedClients = new Set(
+    Array.from(replies.byClient.keys()).filter((organisationId) => mineIds.has(organisationId)),
+  );
+  const rates = outreachRates({
+    contacted: contactedClients,
+    replied: repliedClients,
+    converted: convertedClients,
+  });
 
   let emailsSent = 0;
   let emailsSentByMe = 0;
@@ -119,19 +141,18 @@ export function computeCamOutreach(
     if (message.sent_by_user_id === actorId) emailsSentByMe += 1;
   }
 
-  const rate = (value: number) => (contacted === 0 ? null : value / contacted);
-
   return {
     clientsOwned: mine.length,
-    contacted,
+    contacted: rates.contactedClients,
     emailsSent,
     emailsSentByMe,
     emailsSentBeforeHandover: emailsSent - emailsSentByMe,
     repliesReceived: replies.totalReplies,
-    respondingClients: replies.respondingClients,
-    replyRate: rate(replies.respondingClients),
-    conversions,
-    conversionRate: rate(conversions),
+    respondingClients: rates.repliedClients,
+    respondedClients: rates.respondedClients,
+    replyRate: rates.replyRate,
+    conversions: rates.convertedClients,
+    winRate: rates.winRate,
   };
 }
 

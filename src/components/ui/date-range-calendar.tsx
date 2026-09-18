@@ -61,19 +61,37 @@ export type DateRangeCalendarProps = {
   /** Committed selection; drives what is drawn, and where the calendar opens. */
   value: RangeSelection;
   onChange: (selection: RangeSelection) => void;
+  /**
+   * `"range"` (default) picks a span in two clicks; `"single"` picks one day —
+   * the selection is reported as `{ from: day, to: day }`. Everything else
+   * (navigation, keyboard, bounds) is identical, so a due-date field gets the
+   * same calendar as the period picker rather than a second implementation.
+   */
+  mode?: "range" | "single";
   /** Inclusive bounds — days outside are shown but not selectable. */
   min?: string | null;
   max?: string | null;
   /** Injected in tests / stories; defaults to the real clock. */
   now?: Date;
-  /** Hides the This month / Last month / This quarter row. */
+  /** Hides the This month / Last month / This quarter row. Forced off in single mode. */
   showPresets?: boolean;
   className?: string;
 };
 
+function formatDayLong(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 export function DateRangeCalendar({
   value,
   onChange,
+  mode = "range",
   min,
   max,
   now,
@@ -191,11 +209,11 @@ export function DateRangeCalendar({
     return rows;
   }, [month]);
   const presets = useMemo(() => {
-    if (!showPresets) return [];
+    if (!showPresets || mode === "single") return [];
     return calendarPresets(now ?? new Date())
       .map((preset) => clampPreset(preset, min, max))
       .filter((preset): preset is NonNullable<typeof preset> => preset !== null);
-  }, [showPresets, now, min, max]);
+  }, [showPresets, mode, now, min, max]);
 
   // Paging is disabled at the edges rather than allowed and then empty: the
   // whole month is out of bounds, so there is nothing to show there.
@@ -205,6 +223,11 @@ export function DateRangeCalendar({
   const canGoForward = !max || `${nextMonth}-01` <= max;
 
   const selectDay = (iso: string) => {
+    if (mode === "single") {
+      onChange({ from: iso, to: iso });
+      setFocusedDay(iso);
+      return;
+    }
     onChange(nextSelection(value, iso));
     setFocusedDay(iso);
   };
@@ -265,6 +288,7 @@ export function DateRangeCalendar({
   };
 
   const readout = (() => {
+    if (mode === "single") return value.from ? formatDayLong(value.from) : "Pick a date";
     if (!value.from) return "Pick a start date";
     if (!value.to) return "Now pick an end date";
     const days = rangeLengthDays(value.from, value.to);

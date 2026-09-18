@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
+import { isViewOnly } from "@/lib/auth/permissions";
 import {
   KNOWN_RESTRICTABLE_FIELDS,
   type RestrictedFieldRow,
@@ -30,7 +32,7 @@ import { RestrictedFieldsPanel } from "./restricted-fields-panel";
  * facts, then a card per job — what is locked now, and locking another field.
  */
 export default async function RestrictedFieldsPage() {
-  const authorization = await getCurrentActor("approval:manage", {
+  const authorization = await getViewingActor("approval:manage", {
     route: "/settings/restricted-fields",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
@@ -41,7 +43,8 @@ export default async function RestrictedFieldsPage() {
     supabase
       .from("restricted_edit_fields")
       .select("field_name, reason, active")
-      .order("active", { ascending: false })
+      // No active-first ordering: a field that is unlocked must stay where it
+      // is in the list, so the order cannot depend on the toggle.
       .order("field_name")
       .overrideTypes<RestrictedFieldRow[], { merge: false }>(),
     supabase.rpc("list_restrictable_edit_fields"),
@@ -85,6 +88,9 @@ export default async function RestrictedFieldsPage() {
               CAMs suggest changes to these, and an admin approves them
             </span>
           </p>
+          {isViewOnly(authorization.actor.role) && (
+            <p className="mt-2 text-sm text-dim">{VIEW_ONLY_CONTROL_NOTE}</p>
+          )}
         </Rise>
 
         {rowsResult.error && (
@@ -97,7 +103,11 @@ export default async function RestrictedFieldsPage() {
         )}
 
         <Group className="space-y-4">
-          <RestrictedFieldsPanel initialFields={rows} lockableFields={lockableFields} />
+          <RestrictedFieldsPanel
+            initialFields={rows}
+            lockableFields={lockableFields}
+            readOnly={isViewOnly(authorization.actor.role)}
+          />
         </Group>
       </Stage>
     </div>

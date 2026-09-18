@@ -117,6 +117,12 @@ describe("bulkSector", () => {
     );
   });
 
+  it("maps Arts, Environment and Housing outside the legacy import whitelist", () => {
+    assert.equal(bulkSector(["Arts/culture/heritage/science"]), "Arts & Culture");
+    assert.equal(bulkSector(["Environment/conservation/heritage"]), "Environment & Conservation");
+    assert.equal(bulkSector(["Accommodation/housing"]), "Housing & Homelessness");
+  });
+
   it("picks one sector for a charity classified under several", () => {
     // Declaration order in the config decides, so the same charity always lands
     // in the same sector rather than depending on the register's row order.

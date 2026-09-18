@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor, getCurrentActor } from "@/lib/auth/actor";
 import { reportError } from "@/lib/error-logging";
 
 // ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ export async function loadRules(): Promise<{
   version: number;
   error?: string;
 }> {
-  const authorization = await getCurrentActor("user:manage", {
+  const authorization = await getViewingActor("user:manage", {
     route: "/settings/data-handling-rules",
   });
   if (!authorization.ok) {
@@ -93,7 +93,8 @@ export async function loadRules(): Promise<{
       .select(
         "id, rule_version, source, field_path, action, rule_kind, reason, is_active, created_at, updated_at, created_by_user:users!created_by(full_name, email)",
       )
-      .order("is_active", { ascending: false })
+      // No active-first ordering: a protection that is turned off must stay
+      // where it is in the list, so the order cannot depend on the toggle.
       .order("created_at", { ascending: false }),
     supabase
       .from("data_handling_rule_versions")
@@ -135,7 +136,7 @@ export async function loadFilterActivity(): Promise<FilterActivity> {
     fields: [],
   };
 
-  const authorization = await getCurrentActor("user:manage", {
+  const authorization = await getViewingActor("user:manage", {
     route: "/settings/data-handling-rules",
   });
   if (!authorization.ok) return { ...empty, error: NOT_AUTHORISED };
@@ -196,7 +197,7 @@ export type ObservedField = {
 export async function loadObservedFields(
   source: string,
 ): Promise<{ fields: ObservedField[]; error?: string }> {
-  const authorization = await getCurrentActor("user:manage", {
+  const authorization = await getViewingActor("user:manage", {
     route: "/settings/data-handling-rules",
   });
   if (!authorization.ok) return { fields: [], error: NOT_AUTHORISED };

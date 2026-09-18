@@ -171,6 +171,10 @@ export type LiveNewsInput = {
   organisationName: string;
   tradingName?: string | null;
   website?: string | null;
+  city?: string | null;
+  countryCode?: string | null;
+  geographicReach?: string | null;
+  sector?: string | null;
 };
 
 export type LiveNewsHook = {
@@ -222,13 +226,25 @@ function searchablePhrase(name: string): string {
  * has nothing searchable. The quoted phrase is the precision anchor;
  * "charity" disambiguates common-word names for Exa's neural search
  * (ablation: bare "Roundabout" returned 100% traffic articles, shaped 100%
- * charity coverage). The title gate below remains the enforcer — shaping
- * only improves the candidate pool.
+ * charity coverage). Optional location grounding (e.g. city) further anchors
+ * the query to avoid foreign false positives.
  */
-export function buildNewsQuery(name: string): string | null {
+export function buildNewsQuery(
+  name: string,
+  context?: {
+    city?: string | null;
+    countryCode?: string | null;
+    sector?: string | null;
+  },
+): string | null {
   const phrase = searchablePhrase(name);
   if (!phrase) return null;
-  return `"${phrase}" charity`;
+  const parts = [`"${phrase}"`, "charity"];
+  const city = context?.city?.trim();
+  if (city && city.length >= 3 && !phrase.toLowerCase().includes(city.toLowerCase())) {
+    parts.push(city);
+  }
+  return parts.join(" ");
 }
 
 /** Candidate names, everyday (trading) name first per NAME_RULE. */
@@ -254,10 +270,38 @@ function significantTokens(name: string): string[] {
     .filter((word) => word.length >= 4 && !GENERIC_WORDS.has(word));
 }
 
+function isUkHostOrOutlet(articleHost?: string | null): boolean {
+  if (!articleHost) return false;
+  return (
+    articleHost.endsWith(".uk") ||
+    articleHost.includes(".co.uk") ||
+    articleHost.includes(".org.uk") ||
+    articleHost.includes("bbc.") ||
+    articleHost.includes("theguardian.") ||
+    articleHost.includes("independent.co.uk") ||
+    articleHost.includes("telegraph.co.uk")
+  );
+}
+
 /** Full-phrase contiguous match on the normalised title. */
-function titleMatchesPhrase(titleHaystack: string, name: string): boolean {
+function titleMatchesPhrase(
+  titleHaystack: string,
+  name: string,
+  articleHost?: string | null,
+  city?: string | null,
+): boolean {
   const phrase = normalise(searchablePhrase(name));
-  return Boolean(phrase) && titleHaystack.includes(phrase);
+  if (!phrase || !titleHaystack.includes(phrase)) return false;
+  // If the name has only 1 distinctive token (e.g. "COCO", "Oasis"),
+  // matching the phrase is matching a single word. Require UK host, sector keyword, or city match.
+  if (significantTokens(name).length <= 1) {
+    const isUk = isUkHostOrOutlet(articleHost);
+    const titleWords = new Set(titleHaystack.split(" ").filter(Boolean));
+    const hasSectorWord = Array.from(GENERIC_WORDS).some((gw) => titleWords.has(gw));
+    const hasCity = Boolean(city && city.trim().length >= 3 && titleWords.has(normalise(city)));
+    return isUk || hasSectorWord || hasCity;
+  }
+  return true;
 }
 
 /**
@@ -268,10 +312,27 @@ function titleMatchesPhrase(titleHaystack: string, name: string): boolean {
  * Requires the full set when the name has fewer than two distinctive tokens,
  * otherwise at least two. Names with no distinctive tokens at all can only
  * match by phrase, so a generic-only name never matches a random article.
+ *
+ * For single-token names (e.g. "COCO", "Oasis"), single-word matches are
+ * vulnerable to international noise (e.g. Chinese tea, fashion). We require
+ * UK-domain hosting, sector keyword presence, or matching city evidence.
  */
-function titleMatchesTokens(titleWords: Set<string>, name: string): boolean {
+function titleMatchesTokens(
+  titleWords: Set<string>,
+  name: string,
+  articleHost?: string | null,
+  city?: string | null,
+): boolean {
   const tokens = significantTokens(name);
   if (tokens.length === 0) return false;
+  if (tokens.length === 1) {
+    const token = tokens[0]!;
+    if (!titleWords.has(token)) return false;
+    const isUk = isUkHostOrOutlet(articleHost);
+    const hasSectorWord = Array.from(GENERIC_WORDS).some((gw) => titleWords.has(gw));
+    const hasCity = Boolean(city && city.trim().length >= 3 && titleWords.has(normalise(city)));
+    return isUk || hasSectorWord || hasCity;
+  }
   const hits = tokens.filter((token) => titleWords.has(token)).length;
   return hits >= Math.min(2, tokens.length);
 }
@@ -409,7 +470,7 @@ function hasForeignAcronym(item: ScoredArticle, namePhrases: string[]): boolean 
 export function selectNewsHook(
   articles: NewsArticle[],
   names: string[],
-  options: { website?: string | null; nowMs?: number } = {},
+  options: { website?: string | null; city?: string | null; nowMs?: number } = {},
 ): LiveNewsHook | null {
   const nowMs = options.nowMs ?? Date.now();
   const ownHost = siteHost(options.website);
@@ -428,20 +489,28 @@ export function selectNewsHook(
     {
       pool: everything,
       test: (item) =>
-        item.hasAuthor && names.some((name) => titleMatchesPhrase(item.haystack, name)),
+        item.hasAuthor &&
+        names.some((name) =>
+          titleMatchesPhrase(item.haystack, name, item.host, options.city),
+        ),
     },
     {
       pool: everything,
-      test: (item) => names.some((name) => titleMatchesPhrase(item.haystack, name)),
+      test: (item) =>
+        names.some((name) =>
+          titleMatchesPhrase(item.haystack, name, item.host, options.city),
+        ),
     },
     {
       pool: preferred,
       test: (item) =>
-        item.hasAuthor && names.some((name) => titleMatchesTokens(item.titleWords, name)),
+        item.hasAuthor &&
+        names.some((name) => titleMatchesTokens(item.titleWords, name, item.host, options.city)),
     },
     {
       pool: preferred,
-      test: (item) => names.some((name) => titleMatchesTokens(item.titleWords, name)),
+      test: (item) =>
+        names.some((name) => titleMatchesTokens(item.titleWords, name, item.host, options.city)),
     },
   ];
 
@@ -537,7 +606,13 @@ export async function lookupLiveNewsHook(
 
   const names = candidateNames(input);
   const queryName = names[0];
-  const query = queryName ? buildNewsQuery(queryName) : null;
+  const query = queryName
+    ? buildNewsQuery(queryName, {
+        city: input.city,
+        countryCode: input.countryCode,
+        sector: input.sector,
+      })
+    : null;
   if (!query) {
     logApiHealth(NEWS_HOOK_SERVICE, NEWS_HOOK_OPERATION, true, startedAt, {
       organisationId: input.organisationId,
@@ -609,7 +684,11 @@ export async function lookupLiveNewsHook(
         { ...context, status: status ?? undefined, reason: failureReason(status) },
       );
     }
-    const match = selectNewsHook(results, names, { website: input.website });
+    const match = selectNewsHook(results, names, {
+      website: input.website,
+      city: input.city,
+      nowMs: startedAt,
+    });
     logApiHealth(NEWS_HOOK_SERVICE, NEWS_HOOK_OPERATION, true, startedAt, {
       organisationId: input.organisationId,
       resultCount: results.length,

@@ -28,7 +28,7 @@ async function allSources(): Promise<Map<string, string>> {
 const GMAIL_TRANSPORT_ALLOWLIST = new Set([
   "lib/gmail/branch-sender.ts",
   "lib/gmail/client.ts",
-  "app/clients/[id]/outreach-actions.ts",
+  "app/(app)/clients/[id]/outreach-actions.ts",
   "lib/outreach/scheduled-worker.ts",
   // F179: platform-to-CAM notification email (a reply arrived, etc.) — not
   // outreach. Calls sendGmailMessage directly, deliberately bypassing
@@ -53,7 +53,7 @@ describe("F250 human-send architecture", () => {
   });
 
   it("requires the explicit review gate before the interactive send call", async () => {
-    const action = await source("../../app/clients/[id]/outreach-actions.ts");
+    const action = await source("../../app/(app)/clients/[id]/outreach-actions.ts");
     assert.match(
       action,
       /humanReviewDecision\(\s*[^)]*explicitlyApproved,?\s*\)/,
@@ -113,10 +113,10 @@ describe("F250 human-send architecture", () => {
     // surfaces this consolidation removed came to drift apart.
     const sources = await allSources();
     const offenders = [...sources]
-      .filter(([path]) => path.startsWith("app/clients/"))
+      .filter(([path]) => path.startsWith("app/(app)/clients/"))
       .filter(([, body]) => /sendReviewedEmail|scheduleReviewedEmail|EmailReviewPanel/.test(body))
       // The server actions themselves live here and are the approved path.
-      .filter(([path]) => path !== "app/clients/[id]/outreach-actions.ts")
+      .filter(([path]) => path !== "app/(app)/clients/[id]/outreach-actions.ts")
       .map(([path]) => path);
     assert.deepEqual(offenders, [], "the client record must link to the inbox, never compose");
   });

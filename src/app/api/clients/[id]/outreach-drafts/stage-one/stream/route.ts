@@ -16,7 +16,8 @@ import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
 import { computeCostUsd } from "@/lib/outreach/generation-cost";
 import { loadModelRate } from "@/lib/ai/model-rate";
 import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
-import { resolveMissionText } from "@/lib/mission";
+import { loadStageOneExtras, toStageOneContext } from "@/lib/outreach/stage-one-context";
+import { resolveStageOneNews } from "@/lib/outreach/stage-one-news";
 
 // No maxDuration export — see the stage-one route: the 300s project default
 // applies, and a distinct value would cost a Vercel function.
@@ -33,10 +34,17 @@ import { resolveMissionText } from "@/lib/mission";
  * token returns a normal JSON error with the same status the POST route would
  * have used; anything that fails mid-stream arrives as an `error` event.
  *
- * The preamble intentionally mirrors the POST route field-for-field (same
- * guards, same fail-soft reads) rather than sharing it: the two must never
- * disagree about what may generate, and a shared helper edited for streaming
- * could silently change what the send path checks.
+ * The *guards* intentionally mirror the POST route field-for-field rather than
+ * sharing it: the two must never disagree about what may generate, and a shared
+ * helper edited for streaming could silently change what the send path checks.
+ *
+ * The *context* is the opposite case and is shared (`loadStageOneExtras` +
+ * `toStageOneContext`). Duplicating it here did exactly what duplication does:
+ * this route drifted and stopped passing F220's extracted PDF text, so every
+ * draft written through the compose window — which streams — silently lost a
+ * client's uploaded documents while the POST route beside it kept them. What
+ * the model is told about a client is not a permission check, and the two
+ * paths have no business disagreeing about it.
  */
 const bodySchema = z.object({ draftId: z.uuid().optional() });
 
@@ -189,29 +197,7 @@ export async function POST(
     );
   }
 
-  const [
-    { data: contact, error: contactError },
-    { data: enrichment, error: enrichmentError },
-    { data: financialPeriod, error: financialError },
-  ] = await Promise.all([
-    supabase.from("contacts").select("id, first_name, last_name, job_title, email").eq("organisation_id", organisationId).order("is_primary", { ascending: false }).order("created_at", { ascending: true }).limit(1).maybeSingle(),
-    supabase.from("enrichment_results").select("mission_statement, mission_keywords, sector, sub_sector, news_hooks").eq("organisation_id", organisationId).order("enriched_at", { ascending: false }).limit(1).maybeSingle(),
-    supabase.from("financial_periods").select("income_band").eq("organisation_id", organisationId).order("period_end", { ascending: false }).limit(1).maybeSingle(),
-  ]);
-  if (contactError) await reportError(contactError, { operation: "outreach.stage_one.load_contact", organisationId });
-  if (enrichmentError) await reportError(enrichmentError, { operation: "outreach.stage_one.load_context", organisationId });
-  if (financialError) await reportError(financialError, { operation: "outreach.stage_one.load_financial_context", organisationId });
-
-  const { data: savedBooklet, error: bookletError } = await supabase
-    .from("client_booklets")
-    .select("booklet_text")
-    .eq("organisation_id", organisationId)
-    .order("generated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<{ booklet_text: string }>();
-  if (bookletError) {
-    await reportError(bookletError, { operation: "outreach.stage_one.load_booklet", organisationId });
-  }
+  const extras = await loadStageOneExtras(supabase, organisationId, "outreach.stage_one");
 
   let streamModel;
   let callModel;
@@ -237,11 +223,33 @@ export async function POST(
     );
   }
 
+  // F110 for first contact: a live lookup, but only when the CAM chose the
+  // news-hook opening — see stage-one-news.ts. Run before the stream opens so a
+  // slow provider costs a skeleton rather than a stalled token stream.
+  const news = await resolveStageOneNews({
+    opening: preferences.data.opening,
+    organisationId,
+    organisationName: organisation.legal_name,
+    tradingName: organisation.trading_name,
+    website: organisation.website,
+    city: organisation.city,
+    countryCode: organisation.country_code,
+    geographicReach: organisation.geographic_reach,
+    sector: organisation.sector,
+    storedHooks: extras.enrichment?.news_hooks,
+  });
+
   const actorId = authorization.actor.id;
-  const senderName = authorization.actor.fullName;
-  const contactRow = contact as { id: string; first_name: string | null; last_name: string | null; job_title: string | null; email: string | null } | null;
-  const enrichmentRow = enrichment as { mission_statement: string | null; mission_keywords: string[] | null; sector: string | null; sub_sector: string | null; news_hooks: string[] | null } | null;
-  const financialRow = financialPeriod as { income_band: "under_10k" | "10k_100k" | "100k_1m" | "over_1m" | null } | null;
+  const context = {
+    ...toStageOneContext({
+      organisation,
+      extras,
+      senderName: authorization.actor.fullName,
+      attachFlyer: preferences.data.attachFlyer,
+    }),
+    newsHooks: news.hooks,
+  };
+  const contactRow = extras.contact;
   const isRegeneration = draftId !== undefined;
 
   const stream = new ReadableStream({
@@ -256,32 +264,7 @@ export async function POST(
       try {
         const result = await streamStageOneDraft(
           organisationId,
-          {
-            organisationName: organisation.legal_name,
-            tradingName: organisation.trading_name,
-            organisationType: organisation.organisation_type,
-            website: organisation.website,
-            city: organisation.city,
-            countryCode: organisation.country_code,
-            geographicReach: organisation.geographic_reach,
-            incomeBand: financialRow?.income_band,
-            contactName: contactRow ? [contactRow.first_name, contactRow.last_name].filter(Boolean).join(" ") : null,
-            contactJobTitle: contactRow?.job_title,
-            // Same canonical-first mission resolution as the non-streaming
-            // route beside it: register purpose, then enrichment.
-            missionStatement: resolveMissionText({
-              charity_activities: organisation.charity_activities,
-              cic_community_statement: organisation.cic_community_statement,
-              enrichment_mission: enrichmentRow?.mission_statement,
-            }),
-            missionKeywords: enrichmentRow?.mission_keywords,
-            sector: organisation.sector?.trim() || enrichmentRow?.sector,
-            subSector: organisation.sub_sector?.trim() || enrichmentRow?.sub_sector,
-            newsHooks: enrichmentRow?.news_hooks,
-            booklet: savedBooklet?.booklet_text ?? null,
-            senderName,
-            attachFlyer: preferences.data.attachFlyer,
-          },
+          context,
           streamModel,
           (event) => send(event),
           { length: preferences.data.length, register: preferences.data.register, opening: preferences.data.opening, closing: preferences.data.closing },
@@ -292,7 +275,17 @@ export async function POST(
         const { data: message, error: draftError } = isRegeneration
           ? await supabase
               .from("outreach_messages")
-              .update({ subject: result.draft.subject, body: result.draft.body, attach_flyer: preferences.data.attachFlyer })
+              .update({
+                subject: result.draft.subject,
+                body: result.draft.body,
+                attach_flyer: preferences.data.attachFlyer,
+                // Rewritten on every regeneration, including back to null, so a
+                // regeneration that found no hook cannot keep the last one's
+                // article link on the row as if it were this draft's.
+                news_source: news.live ? "live" : null,
+                news_hook: news.live?.text ?? null,
+                news_url: news.live?.url ?? null,
+              })
               .eq("id", draftId)
               .eq("organisation_id", organisationId)
               .select("id")
@@ -307,6 +300,9 @@ export async function POST(
                 body: result.draft.body,
                 attach_flyer: preferences.data.attachFlyer,
                 send_status: "draft",
+                news_source: news.live ? "live" : null,
+                news_hook: news.live?.text ?? null,
+                news_url: news.live?.url ?? null,
               })
               .select("id")
               .single();

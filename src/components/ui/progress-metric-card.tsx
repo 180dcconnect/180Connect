@@ -22,6 +22,11 @@ import { PeriodSelect, ViewToggle, type PeriodOption } from "./metric-controls";
 // Re-exported so consumers import this file only.
 export type { SeriesPoint, MetricSeries, MetricAccent, ChartView, PeriodOption };
 
+export type FooterStat = {
+  label: string;
+  value: number | string;
+};
+
 export type CardSize = "sm" | "md" | "lg";
 
 export interface ProgressMetricCardProps {
@@ -43,12 +48,23 @@ export interface ProgressMetricCardProps {
   series?: MetricSeries[];
   defaultIndex?: number;
   size?: CardSize;
-  /** Show the secondary stats (peak / low / avg) in the footer. */
+  /** Show the secondary stats in the footer. */
   showStats?: boolean;
+  /**
+   * Custom footer stats to display on the right side of the footer instead of peak / low / avg.
+   * - "series": automatically shows the sum of every series after the first (e.g. replied, converted).
+   * - FooterStat[]: explicit list of label and value.
+   * - function: derives custom stats from the sliced visible series.
+   */
+  footerStats?: "series" | FooterStat[] | ((visibleSeries: MetricSeries[]) => FooterStat[]);
   /** Show the delta figure in the footer. */
   showDelta?: boolean;
   /** Show the bottom footer bar. If false, hides the line and all footer stats. */
   showFooter?: boolean;
+  /** Show Y-axis graduation scale and X-axis date labels on the chart. */
+  showAxes?: boolean;
+  showXAxis?: boolean;
+  showYAxis?: boolean;
   /** Offer a "Custom range" step in the period dropdown for exact dates. */
   allowCustomRange?: boolean;
   /** Value formatting. Default: compact in the headline, exact in the tooltip. */
@@ -147,8 +163,12 @@ export default function ProgressMetricCard({
   defaultIndex,
   size = "md",
   showStats = true,
+  footerStats: footerStatsProp,
   showDelta = true,
   showFooter = true,
+  showAxes = false,
+  showXAxis,
+  showYAxis,
   allowCustomRange = false,
   valueFormatter,
   dateFormatter,
@@ -234,6 +254,18 @@ export default function ProgressMetricCard({
       avg: vals.length ? sum / vals.length : 0,
     };
   }, [primary]);
+
+  const resolvedFooterStats = useMemo<FooterStat[]>(() => {
+    if (Array.isArray(footerStatsProp)) return footerStatsProp;
+    if (typeof footerStatsProp === "function") return footerStatsProp(visibleSeries);
+    if (footerStatsProp === "series") {
+      return visibleSeries.slice(1).map((s) => ({
+        label: s.footerLabel ?? s.name.replace(/^clients\s+/i, "").toLowerCase(),
+        value: s.data.reduce((acc, point) => acc + point.value, 0),
+      }));
+    }
+    return [];
+  }, [footerStatsProp, visibleSeries]);
 
   // A window that starts at zero has no percentage to quote — every growth is
   // infinite from nothing — so the change is stated as a count instead.
@@ -418,7 +450,11 @@ export default function ProgressMetricCard({
             defaultIndex={fallback}
             valueFormatter={fmtFull}
             dateFormatter={fmtDate}
+            compactFormatter={fmtCompact}
             bandTop={fullWidth ? 42 : undefined}
+            showAxes={showAxes}
+            showXAxis={showXAxis}
+            showYAxis={showYAxis}
             className="rounded-r-[inherit]"
           />
         </div>
@@ -511,23 +547,45 @@ export default function ProgressMetricCard({
             </div>
           )}
           {showStats && (
-            <div className="ml-auto flex items-center gap-2.5 text-[12px] text-muted-foreground">
-              <span>
-                <span className="font-medium text-foreground/80">{fmtCompact(stats.peak)}</span>{" "}
-                peak
-              </span>
-              <span className="opacity-40">·</span>
-              <span>
-                <span className="font-medium text-foreground/80">{fmtCompact(stats.low)}</span> low
-              </span>
-              <span className="opacity-40">·</span>
-              <span>
-                <span className="font-medium text-foreground/80">
-                  {fmtCompact(Math.round(stats.avg))}
-                </span>{" "}
-                avg
-              </span>
-            </div>
+            <motion.div
+              key={`stats-${selected.label}`}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.25 }}
+              className="ml-auto flex items-center gap-2.5 text-[12px] text-muted-foreground"
+            >
+              {resolvedFooterStats.length > 0 ? (
+                resolvedFooterStats.map((stat, idx) => (
+                  <span key={stat.label} className="flex items-center gap-2.5">
+                    {idx > 0 && <span className="opacity-40">·</span>}
+                    <span>
+                      <span className="font-medium text-foreground/80">
+                        {typeof stat.value === "number" ? fmtCompact(stat.value) : stat.value}
+                      </span>{" "}
+                      {stat.label}
+                    </span>
+                  </span>
+                ))
+              ) : (
+                <>
+                  <span>
+                    <span className="font-medium text-foreground/80">{fmtCompact(stats.peak)}</span>{" "}
+                    peak
+                  </span>
+                  <span className="opacity-40">·</span>
+                  <span>
+                    <span className="font-medium text-foreground/80">{fmtCompact(stats.low)}</span> low
+                  </span>
+                  <span className="opacity-40">·</span>
+                  <span>
+                    <span className="font-medium text-foreground/80">
+                      {fmtCompact(Math.round(stats.avg))}
+                    </span>{" "}
+                    avg
+                  </span>
+                </>
+              )}
+            </motion.div>
           )}
         </div>
       )}

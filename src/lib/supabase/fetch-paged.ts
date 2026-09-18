@@ -27,6 +27,20 @@ export type PagedResult<T, E = { message: string }> = {
   partial: T[];
 };
 
+export type FetchPagedOptions = {
+  /**
+   * How many 1000-row windows to request at once.
+   *
+   * The default, 1, walks the table one window after another — each request
+   * waits for the last, so a 2,800-row table costs three round trips back to
+   * back. A table known to run to a few thousand rows (organisations and what
+   * hangs off it) should ask for several at once: the whole table then arrives
+   * in one round, at the price of one empty window when the guess overshoots.
+   * Keep it small — every window is a query against the database.
+   */
+  pagesPerRound?: number;
+};
+
 /**
  * `E` defaults to PostgREST's `{ message }` — the shape reportError is given. A
  * caller that rethrows its error rather than reporting it can widen to
@@ -34,18 +48,28 @@ export type PagedResult<T, E = { message: string }> = {
  */
 export async function fetchPaged<T, E = { message: string }>(
   build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: E | null }>,
+  { pagesPerRound = 1 }: FetchPagedOptions = {},
 ): Promise<PagedResult<T, E>> {
-  const all: T[] = [];
-  let from = 0;
-  while (true) {
-    const { data, error } = await build(from, from + FETCH_STEP - 1);
-    if (error) return { data: null, error, partial: all };
-    if (!data || data.length === 0) break;
-    all.push(...data);
-    if (data.length < FETCH_STEP) break;
-    from += FETCH_STEP;
+  if (!Number.isInteger(pagesPerRound) || pagesPerRound < 1) {
+    throw new RangeError("pagesPerRound must be a whole number of at least 1");
   }
-  return { data: all, error: null, partial: all };
+
+  const all: T[] = [];
+  for (let from = 0; ; from += FETCH_STEP * pagesPerRound) {
+    const pages = await Promise.all(
+      Array.from({ length: pagesPerRound }, (_, page) =>
+        build(from + page * FETCH_STEP, from + (page + 1) * FETCH_STEP - 1),
+      ),
+    );
+    // Read in window order, so the rows keep the query's ordering and a failure
+    // in a later window still hands back every row before it.
+    for (const { data, error } of pages) {
+      if (error) return { data: null, error, partial: all };
+      if (!data || data.length === 0) return { data: all, error: null, partial: all };
+      all.push(...data);
+      if (data.length < FETCH_STEP) return { data: all, error: null, partial: all };
+    }
+  }
 }
 
 /**
@@ -58,6 +82,13 @@ export async function fetchPaged<T, E = { message: string }>(
  * own, larger size.
  */
 export const ID_CHUNK = 200;
+
+/**
+ * How many id chunks `fetchPagedForOrgs` reads at once. Enough that a CAM with a
+ * thousand clients does not wait on five requests in a row; few enough that one
+ * page load cannot open dozens of queries against a free-plan database.
+ */
+export const CHUNKS_PER_ROUND = 4;
 
 export function chunk<T>(items: readonly T[], size = ID_CHUNK): T[][] {
   if (size < 1) throw new RangeError("chunk size must be at least 1");
@@ -87,10 +118,18 @@ export async function fetchPagedForOrgs<T>(
   if (orgIds.length === 0) return { data: [], error: null, partial: [] };
 
   const all: T[] = [];
-  for (const ids of chunk(orgIds)) {
-    const { data, error } = await fetchPaged<T>((from, to) => build(ids, from, to));
-    if (error || !data) return { data: null, error, partial: all };
-    all.push(...data);
+  const chunks = chunk(orgIds);
+  for (let start = 0; start < chunks.length; start += CHUNKS_PER_ROUND) {
+    const results = await Promise.all(
+      chunks
+        .slice(start, start + CHUNKS_PER_ROUND)
+        .map((ids) => fetchPaged<T>((from, to) => build(ids, from, to))),
+    );
+    // Concatenated in chunk order, so the result matches a sequential read.
+    for (const { data, error } of results) {
+      if (error || !data) return { data: null, error, partial: all };
+      all.push(...data);
+    }
   }
   return { data: all, error: null, partial: all };
 }

@@ -120,6 +120,22 @@ export type TimelineEntry = {
  */
 export const UNKNOWN_ACTOR = "A former team member";
 
+/**
+ * Shown when an event had no person behind it at all: `audit_log.actor_user_id`
+ * is null because the platform itself made the change — a reply arriving moved
+ * the client to Responded, a follow-up went out on schedule, a silence window
+ * elapsed. Those rows used to fall through to UNKNOWN_ACTOR and read as "A
+ * former team member updated the pipeline status", which names a person who
+ * never existed and sends the reader looking for them. "The system" instead:
+ * the same words a CAM would use for something the app did on its own.
+ *
+ * A null actor means the system; a present actor whose name cannot be resolved
+ * means a person who has since gone. Only the actor position makes that
+ * distinction — an ownership `detail.from`/`detail.to` that is null is still a
+ * missing person, not the system.
+ */
+export const SYSTEM_ACTOR = "The system";
+
 export type NoteRow = {
   id: string;
   content: string;
@@ -169,11 +185,18 @@ export function collectReferencedUserIds(rows: readonly AuditRow[]): Set<string>
   const ids = new Set<string>();
   for (const row of rows) {
     if (row.actor_user_id) ids.add(row.actor_user_id);
+    // `detail` arrives as jsonb, so a malformed row can carry null rather
+    // than the object the type promises — treat that as "no references"
+    // rather than throwing the whole feed's name lookup away.
+    const detail =
+      row.detail && typeof row.detail === "object"
+        ? (row.detail as Record<string, unknown>)
+        : {};
     if (row.action === "ownership_reassigned") {
-      if (typeof row.detail.from === "string") ids.add(row.detail.from);
-      if (typeof row.detail.to === "string") ids.add(row.detail.to);
+      if (typeof detail.from === "string") ids.add(detail.from);
+      if (typeof detail.to === "string") ids.add(detail.to);
     }
-    if (typeof row.detail.requested_by === "string") ids.add(row.detail.requested_by);
+    if (typeof detail.requested_by === "string") ids.add(detail.requested_by);
   }
   return ids;
 }
@@ -183,6 +206,14 @@ function resolveName(id: string | null, names: ReadonlyMap<string, string | null
   if (!id) return UNKNOWN_ACTOR;
   const name = names.get(id);
   return name && name.trim() ? name : UNKNOWN_ACTOR;
+}
+
+/** The actor of an audit row: no actor at all is the platform, not a person. */
+function resolveActorName(
+  id: string | null,
+  names: ReadonlyMap<string, string | null>,
+): string {
+  return id ? resolveName(id, names) : SYSTEM_ACTOR;
 }
 
 function detailString(detail: Record<string, unknown>, key: string): string | null {
@@ -271,7 +302,7 @@ export function buildStatusChangedEntry(
     id: `status-${row.id}`,
     type: "status_changed",
     timestamp: row.created_at,
-    actorName: resolveName(row.actor_user_id, names),
+    actorName: resolveActorName(row.actor_user_id, names),
     summary: `Status changed from ${from ? formatOutreachStatus(from) : "—"} to ${
       to ? formatOutreachStatus(to) : "—"
     }.`,
@@ -299,7 +330,7 @@ export function buildOwnershipReassignedEntry(
     id: `ownership-${row.id}`,
     type: "ownership_reassigned",
     timestamp: row.created_at,
-    actorName: resolveName(row.actor_user_id, names),
+    actorName: resolveActorName(row.actor_user_id, names),
     summary: `Ownership moved from ${fromName} to ${toName}.`,
     handover: { fromName, toName, reason },
     source: { type: "audit_log", id: row.id },
@@ -340,7 +371,7 @@ export function buildEditSuggestionEntry(
     id: `edit-suggestion-${row.id}`,
     type: approved ? "edit_applied" : "edit_rejected",
     timestamp: row.created_at,
-    actorName: resolveName(row.actor_user_id, names),
+    actorName: resolveActorName(row.actor_user_id, names),
     summary,
     source: { type: "audit_log", id: row.id },
   };

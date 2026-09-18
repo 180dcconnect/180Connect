@@ -45,6 +45,11 @@ export type PreviousContactScoreResult = {
   hasPriorContact: boolean;
   /** True when the recency decay moved the score below its status base. */
   recencyApplied: boolean;
+  /** True when the status isn't one this scorer recognises — the only case
+   *  where the 0.5 it lands on means "no reading" rather than a real status
+   *  (loss_due_timing, initial_outreach_sent, follow_up_sent all land on 0.5
+   *  too, but each is a genuine, recognised status). */
+  unknownStatus: boolean;
 };
 
 /** Same neutral an unknown sector/geography gets elsewhere in this folder. */
@@ -103,6 +108,7 @@ export function scoreByPreviousContact(
       score: UNKNOWN_STATUS_SCORE,
       hasPriorContact: false,
       recencyApplied: false,
+      unknownStatus: true,
     };
   }
 
@@ -114,7 +120,7 @@ export function scoreByPreviousContact(
     !hasPriorContact ||
     !lastSent
   ) {
-    return { score: base, hasPriorContact, recencyApplied: false };
+    return { score: base, hasPriorContact, recencyApplied: false, unknownStatus: false };
   }
 
   // Clamp at zero so a future-dated timestamp (clock skew, seeded data) counts
@@ -128,5 +134,6 @@ export function scoreByPreviousContact(
     score,
     hasPriorContact,
     recencyApplied: recoveryRatio < 1,
+    unknownStatus: false,
   };
 }

@@ -3,14 +3,22 @@ import { describe, it } from "node:test";
 
 import {
   assignActionFailure,
+  assigneeOwnerNote,
   completeActionFailure,
   formatDueDate,
+  formatDueDateWithRelative,
   formatMyActions,
   formatTeamAssignedActions,
+  formatTeamTasks,
+  daysOverdue,
+  getOrdinalSuffix,
   groupMyActionsByDueDate,
   isActionOverdue,
   isAdminAssignedRow,
+  taskPriorityFromDb,
+  taskPriorityToDb,
   validateAssignAction,
+  validateUpdateTeamTask,
   type ActionRow,
   type TeamActionRow,
 } from "./actions.ts";
@@ -46,6 +54,8 @@ function teamRow(overrides: Partial<TeamActionRow> = {}): TeamActionRow {
     created_by_user_id: ADMIN_ID,
     assignee_user_id: OTHER_CAM_ID,
     created_at: "2026-08-01T10:00:00Z",
+    updated_at: "2026-08-02T10:00:00Z",
+    priority: 2,
     organisation: { legal_name: "1-1 Coco" },
     created_by_user: { full_name: "Priya Admin" },
     assignee: { full_name: "Sam CAM" },
@@ -73,6 +83,27 @@ describe("isActionOverdue", () => {
   });
 });
 
+describe("daysOverdue", () => {
+  const now = new Date("2026-08-31T09:00:00Z");
+
+  it("is 0 with no due date", () => {
+    assert.equal(daysOverdue(null, now), 0);
+  });
+
+  it("is 0 when due today", () => {
+    assert.equal(daysOverdue("2026-08-31", now), 0);
+  });
+
+  it("is 0 when due in the future", () => {
+    assert.equal(daysOverdue("2026-09-05", now), 0);
+  });
+
+  it("counts whole calendar days past due", () => {
+    assert.equal(daysOverdue("2026-08-30", now), 1);
+    assert.equal(daysOverdue("2026-08-17", now), 14);
+  });
+});
+
 describe("formatDueDate", () => {
   it("formats a due date without going through a timezone-sensitive Date parse", () => {
     assert.equal(formatDueDate("2026-08-30"), "30 Aug");
@@ -82,6 +113,58 @@ describe("formatDueDate", () => {
 
   it("returns the raw string for something that isn't a plain calendar date", () => {
     assert.equal(formatDueDate("not-a-date"), "not-a-date");
+  });
+});
+
+describe("getOrdinalSuffix", () => {
+  it("computes the correct ordinal suffix for days of the month", () => {
+    assert.equal(getOrdinalSuffix(1), "st");
+    assert.equal(getOrdinalSuffix(2), "nd");
+    assert.equal(getOrdinalSuffix(3), "rd");
+    assert.equal(getOrdinalSuffix(4), "th");
+    assert.equal(getOrdinalSuffix(11), "th");
+    assert.equal(getOrdinalSuffix(12), "th");
+    assert.equal(getOrdinalSuffix(13), "th");
+    assert.equal(getOrdinalSuffix(19), "th");
+    assert.equal(getOrdinalSuffix(21), "st");
+    assert.equal(getOrdinalSuffix(22), "nd");
+    assert.equal(getOrdinalSuffix(23), "rd");
+    assert.equal(getOrdinalSuffix(31), "st");
+  });
+});
+
+describe("formatDueDateWithRelative", () => {
+  const now = new Date("2026-09-16T12:00:00Z");
+
+  it("formats dates with ordinal, full month, year, and relative timing", () => {
+    assert.equal(
+      formatDueDateWithRelative("2026-09-19", now),
+      "19th September 2026 (in 3 days)",
+    );
+    assert.equal(
+      formatDueDateWithRelative("2026-09-17", now),
+      "17th September 2026 (tomorrow)",
+    );
+    assert.equal(
+      formatDueDateWithRelative("2026-09-16", now),
+      "16th September 2026 (today)",
+    );
+    assert.equal(
+      formatDueDateWithRelative("2026-09-15", now),
+      "15th September 2026 (yesterday)",
+    );
+    assert.equal(
+      formatDueDateWithRelative("2026-09-13", now),
+      "13th September 2026 (3 days ago)",
+    );
+    assert.equal(
+      formatDueDateWithRelative("2026-10-01", now),
+      "1st October 2026 (in 15 days)",
+    );
+  });
+
+  it("returns raw string if not a valid calendar date", () => {
+    assert.equal(formatDueDateWithRelative("invalid-date", now), "invalid-date");
   });
 });
 
@@ -95,6 +178,7 @@ describe("formatMyActions (F168)", () => {
     assert.equal(action?.organisationName, "1-1 Coco");
     assert.equal(action?.organisationId, "org-1");
     assert.equal(action?.title, "Send follow-up email");
+    assert.equal(action?.priority, "normal");
   });
 
   it("marks an action the CAM raised for themselves as self, not assigned", () => {
@@ -171,6 +255,23 @@ describe("formatMyActions (F168)", () => {
 
   it("returns an empty list when nothing is assigned", () => {
     assert.deepEqual(formatMyActions([], ACTOR_ID, now), []);
+  });
+});
+
+describe("task priorities", () => {
+  it("translates the database rank without exposing it to the UI", () => {
+    assert.equal(taskPriorityFromDb(1), "high");
+    assert.equal(taskPriorityFromDb(2), "normal");
+    assert.equal(taskPriorityFromDb(3), "low");
+    assert.equal(taskPriorityToDb("high"), 1);
+    assert.equal(taskPriorityToDb("normal"), 2);
+    assert.equal(taskPriorityToDb("low"), 3);
+  });
+
+  it("treats missing or unfamiliar legacy values as Normal", () => {
+    assert.equal(taskPriorityFromDb(undefined), "normal");
+    assert.equal(taskPriorityFromDb(null), "normal");
+    assert.equal(taskPriorityFromDb(99), "normal");
   });
 });
 
@@ -317,6 +418,54 @@ describe("formatTeamAssignedActions (F169 AC1/AC3)", () => {
   });
 });
 
+describe("formatTeamTasks", () => {
+  const now = new Date("2026-08-31T09:00:00Z");
+
+  it("keeps admin-assigned, self-created and system tasks in the team tracker", () => {
+    const tasks = formatTeamTasks(
+      [
+        teamRow({ id: "assigned" }),
+        teamRow({
+          id: "self",
+          created_by_user_id: OTHER_CAM_ID,
+          assignee_user_id: OTHER_CAM_ID,
+        }),
+        teamRow({ id: "system", created_by_user_id: null, created_by_user: null }),
+      ],
+      now,
+    );
+
+    assert.deepEqual(tasks.map((task) => task.origin), ["assigned", "self", "system"]);
+  });
+
+  it("shows an open task without an assignee as Unassigned", () => {
+    const [task] = formatTeamTasks(
+      [teamRow({ assignee_user_id: null, assignee: null })],
+      now,
+    );
+    assert.equal(task?.assigneeName, "Unassigned");
+  });
+
+  it("keeps the former-team-member explanation on closed work", () => {
+    const [task] = formatTeamTasks(
+      [teamRow({ status: "completed", assignee_user_id: null, assignee: null })],
+      now,
+    );
+    assert.equal(task?.assigneeName, "Former team member");
+  });
+
+  it("maps priority, overdue days and the concurrency timestamp", () => {
+    const [task] = formatTeamTasks(
+      [teamRow({ due_date: "2026-08-29", priority: 1 })],
+      now,
+    );
+    assert.equal(task?.priority, "high");
+    assert.equal(task?.isOverdue, true);
+    assert.equal(task?.daysOverdue, 2);
+    assert.equal(task?.updatedAt, "2026-08-02T10:00:00Z");
+  });
+});
+
 describe("validateAssignAction (F169 AC1)", () => {
   const validInput = {
     organisationId: "11111111-1111-4111-8111-111111111111",
@@ -332,6 +481,7 @@ describe("validateAssignAction (F169 AC1)", () => {
     if (result.success) {
       assert.equal(result.data.title, "Send updated proposal");
       assert.equal(result.data.dueDate, "2026-09-01");
+      assert.equal(result.data.priority, "normal");
     }
   });
 
@@ -371,13 +521,64 @@ describe("validateAssignAction (F169 AC1)", () => {
     assert.equal(result.success, false);
     if (!result.success) assert.match(result.message, /due date/i);
   });
+
+  it("rejects an impossible calendar date", () => {
+    const result = validateAssignAction({ ...validInput, dueDate: "2026-02-31" });
+    assert.equal(result.success, false);
+    if (!result.success) assert.match(result.message, /due date/i);
+  });
+
+  it("accepts a plain-English priority choice", () => {
+    const result = validateAssignAction({ ...validInput, priority: "high" });
+    assert.equal(result.success, true);
+    if (result.success) assert.equal(result.data.priority, "high");
+  });
+
+  it("rejects a priority outside the offered choices", () => {
+    const result = validateAssignAction({ ...validInput, priority: "urgent" });
+    assert.equal(result.success, false);
+    if (!result.success) assert.match(result.message, /High, Normal or Low/);
+  });
+});
+
+describe("validateUpdateTeamTask", () => {
+  const validInput = {
+    actionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    assigneeUserId: OTHER_CAM_ID,
+    title: "Call the client",
+    description: "Discuss the next steps.",
+    dueDate: "2026-09-18",
+    priority: "low",
+    expectedUpdatedAt: "2026-09-17T10:00:00Z",
+  };
+
+  it("accepts editable task fields while leaving the linked client out", () => {
+    const result = validateUpdateTeamTask(validInput);
+    assert.equal(result.success, true);
+    if (result.success) {
+      assert.equal(result.data.priority, "low");
+      assert.equal(result.data.title, "Call the client");
+    }
+  });
+
+  it("rejects an invalid priority", () => {
+    const result = validateUpdateTeamTask({ ...validInput, priority: "urgent" });
+    assert.equal(result.success, false);
+    if (!result.success) assert.match(result.message, /High, Normal or Low/);
+  });
+
+  it("rejects a stale or missing update timestamp before the RPC", () => {
+    const result = validateUpdateTeamTask({ ...validInput, expectedUpdatedAt: "" });
+    assert.equal(result.success, false);
+    if (!result.success) assert.match(result.message, /Refresh/);
+  });
 });
 
 describe("assignActionFailure (F169)", () => {
   it("maps a permission refusal to a clear message", () => {
     assert.deepEqual(assignActionFailure({ code: "42501", message: "denied" }), {
       status: 403,
-      error: "Only an admin can assign actions.",
+      error: "Only an administrator can assign tasks.",
     });
   });
 
@@ -400,5 +601,47 @@ describe("assignActionFailure (F169)", () => {
 
   it("hides a message-less error too", () => {
     assert.equal(assignActionFailure({ code: "42501", message: "  " }).status, 500);
+  });
+});
+
+/**
+ * The line under the assignee picker. It reports a difference, never blocks
+ * one — delegation to a non-owner is allowed — so every case here produces
+ * either the fact or nothing, and none of them produces a refusal.
+ */
+describe("assigneeOwnerNote (F169)", () => {
+  const base = {
+    assigneeUserId: OTHER_CAM_ID,
+    assigneeName: "Sam CAM",
+    clientOwnerId: ACTOR_ID,
+    clientOwnerName: "Dana Whitfield",
+  };
+
+  it("says nothing when the assignee owns the client", () => {
+    assert.equal(
+      assigneeOwnerNote({ ...base, clientOwnerId: OTHER_CAM_ID }),
+      "",
+    );
+  });
+
+  it("names both people when the assignee does not own the client", () => {
+    assert.equal(
+      assigneeOwnerNote(base),
+      "Sam CAM doesn't own this client — it's owned by Dana Whitfield.",
+    );
+  });
+
+  it("says nobody owns an unowned client, rather than blaming the assignee", () => {
+    assert.equal(
+      assigneeOwnerNote({ ...base, clientOwnerId: null, clientOwnerName: null }),
+      "No one owns this client yet.",
+    );
+  });
+
+  it("falls back when the owner's name did not come back with the row", () => {
+    assert.equal(
+      assigneeOwnerNote({ ...base, clientOwnerName: "  " }),
+      "Sam CAM doesn't own this client — it's owned by another team member.",
+    );
   });
 });

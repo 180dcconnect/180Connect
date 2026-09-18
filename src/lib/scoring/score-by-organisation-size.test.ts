@@ -15,24 +15,53 @@ describe("scoreByOrganisationSize — complete client data", () => {
     assert.equal(result.band, "10k_100k");
   });
 
-  it("classifies a £100k–£1m income as 100k_1m", () => {
-    const result = scoreByOrganisationSize(500_000);
-    assert.equal(result.band, "100k_1m");
+  it("classifies a £100k–£500k income as 100k_500k", () => {
+    const result = scoreByOrganisationSize(250_000);
+    assert.equal(result.band, "100k_500k");
   });
 
-  it("classifies an income over £1m as over_1m", () => {
+  it("classifies a £500k–£1m income as 500k_1m", () => {
+    const result = scoreByOrganisationSize(750_000);
+    assert.equal(result.band, "500k_1m");
+  });
+
+  it("classifies a £1m–£10m income as 1m_10m", () => {
     const result = scoreByOrganisationSize(5_000_000);
-    assert.equal(result.band, "over_1m");
+    assert.equal(result.band, "1m_10m");
   });
 
-  it("larger bands score higher than smaller ones", () => {
+  it("classifies a £10m–£50m income as 10m_50m", () => {
+    const result = scoreByOrganisationSize(25_000_000);
+    assert.equal(result.band, "10m_50m");
+  });
+
+  it("classifies a £50m–£100m income as 50m_100m", () => {
+    const result = scoreByOrganisationSize(75_000_000);
+    assert.equal(result.band, "50m_100m");
+  });
+
+  it("classifies an income over £100m as over_100m", () => {
+    const result = scoreByOrganisationSize(250_000_000);
+    assert.equal(result.band, "over_100m");
+  });
+
+  it("prioritises the 180DC sweet spot bands (£100k–£10m) and anchors over micro and massive global institutions", () => {
     const under10k = scoreByOrganisationSize(5_000);
     const tenToHundred = scoreByOrganisationSize(50_000);
-    const hundredToMillion = scoreByOrganisationSize(500_000);
-    const overMillion = scoreByOrganisationSize(5_000_000);
+    const emergingMid = scoreByOrganisationSize(250_000);
+    const establishedMid = scoreByOrganisationSize(750_000);
+    const large = scoreByOrganisationSize(5_000_000);
+    const anchor = scoreByOrganisationSize(25_000_000);
+    const national = scoreByOrganisationSize(75_000_000);
+    const mega = scoreByOrganisationSize(250_000_000);
+
     assert.ok(under10k.score < tenToHundred.score);
-    assert.ok(tenToHundred.score < hundredToMillion.score);
-    assert.ok(hundredToMillion.score < overMillion.score);
+    assert.ok(tenToHundred.score < emergingMid.score);
+    assert.ok(emergingMid.score <= establishedMid.score);
+    assert.ok(establishedMid.score >= large.score);
+    assert.ok(large.score > anchor.score);
+    assert.ok(anchor.score > national.score);
+    assert.ok(national.score > mega.score);
   });
 });
 
@@ -84,19 +113,59 @@ describe("scoreByOrganisationSize — boundary values", () => {
     assert.equal(result.band, "10k_100k");
   });
 
-  it("an income of £100,001 starts the 100k_1m band", () => {
+  it("an income of £100,001 starts the 100k_500k band", () => {
     const result = scoreByOrganisationSize(100_001);
-    assert.equal(result.band, "100k_1m");
+    assert.equal(result.band, "100k_500k");
   });
 
-  it("an income exactly at £1m stays in the 100k_1m band", () => {
+  it("an income exactly at £500k stays in the 100k_500k band", () => {
+    const result = scoreByOrganisationSize(500_000);
+    assert.equal(result.band, "100k_500k");
+  });
+
+  it("an income of £500,001 starts the 500k_1m band", () => {
+    const result = scoreByOrganisationSize(500_001);
+    assert.equal(result.band, "500k_1m");
+  });
+
+  it("an income exactly at £1m stays in the 500k_1m band", () => {
     const result = scoreByOrganisationSize(1_000_000);
-    assert.equal(result.band, "100k_1m");
+    assert.equal(result.band, "500k_1m");
   });
 
-  it("an income of £1,000,001 counts as over_1m", () => {
+  it("an income of £1,000,001 starts the 1m_10m band", () => {
     const result = scoreByOrganisationSize(1_000_001);
-    assert.equal(result.band, "over_1m");
+    assert.equal(result.band, "1m_10m");
+  });
+
+  it("an income exactly at £10m stays in the 1m_10m band", () => {
+    const result = scoreByOrganisationSize(10_000_000);
+    assert.equal(result.band, "1m_10m");
+  });
+
+  it("an income of £10,000,001 starts the 10m_50m band", () => {
+    const result = scoreByOrganisationSize(10_000_001);
+    assert.equal(result.band, "10m_50m");
+  });
+
+  it("an income exactly at £50m stays in the 10m_50m band", () => {
+    const result = scoreByOrganisationSize(50_000_000);
+    assert.equal(result.band, "10m_50m");
+  });
+
+  it("an income of £50,000,001 starts the 50m_100m band", () => {
+    const result = scoreByOrganisationSize(50_000_001);
+    assert.equal(result.band, "50m_100m");
+  });
+
+  it("an income exactly at £100m stays in the 50m_100m band", () => {
+    const result = scoreByOrganisationSize(100_000_000);
+    assert.equal(result.band, "50m_100m");
+  });
+
+  it("an income of £100,000,001 counts as over_100m", () => {
+    const result = scoreByOrganisationSize(100_000_001);
+    assert.equal(result.band, "over_100m");
   });
 
   it("zero income is valid data, not missing data", () => {

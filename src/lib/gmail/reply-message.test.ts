@@ -101,6 +101,32 @@ test("strips a Gmail-style quoted chain, keeping the client's own words", () => 
   assert.doesNotMatch(stripped, /I am reaching out about/);
 });
 
+test("strips a quoted chain whose Gmail attribution line wrapped", () => {
+  // Gmail's text/plain part hard-wraps at ~76 characters, so a long sender
+  // name and address split "On ... wrote:" across two lines. Seen on staging.
+  const stripped = stripQuotedReply(
+    [
+      "Sounds good, Tuesday works for us.",
+      "",
+      "On Mon, Sep 14, 2026 at 3:51 PM 180 Degrees Sheffield <",
+      "clients.sheffield@180dc.org> wrote:",
+      "",
+      "> Hi Sarah,",
+      "> Would Tuesday suit you?",
+      "",
+      "--",
+      "Email <sheffield@180dc.org> - Website <https://www.180dc.org/>",
+    ].join("\n"),
+  );
+
+  assert.equal(stripped, "Sounds good, Tuesday works for us.");
+});
+
+test("does not cut at a sentence that merely starts with On", () => {
+  const plain = "On Tuesday we are free.\nPlease send a calendar invite.\nThanks";
+  assert.equal(stripQuotedReply(plain), plain);
+});
+
 test("keeps an inline reply that sits below quoted lines", () => {
   // The reason this cuts at an attribution header and then drops quoted lines,
   // rather than cutting at the first ">": an inline reply interleaves, and

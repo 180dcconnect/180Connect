@@ -70,6 +70,53 @@ describe("fetchPaged", () => {
 
     assert.deepEqual(partial, data);
   });
+
+  it("asks for several windows at once when told the table is large", async () => {
+    const source = pageSource(FETCH_STEP * 2 + 7);
+    const { data } = await fetchPaged<number>(source.build, { pagesPerRound: 4 });
+
+    // Three windows hold the rows; the fourth was requested in the same round
+    // and is the overshoot the option trades for a single round trip.
+    assert.deepEqual(
+      source.calls.map((call) => call.from),
+      [0, FETCH_STEP, FETCH_STEP * 2, FETCH_STEP * 3],
+    );
+    assert.equal(data?.length, FETCH_STEP * 2 + 7);
+    // Rows come back in window order, not in whatever order the requests settled.
+    assert.deepEqual(data, Array.from({ length: FETCH_STEP * 2 + 7 }, (_, i) => i));
+  });
+
+  it("starts another round only when every window in the last one was full", async () => {
+    const source = pageSource(FETCH_STEP * 3 + 1);
+    const { data } = await fetchPaged<number>(source.build, { pagesPerRound: 2 });
+
+    assert.equal(data?.length, FETCH_STEP * 3 + 1);
+    assert.deepEqual(
+      source.calls.map((call) => call.from),
+      [0, FETCH_STEP, FETCH_STEP * 2, FETCH_STEP * 3],
+    );
+  });
+
+  it("keeps the rows before a failing window of a parallel round in `partial`", async () => {
+    const { data, error, partial } = await fetchPaged<number>(
+      (from) =>
+        from === 0
+          ? Promise.resolve({ data: Array.from({ length: FETCH_STEP }, () => 1), error: null })
+          : Promise.resolve({ data: null, error: { message: "boom" } }),
+      { pagesPerRound: 3 },
+    );
+
+    assert.equal(data, null);
+    assert.deepEqual(error, { message: "boom" });
+    assert.equal(partial.length, FETCH_STEP);
+  });
+
+  it("rejects a round size that would never request anything", async () => {
+    await assert.rejects(
+      fetchPaged<number>(pageSource(1).build, { pagesPerRound: 0 }),
+      RangeError,
+    );
+  });
 });
 
 describe("chunk", () => {

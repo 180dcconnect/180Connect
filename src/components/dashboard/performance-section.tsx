@@ -11,13 +11,14 @@ import {
   isoDayUTC,
   performanceForPeriod,
   sectorPerformance,
+  type FunnelTrendSeries,
   type PerformanceInput,
   type PerformanceSummary,
   type SectorPerformanceRow,
   type TeamUserRow,
   type WeeklyCount,
 } from "@/lib/performance-metrics";
-import ProgressMetricCard from "@/components/ui/progress-metric-card";
+import SeriesLineChartCard from "@/components/ui/series-line-chart-card";
 import { StackedStickColumns, type StackedStickBucket } from "@/components/ui/stacked-stick-columns";
 import { PeriodSelect, type PeriodOption } from "@/components/ui/metric-controls";
 
@@ -30,6 +31,8 @@ import { PeriodSelect, type PeriodOption } from "@/components/ui/metric-controls
  * Who can pick a specific person: admins and viewers (matrix §3.1 read the whole
  * directory; the product rule is that CAMs see the team and themselves, while
  * oversight roles can drill into anyone). CAMs get only the two-way toggle.
+ * Viewers cannot send outreach, so they see "Whole team" and the CAM picker,
+ * with no "Just me" option.
  */
 
 type Scope = { kind: "team" } | { kind: "me" } | { kind: "cam"; userId: string };
@@ -42,11 +45,15 @@ export interface PerformanceSectionProps {
   actorRole: string;
   /** Daily cumulative conversion-rate points over the trailing 90 days. */
   trend: GrowthPoint[];
+  /**
+   * Daily distinct-client counts (contacted / replied / converted) over the
+   * trailing year. Feeds the funnel chart; team-wide like `trend` — the scope
+   * picker re-derives the tiles, not this chart.
+   */
+  funnel?: FunnelTrendSeries | null;
   sectors: SectorPerformanceRow[];
   /** Per-user sector performance breakdowns, keyed by user ID. */
   sectorsByUser?: Record<string, SectorPerformanceRow[]>;
-  /** Per-user conversion rate trends, keyed by user ID. */
-  trendByUser?: Record<string, GrowthPoint[]>;
   /** Raw 90-day window rows — when present the tiles/trend/sectors are re-derived
    *  client-side for the picked period (vs prior period), so custom calendars
    *  stay instant and never round-trip. */
@@ -55,8 +62,11 @@ export interface PerformanceSectionProps {
   className?: string;
 }
 
-function pct(value: number): string {
-  return `${Math.round(value * 100)}%`;
+/** A rate as a whole percentage. Null — nothing to divide by — reads as `—`,
+ *  never 0%: "contacted nobody" and "contacted everyone and got nothing" are
+ *  different findings. */
+function pct(value: number | null): string {
+  return value === null ? "—" : `${Math.round(value * 100)}%`;
 }
 
 function getPercentageChange(thisWeek: number, lastWeek: number) {
@@ -288,9 +298,11 @@ function CamPicker({
 function ScopeToggle({
   scope,
   onScope,
+  showJustMe = true,
 }: {
   scope: Scope;
   onScope: (scope: Scope) => void;
+  showJustMe?: boolean;
 }) {
   const item = (kind: Scope["kind"], label: string) => {
     const isSelected =
@@ -319,7 +331,7 @@ function ScopeToggle({
   return (
     <div className="flex items-center gap-0.5 rounded-full bg-black/[0.05] p-0.5 backdrop-blur-sm">
       {item("team", "Whole team")}
-      {item("me", "Just me")}
+      {showJustMe && item("me", "Just me")}
     </div>
   );
 }
@@ -330,18 +342,22 @@ export function PerformanceSection({
   actorId,
   actorRole,
   trend,
+  funnel,
   sectors,
   sectorsByUser,
-  trendByUser,
   raw,
   sectorByOrg,
   className = "",
 }: PerformanceSectionProps) {
   const canPickCam = actorRole === "admin" || actorRole === "viewer";
+  const canShowJustMe = actorRole !== "viewer";
   const [scope, setScope] = useState<Scope>({ kind: "team" });
   const [pickedCamId, setPickedCamId] = useState<string | null>(null);
 
   const applyScope = (next: Scope) => {
+    if (!canShowJustMe && next.kind === "me") {
+      next = { kind: "team" };
+    }
     setScope(next);
     if (next.kind !== "cam") setPickedCamId(null);
   };
@@ -393,14 +409,14 @@ export function PerformanceSection({
   const effectiveSummary = periodSummary ?? summary;
 
   const person =
-    scope.kind === "me"
+    scope.kind === "me" && canShowJustMe
       ? (effectiveSummary.people.get(actorId) ?? null)
       : scope.kind === "cam"
         ? (effectiveSummary.people.get(scope.userId) ?? null)
         : null;
 
   const scopeLabel =
-    scope.kind === "team"
+    scope.kind === "team" || (!canShowJustMe && scope.kind === "me")
       ? "Whole team"
       : scope.kind === "me"
         ? "Your performance"
@@ -416,29 +432,13 @@ export function PerformanceSection({
       const toMs = Date.parse(`${selected.to}T00:00:00Z`) + 24 * 60 * 60 * 1000;
       const days = Math.max(1, Math.round((toMs - fromMs) / (24 * 60 * 60 * 1000)));
       const filterId =
-        scope.kind === "me" ? actorId : scope.kind === "cam" ? scope.userId : undefined;
+        scope.kind === "me" && canShowJustMe ? actorId : scope.kind === "cam" ? scope.userId : undefined;
       return sectorPerformance(raw, sectorByOrg, days, new Date(`${selected.to}T00:00:00Z`), filterId);
     }
-    if (scope.kind === "me" && sectorsByUser) return sectorsByUser[actorId] ?? [];
+    if (scope.kind === "me" && canShowJustMe && sectorsByUser) return sectorsByUser[actorId] ?? [];
     if (scope.kind === "cam" && sectorsByUser) return sectorsByUser[scope.userId] ?? [];
     return sectors;
-  }, [raw, sectorByOrg, selected, scope, actorId, sectors, sectorsByUser]);
-
-  const baseTrend = useMemo(() => {
-    if (scope.kind === "me" && trendByUser) return trendByUser[actorId] ?? [];
-    if (scope.kind === "cam" && trendByUser) return trendByUser[scope.userId] ?? [];
-    return trend;
-  }, [scope, actorId, trend, trendByUser]);
-
-  const currentTrend = useMemo(() => {
-    if (!selected.from || !selected.to) return baseTrend;
-    return baseTrend.filter((p) => p.date >= selected.from! && p.date <= selected.to!);
-  }, [baseTrend, selected]);
-
-  // The trend card's headline is the *current* cumulative rate — the series'
-  // last point — not a sum of daily rates.
-  const currentRate = currentTrend.length > 0 ? currentTrend[currentTrend.length - 1].value : 0;
-  const formatRate = (value: number) => `${(value * 100).toFixed(1)}%`;
+  }, [raw, sectorByOrg, selected, scope, actorId, canShowJustMe, sectors, sectorsByUser]);
 
   const visibleSectors = currentSectors.slice(0, 8);
   const hiddenSectors = currentSectors.length - visibleSectors.length;
@@ -477,7 +477,11 @@ export function PerformanceSection({
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <ScopeToggle scope={scope} onScope={(next) => applyScope(next)} />
+        <ScopeToggle
+          scope={scope}
+          onScope={(next) => applyScope(next)}
+          showJustMe={canShowJustMe}
+        />
         <PeriodSelect
           value={selected.label}
           options={periodOptions}
@@ -537,20 +541,40 @@ export function PerformanceSection({
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        <ProgressMetricCard
-          title="Conversion rate trend"
-          total={formatRate(currentRate)}
-          deltaLabel=""
-          data={currentTrend}
-          valueFormatter={formatRate}
+        {/*
+         * Funnel trend: distinct clients contacted, replied and converted over
+         * time, as three lines against real axes — counts up the left, dates
+         * along the bottom.
+         *
+         * It is a chart card, not a KPI tile: the plot spans the card and each
+         * line carries its own figure and change above it. The card it replaced
+         * put one large number over the top of three series, which could only
+         * ever have described one of them, and pushed its y-axis to the right
+         * because the plot only occupied the right-hand 62% of the card.
+         *
+         * The window is the reader's: 30 days of daily points, 90 days or a
+         * year bucketed into weeks so three lines stay legible, or any custom
+         * range inside the year of daily points the server sent.
+         */}
+        <SeriesLineChartCard
+          title="Contacted, replied, converted"
+          subtitle="Clients reached at each stage"
+          unit="clients"
+          toggleId="funnel-view-toggle"
+          series={[
+            { name: "Contacted", data: funnel?.contacted ?? [] },
+            { name: "Replied", data: funnel?.replied ?? [] },
+            { name: "Converted", data: funnel?.converted ?? [] },
+          ]}
+          period="Past 30 days"
           periodOptions={[
             { label: "Past 30 days", points: 30 },
-            { label: "Past 90 days" },
+            { label: "Past 90 days", points: 90 },
+            { label: "Past 12 months", points: 365 },
           ]}
-          showDelta={false}
-          showStats
-          size="md"
-          className="min-h-[300px]"
+          allowCustomRange
+          emptyMessage="No outreach in this window yet — the three lines appear with the first email sent."
+          className="min-h-[380px]"
         />
 
         <div className="flex min-h-[300px] flex-col rounded-[28px] border border-border bg-card p-6 shadow-[0_2px_10px_rgba(0,0,0,0.04)]">
@@ -573,7 +597,7 @@ export function PerformanceSection({
                 <span>Sector</span>
                 <span className="text-right">Sent</span>
                 <span className="text-right">Reply</span>
-                <span className="hidden text-right sm:block">Conv.</span>
+                <span className="hidden text-right sm:block">Win</span>
               </div>
               <ul className="divide-y divide-black/[0.04]">
                 {visibleSectors.map((row) => (
@@ -585,7 +609,7 @@ export function PerformanceSection({
                     <span className="text-right text-foreground/70">{row.emailsSent.toLocaleString()}</span>
                     <span className="text-right text-foreground/70">{pct(row.replyRate)}</span>
                     <span className="hidden text-right font-semibold text-foreground sm:block">
-                      {pct(row.conversionRate)}
+                      {pct(row.winRate)}
                     </span>
                   </li>
                 ))}

@@ -85,7 +85,13 @@ export function containsRedactionPlaceholder(
   value: string | null | undefined,
 ): boolean {
   if (!value) return false;
-  return value.includes(REDACTED_EMAIL) || value.includes(REDACTED_PHONE);
+  return (
+    value.includes(REDACTED_EMAIL) ||
+    value.includes(REDACTED_PHONE) ||
+    value.includes("[redacted]") ||
+    /\[redacted(?::[^\]]+)?\]/i.test(value) ||
+    value.trim().toLowerCase() === "redacted"
+  );
 }
 
 /**

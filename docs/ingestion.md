@@ -237,7 +237,7 @@ A run with everything at zero is a normal weekly outcome, not a fault.
    CHECK constraint and the list inside `record_field_source()`. Missing this is
    why bulk-imported charities recorded no provenance for weeks: the write is
    best-effort, so it failed silently.
-6. Add a label to `SOURCE_LABELS` in `src/app/admin/import-status/run-format.ts`,
+6. Add a label to `SOURCE_LABELS` in `src/app/(app)/admin/import-status/run-format.ts`,
    or the source shows on screen as a raw token.
 
 ---

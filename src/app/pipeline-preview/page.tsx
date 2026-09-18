@@ -7,11 +7,11 @@
  * funnel at full stretch, every stage carrying weight.
  */
 
-import { PipelineReport } from "../clients/pipeline-report";
+import { PipelineReport } from "../(app)/clients/pipeline-report";
 import {
   FUNNEL_STAGE_KEYS,
   type FunnelStageKey,
-} from "../clients/client-insights";
+} from "../(app)/clients/client-insights";
 
 const COUNTS: Record<FunnelStageKey, number> = {
   all: 2000,

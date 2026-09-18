@@ -140,6 +140,26 @@ export function latestTotalIncome(
 }
 
 /**
+ * Whether a factor's value is a real reading or a stand-in for "nothing to go
+ * on" — distinct from the value itself, since several factors land on the same
+ * neutral 0.5 for both a genuine "checked, found nothing" outcome and a plain
+ * "never had the data" one. The breakdown UI uses this to stop rendering "No
+ * reading on this parameter" over a value that was actually computed from real
+ * data (a sector that matched the taxonomy, a status the scorer recognises,
+ * and so on).
+ *
+ * partnershipHistory is deliberately not here: F092's own AC2 treats "never
+ * checked" and "checked, confirmed zero grants" as the same thing on purpose,
+ * so collapsing them in the UI is the intended behaviour, not a gap.
+ */
+export type FactorReadings = {
+  sector: boolean;
+  geography: boolean;
+  size: boolean;
+  previousContact: boolean;
+};
+
+/**
  * The five normalised factors for one organisation. Exported because the
  * backfill reports which factors were carrying real signal versus standing at
  * neutral — the honest way to show a stakeholder why two clients score alike.
@@ -151,23 +171,47 @@ export function priorityFactorsFor(
   // defaults, which is every caller from before score settings owned these.
   rules?: ScoringRules,
 ): PriorityFactors {
+  const { factors } = scoreAndReadingsFor(org, priorityRegions, rules);
+  return factors;
+}
+
+/** Like priorityFactorsFor, plus whether each factor is a real reading. */
+export function scoreAndReadingsFor(
+  org: ScoreableOrganisation,
+  priorityRegions: readonly string[] = BRANCH_PRIORITY_REGIONS,
+  rules?: ScoringRules,
+): { factors: PriorityFactors; readings: FactorReadings } {
+  // F089 — the sector scorer's own neutral covers both "no sector recorded"
+  // and "free text matching nothing"; only matchedTaxonomy means a reading.
+  const sector = scoreBySector(org.sector ?? null, rules?.sectorScores);
+  const geography = scoreByGeography(
+    org.city,
+    priorityRegions,
+    rules
+      ? { inside: rules.geography.insideScore, outside: rules.geography.outsideScore }
+      : undefined,
+  );
+  const size = scoreByOrganisationSize(latestTotalIncome(org), rules?.sizeScores);
+  const partnershipHistory = scoreByPartnershipHistory(org.matched_grant_count);
+  const previousContact = scoreByPreviousContact(
+    org.outreach_status,
+    org.last_contacted_at,
+  );
+
   return {
-    // F089 — the sector scorer's own neutral covers both "no sector recorded"
-    // and "free text matching nothing"; this layer just passes the value through.
-    sector: scoreBySector(org.sector ?? null, rules?.sectorScores).score,
-    geography: scoreByGeography(
-      org.city,
-      priorityRegions,
-      rules
-        ? { inside: rules.geography.insideScore, outside: rules.geography.outsideScore }
-        : undefined,
-    ).score,
-    size: scoreByOrganisationSize(latestTotalIncome(org), rules?.sizeScores).score,
-    partnershipHistory: scoreByPartnershipHistory(org.matched_grant_count).score,
-    previousContact: scoreByPreviousContact(
-      org.outreach_status,
-      org.last_contacted_at,
-    ).score,
+    factors: {
+      sector: sector.score,
+      geography: geography.score,
+      size: size.score,
+      partnershipHistory: partnershipHistory.score,
+      previousContact: previousContact.score,
+    },
+    readings: {
+      sector: sector.matchedTaxonomy,
+      geography: !geography.usedDefault && !geography.noPreferenceSet,
+      size: !size.usedDefault,
+      previousContact: !previousContact.unknownStatus,
+    },
   };
 }
 
@@ -190,6 +234,7 @@ export type ComputedScore = {
   score: number;
   band: PriorityBand;
   factors: PriorityFactors;
+  readings: FactorReadings;
   weights: ScoutWeights;
 };
 
@@ -201,7 +246,7 @@ export function computePriorityScore(
 ): ComputedScore {
   const effectiveWeights =
     weights === undefined ? sanitizeWeights(undefined) : sanitizeWeights(weights);
-  const factors = priorityFactorsFor(org, priorityRegions, rules);
+  const { factors, readings } = scoreAndReadingsFor(org, priorityRegions, rules);
   const score = calculatePriorityScore(factors, effectiveWeights);
-  return { score, band: bandForScore(score), factors, weights: effectiveWeights };
+  return { score, band: bandForScore(score), factors, readings, weights: effectiveWeights };
 }

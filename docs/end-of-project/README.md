@@ -69,3 +69,6 @@ the next export.
   outreach relationship history; the API integration (#239) is deferred per
   PRD §5.3 and the replacement is a one-off CSV migration plus a Monday
   retirement date. Parked 10 September 2026.
+- [`your-actions-card-gaps.md`](your-actions-card-gaps.md) — no mark-done from
+  the dashboard card, and no team-wide view for admins (both need a product
+  decision first). Found reviewing the card end-to-end, 17 September 2026.

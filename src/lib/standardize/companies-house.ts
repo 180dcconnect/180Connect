@@ -99,6 +99,32 @@ function deriveCompaniesHouseOrganisationType(
   return "company";
 }
 
+const COMPANY_SECTOR_RULES = [
+  { codes: ["88910"], sector: "Youth & Children" },
+  { codes: ["91020", "91030"], sector: "Heritage & Museums" },
+  { codes: ["91040", "38320", "39000"], sector: "Environment & Conservation" },
+  { codes: ["91011", "91012"], sector: "Arts & Culture" },
+  { codes: ["86", "87", "88"], sector: "Health & Social Care" },
+  { codes: ["85"], sector: "Education & Training" },
+  { codes: ["90"], sector: "Arts & Culture" },
+  { codes: ["93"], sector: "Sports & Recreation" },
+] as const;
+
+export function companiesHouseSector(sicCodes: unknown): string | null {
+  if (!Array.isArray(sicCodes)) return null;
+  const codes = sicCodes
+    .filter((code): code is string => typeof code === "string")
+    .map((code) => code.trim())
+    .filter((code) => /^\d{5}$/.test(code));
+
+  for (const rule of COMPANY_SECTOR_RULES) {
+    if (rule.codes.some((prefix) => codes.some((code) => code.startsWith(prefix)))) {
+      return rule.sector;
+    }
+  }
+  return null;
+}
+
 export function standardizeCompaniesHouseRecord(
   raw: RawCompaniesHouseRecord,
 ): StandardOrganisation {

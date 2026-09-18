@@ -49,11 +49,12 @@ import {
   discardEmailDraft,
   scheduleReviewedEmail,
   sendReviewedEmail,
-} from "@/app/clients/[id]/outreach-actions";
+} from "@/app/(app)/clients/[id]/outreach-actions";
 import { createClient as createBrowserSupabase } from "@/lib/supabase/browser";
 import { composeBodyToHtml } from "@/lib/outreach/compose-body-html";
 import type { PendingSendRequest } from "@/components/inbox/gmail-compose-modal";
 import {
+  REPLY_CLOSING_APPROACH_LABELS,
   REPLY_CLOSING_APPROACHES,
   EMAIL_LENGTHS,
   EMAIL_REGISTER_LABELS,
@@ -130,14 +131,7 @@ const EMAIL_LENGTH_LABELS: Record<EmailLength, string> = {
  * generic "is support useful?" question read wrong, so the picker offers
  * closes that answer or advance what was actually said.
  */
-const CLOSING_APPROACH_LABELS: Record<ReplyClosingApproach, string> = {
-  soft_cta: "Soft invitation",
-  answer_next_step: "Answer + next step",
-  clarifying_question: "Ask a question",
-  short_call: "Suggest a short call",
-  graceful_close: "Graceful close",
-  referral_next_step: "Follow up on referral",
-};
+const CLOSING_APPROACH_LABELS = REPLY_CLOSING_APPROACH_LABELS;
 
 export type ReplyDraftInitial = {
   id: string;
@@ -444,7 +438,7 @@ export function ReplyComposer({
     }, 50);
   }
 
-  async function generate() {
+  async function generate(options?: { skipNews?: boolean }) {
     setIsAiGenerating(true);
     setError(null);
     setWarning(null);
@@ -459,6 +453,7 @@ export function ReplyComposer({
         register,
         closing,
         replyEventId,
+        skipNews: options?.skipNews,
       });
       if (!outcome.ok) {
         setIsAiGenerating(false);
@@ -727,16 +722,26 @@ export function ReplyComposer({
     <section aria-labelledby="reply-composer-heading" className={className}>
 
       {draft?.newsSource === "live" && draft?.newsUrl && (
-        <div className="mt-2 flex items-center gap-1.5 text-[12px] text-dim">
-          <span>Referenced news hook:</span>
-          <a
-            href={draft.newsUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-lead hover:underline truncate max-w-md"
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-inset border border-rule bg-paper px-3 py-2 text-[12px] text-dim">
+          <div className="flex min-w-0 items-center gap-1.5 truncate">
+            <span className="shrink-0 font-medium text-ink">News story:</span>
+            <a
+              href={draft.newsUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-lead hover:underline truncate"
+            >
+              {draft.newsHook ?? draft.newsUrl}
+            </a>
+          </div>
+          <button
+            type="button"
+            onClick={() => void generate({ skipNews: true })}
+            disabled={isAiGenerating}
+            className="shrink-0 font-medium text-dim transition-colors hover:text-stop cursor-pointer"
           >
-            {draft.newsHook ?? draft.newsUrl}
-          </a>
+            Rewrite without news
+          </button>
         </div>
       )}
 

@@ -8,7 +8,12 @@ import { cn } from "@/lib/utils";
 export type SeriesPoint = { value: number; date: string };
 
 /** A named series, optionally pinned to its own accent colour. */
-export type MetricSeries = { name: string; data: SeriesPoint[]; accent?: MetricAccent };
+export type MetricSeries = {
+  name: string;
+  data: SeriesPoint[];
+  accent?: MetricAccent;
+  footerLabel?: string;
+};
 
 export type MetricAccent = "emerald" | "rose" | "neutral" | "brand";
 
@@ -56,6 +61,17 @@ export function formatPointDate(date: string): string {
   return `${get("day")} ${get("month")}, ${get("year")}`;
 }
 
+const AXIS_DAY_LABEL = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  timeZone: "UTC",
+});
+
+export function formatAxisDate(date: string): string {
+  if (!ISO_DAY.test(date)) return date;
+  return AXIS_DAY_LABEL.format(new Date(`${date}T00:00:00Z`));
+}
+
 /** 1_240 → "1.2K". Used for the headline and the peak/low/avg footer. */
 export function formatCompact(value: number): string {
   const abs = Math.abs(value);
@@ -80,11 +96,6 @@ const BAND_BOTTOM = 100;
 // short read as if the series ended a day early.
 const X_INSET_LEFT = 3;
 const X_INSET_RIGHT = 0;
-
-const toX = (i: number, len: number) =>
-  len <= 1
-    ? 50
-    : X_INSET_LEFT + (i / (len - 1)) * (100 - X_INSET_LEFT - X_INSET_RIGHT);
 
 const NUM_SPLINE_SAMPLES = 32;
 
@@ -234,29 +245,45 @@ function sampleMonotoneSplinePath(
   return { line, fill };
 }
 
-export function MetricChart({
-  series,
-  view,
-  defaultIndex,
-  valueFormatter,
-  dateFormatter,
-  bandBottom = BAND_BOTTOM,
-  bandTop = BAND_TOP,
-  className,
-}: {
+export interface MetricChartProps {
   series: ChartSeries[];
   view: ChartView;
   /** Point the cursor rests on when nothing is hovered. */
   defaultIndex: number;
   valueFormatter: (value: number) => string;
   dateFormatter: (date: string) => string;
+  compactFormatter?: (value: number) => string;
   bandBottom?: number;
   bandTop?: number;
+  showAxes?: boolean;
+  showXAxis?: boolean;
+  showYAxis?: boolean;
   className?: string;
-}) {
+}
+
+export function MetricChart({
+  series,
+  view,
+  defaultIndex,
+  valueFormatter,
+  dateFormatter,
+  compactFormatter = formatCompact,
+  bandBottom: bandBottomProp,
+  bandTop: bandTopProp,
+  showAxes = false,
+  showXAxis: showXAxisProp,
+  showYAxis: showYAxisProp,
+  className,
+}: MetricChartProps) {
   const rawId = useId().replace(/:/g, "");
   const [hovered, setHovered] = useState<number | null>(null);
   const [hasEnteredView, setHasEnteredView] = useState(false);
+
+  const showXAxis = showXAxisProp ?? showAxes;
+  const showYAxis = showYAxisProp ?? showAxes;
+  const bandTop = bandTopProp ?? BAND_TOP;
+  const bandBottom = bandBottomProp ?? (showXAxis ? 84 : BAND_BOTTOM);
+  const xInsetRight = showYAxis ? 6 : X_INSET_RIGHT;
 
   const length = series[0]?.data.length ?? 0;
   const active = Math.min(Math.max(hovered ?? defaultIndex, 0), Math.max(length - 1, 0));
@@ -267,11 +294,44 @@ export function MetricChart({
     if (!values.length) return { min: 0, max: 1 };
     const lo = Math.min(...values);
     const hi = Math.max(...values);
-    return hi === lo ? { min: lo - 1, max: hi + 1 } : { min: lo, max: hi };
-  }, [series]);
+    const baseline = showYAxis && lo >= 0 ? 0 : lo;
+    return hi === baseline ? { min: baseline, max: baseline + 1 } : { min: baseline, max: hi };
+  }, [series, showYAxis]);
+
+  const toX = (i: number, len: number) =>
+    len <= 1
+      ? 50
+      : X_INSET_LEFT + (i / (len - 1)) * (100 - X_INSET_LEFT - xInsetRight);
 
   const toY = (value: number) =>
     bandBottom - ((value - min) / (max - min)) * (bandBottom - bandTop);
+
+  const yTicks = useMemo(() => {
+    if (!showYAxis) return [];
+    if (max <= min) return [min];
+    const diff = max - min;
+    const mid = min + diff / 2;
+    const roundMid = Number.isInteger(diff) ? Math.round(mid) : Number(mid.toFixed(1));
+    const unique = Array.from(new Set([max, roundMid, min]));
+    return unique.sort((a, b) => b - a);
+  }, [showYAxis, min, max]);
+
+  const xTicks = useMemo(() => {
+    if (!showXAxis || length < 1) return [];
+    if (length === 1) return [{ index: 0, date: series[0].data[0].date }];
+    if (length === 2) {
+      return [
+        { index: 0, date: series[0].data[0].date },
+        { index: 1, date: series[0].data[1].date },
+      ];
+    }
+    const midIndex = Math.floor((length - 1) / 2);
+    return [
+      { index: 0, date: series[0].data[0].date },
+      { index: midIndex, date: series[0].data[midIndex].date },
+      { index: length - 1, date: series[0].data[length - 1].date },
+    ];
+  }, [showXAxis, length, series]);
 
   if (!length) return null;
 
@@ -286,7 +346,7 @@ export function MetricChart({
     }
     const rawX = ((event.clientX - box.left) / box.width) * 100;
     const fractionalIndex =
-      ((rawX - X_INSET_LEFT) / (100 - X_INSET_LEFT - X_INSET_RIGHT)) * (length - 1);
+      ((rawX - X_INSET_LEFT) / (100 - X_INSET_LEFT - xInsetRight)) * (length - 1);
     const closestIndex = Math.min(length - 1, Math.max(0, Math.round(fractionalIndex)));
     setHovered(closestIndex);
   };
@@ -354,11 +414,42 @@ export function MetricChart({
           className="text-foreground"
         />
 
+        {/* Y-axis gridlines */}
+        {showYAxis &&
+          yTicks.map((tick) => (
+            <line
+              key={`ygrid-${tick}`}
+              x1={0}
+              x2={100}
+              y1={toY(tick)}
+              y2={toY(tick)}
+              stroke="currentColor"
+              strokeDasharray="2 3"
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+              className="text-black/[0.06] dark:text-white/[0.08]"
+            />
+          ))}
+
+        {/* X-axis baseline */}
+        {showXAxis && (
+          <line
+            x1={0}
+            x2={100}
+            y1={bandBottom}
+            y2={bandBottom}
+            stroke="currentColor"
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+            className="text-black/[0.08] dark:text-white/[0.1]"
+          />
+        )}
+
         {series.map((s, seriesIndex) => {
           const pts = s.data.map((d, i) => ({ x: toX(i, s.data.length), y: toY(d.value) }));
 
           if (view === "bars") {
-            const slot = (100 - X_INSET_LEFT - X_INSET_RIGHT) / Math.max(s.data.length, 1);
+            const slot = (100 - X_INSET_LEFT - xInsetRight) / Math.max(s.data.length, 1);
             const width = Math.max(slot * (series.length > 1 ? 0.34 : 0.5), 0.6);
             const offset = (seriesIndex - (series.length - 1) / 2) * width;
             return (
@@ -423,6 +514,47 @@ export function MetricChart({
         })}
       </svg>
       </div>
+
+      {/* Y-axis tick labels */}
+      {showYAxis &&
+        yTicks.map((tick) => (
+          <div
+            key={`ytick-${tick}`}
+            className="pointer-events-none absolute right-1.5 z-10 -translate-y-1/2 select-none"
+            style={{ top: `${toY(tick)}%` }}
+          >
+            <span className="font-mono text-[10px] font-medium tabular-nums text-foreground/40 dark:text-foreground/50">
+              {compactFormatter(tick)}
+            </span>
+          </div>
+        ))}
+
+      {/* X-axis date labels */}
+      {showXAxis && xTicks.length > 0 && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-1 z-10 select-none text-[10px] font-medium text-foreground/40 dark:text-foreground/50">
+          {xTicks.map((tick, i) => {
+            const xPercent = toX(tick.index, length);
+            const isFirst = i === 0;
+            const isLast = i === xTicks.length - 1;
+            return (
+              <span
+                key={`xtick-${tick.date}-${i}`}
+                className="absolute whitespace-nowrap"
+                style={{
+                  left: `${xPercent}%`,
+                  transform: isFirst
+                    ? "translateX(0)"
+                    : isLast
+                      ? "translateX(-100%)"
+                      : "translateX(-50%)",
+                }}
+              >
+                {formatAxisDate(tick.date)}
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       {/* Point markers outside the SVG with spring physics tracking — kept outside the clipped wrapper so the end dot can sit on the border */}
 

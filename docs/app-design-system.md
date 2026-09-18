@@ -17,7 +17,7 @@ look arbitrary aren't.
 | Need | Where |
 | --- | --- |
 | Colour, radius, font tokens | `src/app/globals.css` (`:root` + `@theme inline`) |
-| The card, the status pill, the register key | `src/app/clients/[id]/section-card.tsx` |
+| The card, the status pill, the register key | `src/app/(app)/clients/[id]/section-card.tsx` |
 | Entrance motion | `src/components/dashboard-stage.tsx`, built on `src/components/brand/motion.ts` |
 | Which to use, and when | this file |
 
@@ -32,15 +32,15 @@ the one you're editing is how the old one keeps spreading. Copy these instead:
 
 | Screen | Path | What to take from it |
 | --- | --- | --- |
-| **Client record** | `src/app/clients/[id]/` | **The token reference.** Surfaces, borders, type scale, pills, tabs. When this doc and another screen disagree on *how a card looks*, this wins. |
-| **Data imports** | `src/app/admin/charity-commission/` | **The structure reference.** Page shell, the heading block and its tab row, the rail of facts under it, the two-view console, and stat cards (big numeral, hint, `HorizontalStickGauge`, action zone). Take the *skeleton* from here. |
-| **Dashboard** | `src/app/dashboard/page.tsx` | Page composition only — the `Stage`/`Group`/`Rise` structure, the display heading, cards floating on the ground rather than one box holding everything. Its *surfaces* are the old language; do not copy those. |
+| **Client record** | `src/app/(app)/clients/[id]/` | **The token reference.** Surfaces, borders, type scale, pills, tabs. When this doc and another screen disagree on *how a card looks*, this wins. |
+| **Data imports** | `src/app/(app)/admin/charity-commission/` | **The structure reference.** Page shell, the heading block and its tab row, the rail of facts under it, the two-view console, and stat cards (big numeral, hint, `HorizontalStickGauge`, action zone). Take the *skeleton* from here. |
+| **Dashboard** | `src/app/(app)/dashboard/page.tsx` | Page composition and horizontal space reference — the `Stage`/`Group`/`Rise` structure, the `mx-auto w-full max-w-[1400px]` container, the display heading, cards floating on the ground rather than one box holding everything. Its *surfaces* are the old language; do not copy those. |
 
 Not references, for now:
 
-- `src/app/clients/page.tsx` — work in progress.
+- `src/app/(app)/clients/page.tsx` — work in progress.
 
-**On `src/app/admin/*`.** This doc used to say "never copy an admin page", because
+**On `src/app/(app)/admin/*`.** This doc used to say "never copy an admin page", because
 several pages were on `#f1f2f4`, two grounds stale. That is now half wrong and the
 wrong half is the dangerous one. The **tokens** are still not to be copied from
 there: `recent-runs.tsx`, `group-tabs.tsx` and `lookup-dialog.tsx` are on the old
@@ -190,26 +190,25 @@ Two traps, both already paid for:
 ### Page shell
 
 ```jsx
-<div className="min-h-screen bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
-  <div className="w-full space-y-6">
+<div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+  <div className="mx-auto w-full max-w-[1400px] space-y-6">
 ```
 
 Content on the ground with white cards on it — not one box holding everything.
 `space-y-6` between sections on a record, `space-y-10` on the dashboard where
 sections are heavier.
 
-### Width
+### Width and horizontal space
 
-**Never use `max-w-*`.** Not on the page container, not on a card, not on a
-hint or a paragraph (`max-w-[54ch]`, `max-w-2xl`, `max-w-sm` included). Content
-fills the column the shell gives it; the page's side padding is the only
-thing that sets where it stops. A capped hint under a full-width card title
-leaves a ragged hole on the right, and a capped page on a wide screen floats a
-narrow strip of cards in a sea of ground. Existing `max-w` in older screens is
-drift, not precedent — remove it when you convert a screen.
+**Horizontal space is whatever the dashboard page uses** (`src/app/(app)/dashboard/page.tsx`).
+The page container is bounded and centered at `mx-auto w-full max-w-[1400px]`,
+preventing content from stretching endlessly on wide monitors while keeping standard responsive padding
+(`px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12`) on the outer shell (`max-w-full overflow-x-hidden`).
 
-The one exception is something that genuinely floats — a dialog, popover or
-dropdown — whose width is the component's own, not the page's.
+Within that 1400px container:
+- Content fills the full width of the column the shell gives it.
+- **Do not use ad-hoc `max-w-*` on individual cards, hints, or paragraphs** (e.g. `max-w-[54ch]`, `max-w-2xl`, `max-w-sm`). A capped hint under a full-width card title leaves a ragged hole on the right.
+- The one exception is something that genuinely floats — a dialog, popover or dropdown — whose width is the component's own, not the page's.
 
 Routes under `AppShell` render a `div`, not a `main` — the shell already renders
 the `main` they slot into.
@@ -262,7 +261,50 @@ put `.dark` on `<html>` and define token overrides under it.
 | Code label | `Key`, same file |
 | Entrance | `Stage` / `Group` / `Rise` |
 | Checkbox | `FiledCheckbox` from `src/components/ui/filed-checkbox.tsx` |
+| Instant on/off | `Switch` from `src/components/ui/material-design-3-switch.tsx` |
 | Pick one of a few (settings) | `OptionGroup` from `src/app/settings/option-group.tsx` |
+| A tag | `TagChip` from `src/lib/tags/tag-chips.tsx` |
+| A reading's shape | The sticks — `HorizontalStickGauge`, `StackedStickColumns` |
+| Paging a list | `PaginatedList` on a screen still on the old language (it keeps its footer); `list-pager.tsx` on a converted one (controls at the top) |
+
+**Paged lists carry their count above the first row.** A list an admin works
+through — the CAM request queue, the decision history, the suppression lists — is
+answered as it is read, so a pager under the last row is one the reader has to
+traverse the whole list to reach. On a converted screen the page size sits on the
+card's heading row beside the title and the pill, and "Showing 1 to 10 of 13" with
+the chevrons is the first line of the body; a list with no card heading of its own
+(`PagerRow`) puts both on one row above its first card. `PaginatedList` keeps its
+footer until its screen is converted, which is why the two look different rather
+than half-converted. **Never drop the count**: these lists only grow, and a pager
+without a count reads as though the page is all there is. The arithmetic is
+`src/lib/pagination.ts` for both, so the two placements can't disagree.
+
+**A panel that opens on a click grows, it doesn't snap.** Two ways, and the
+choice is not taste:
+
+- A **list row** folds with `card-collapse-grid` — CSS only, 280ms. Its clip is
+  permanent (the row height is what animates), so nothing inside it may hold a
+  popover: a dropdown in there is cut off at the card's edge.
+- A **panel with a control in it** — the suppress-a-client form, the client
+  form's disclosure rows, the admin guides — uses the Motion reveal in
+  `clients/new/disclosure-section.tsx`: `height: 0 → auto` with opacity, 0.35s on
+  `EASE`, `duration: 0` under reduced motion, and `overflow-hidden` only *while*
+  the height is moving. The clip comes off when the panel settles, which is what
+  lets a client dropdown hang past the card instead of being swallowed by it.
+
+**A tag is one chip, everywhere.** `TagChip` is the tag as it appears on the
+client record, on the tags screen's list and inside its colour picker: a
+rectangle cut with an 8px V notch (`TAG_NOTCH_CLIP`), tinted with the tag's own
+colour, or `bg-paper-sunk text-ink` when it has none. The colour palette is the
+one exception to "never a colour of your own" — it is data the team chose, and
+every entry is ≥4.5:1 as text on its own tint (`src/lib/tags/tag-colours.ts`).
+**"No colour" is neutral, never green**: a tag is the one thing a person picks
+the colour of, so choosing nothing must not arrive as `--brand`, which is not an
+app colour at all. Before this, the record drew a notched brand-green chip and
+the admin list drew a `rounded-full` pill in a second, different brand tint.
+Picking a colour is `OptionGroup`'s problem in miniature — real radios — but the
+control that shows the choice is the chip itself, so you pick by looking at the
+result (`admin/tags/colour-picker.tsx`).
 
 **Checkboxes are always `FiledCheckbox`** — the animated animate-ui checkbox
 (the one on the Terms & Conditions step, where the tick draws itself in),
@@ -274,6 +316,48 @@ and a `<label htmlFor>`; wrapping it in a label alone is not enough.
 **Pick-one choices are real radios.** `OptionGroup` is a `fieldset` of native
 radios styled as cards — grouping, arrow keys and one tab stop come from the
 browser. Never a row of `<button role="radio">`.
+
+**An instant on/off is `Switch`, not a checkbox.** The two controls mean
+different things and a screen that mixes them up lies to people: a checkbox
+answers a question that is submitted with the form, a switch *is* the save.
+Material Design 3's physics are in `material-design-3-switch.tsx` (spring knob,
+morphing handle, halo) but the colours are this system's — `primary` is `--lead`,
+`success` is `--go`, and `destructive` is `--stop`, which is the one to use where
+turning the switch off is the risky direction (`data-handling-rules` turns a
+privacy protection off that way). Its `haptic` prop plays a synthesised click;
+nothing in the app sets it, and nothing should without asking first — a setting's
+state must never depend on the sound card.
+
+**The sticks are the app's instrument.** `HorizontalStickGauge` (a share of a
+whole), `StackedStickColumns` (the last seven buckets, beside a numeral) and
+`stick-slider` (a value you set) all draw the same object — a 3px rounded
+stroke in `--lead`, spaced at the gauge's 8.5px pitch — and a card that needs a
+shape of its own should join them rather than invent one
+(`dashboard/ai-spend-daily-chart.tsx` is the worked example: spend as one
+vertical stick gauge per date, the same reading as the horizontal one stood on
+its end). Where the instrument is a share, the pitch is fixed; where it is a
+time series, the *dates* set the pitch and only the stroke has to give way, and
+only once the dates would otherwise overlap. Three rules keep them one family:
+
+- **Measure the width; never scale a `viewBox`.** A fixed `viewBox` the browser
+  fits to the card means one SVG unit is *not* one CSS pixel, so an instrument
+drawn for a one-column tile arrives stretched the moment its card takes two
+  columns — 4px sticks become 14px blocks, and the whole card reads as a cruder
+  object than the one next to it. `HorizontalStickGauge` measures its container
+  with a `ResizeObserver` and draws in pixels; anything carrying a time series
+  should do the same.
+- **Colour is the accent, or the data's own palette — never a state tone.** A
+  category is not good or bad, so it must not be drawn in `go`/`hold`/`stop`;
+  those mean state, and state comes from `Pill`. A category's five colours live
+  with its labels (`lib/dashboard/ai-spend.ts`), so the instrument, its legend
+  and the next screen that shows the same split agree.
+- **One category per mark — except a date's own stick.** A mark is 3px, so a
+  split that matters gets a row of its own (`AiSpendActivityGauge`), and the
+  per-day detail used to live on hover alone. The spend-by-day chart is the
+  exception: each date is one vertical stick whose height is that date's spend
+  against the dollar axis, split bottom-up into one segment per kind of work in
+  the gauge's colours. A dot too small to split takes its busiest kind's colour
+  instead, and the full breakdown stays on hover.
 
 `origin-button`, `gooey-action-button`, `send-button`, `gooey-email-input` and
 the other gooey/animated variants are one-off brand pieces, not app defaults.

@@ -5,6 +5,7 @@ import {
   bucketCountsForPeriod,
   computePerformance,
   createPeriodBuckets,
+  funnelTrendSeries,
   performanceForPeriod,
   performanceInputForClient,
   pipelineTrendSeries,
@@ -237,6 +238,68 @@ describe("pipelineTrendSeries", () => {
   });
 });
 
+describe("funnelTrendSeries", () => {
+  it("counts distinct clients per day, not events", () => {
+    const { contacted, replied, converted } = funnelTrendSeries(
+      input({
+        messages: [
+          message({ sent_at: "2026-08-10T09:00:00Z", organisation_id: "org-1" }),
+          message({ id: "msg-2", sent_at: "2026-08-10T15:00:00Z", organisation_id: "org-1" }),
+          message({ id: "msg-3", sent_at: "2026-08-10T16:00:00Z", organisation_id: "org-2" }),
+        ],
+        replies: [
+          reply({ received_at: "2026-08-10T17:00:00Z", organisation_id: "org-1" }),
+          reply({
+            id: "rep-2",
+            received_at: "2026-08-10T18:00:00Z",
+            organisation_id: "org-1",
+          }),
+        ],
+        conversions: [conversion({ created_at: "2026-08-10T19:00:00Z" })],
+      }),
+      7,
+      NOW,
+    );
+    const at = (series: { date: string; value: number }[], date: string) =>
+      series.find((p) => p.date === date)?.value;
+    // Two emails to org-1 but one contacted client; two replies but one replying client.
+    assert.equal(at(contacted, "2026-08-10"), 2);
+    assert.equal(at(replied, "2026-08-10"), 1);
+    assert.equal(at(converted, "2026-08-10"), 1);
+  });
+
+  it("is daily, not cumulative, and drops events outside the window", () => {
+    const { contacted, replied, converted } = funnelTrendSeries(
+      input({
+        messages: [
+          message({ sent_at: "2026-08-10T10:00:00Z", organisation_id: "org-1" }),
+          message({ id: "msg-2", sent_at: "2026-08-01T10:00:00Z", organisation_id: "org-2" }),
+        ],
+        replies: [reply({ received_at: "2026-08-10T10:00:00Z", organisation_id: "org-1" })],
+        conversions: [conversion({ created_at: "2026-06-01T10:00:00Z" })],
+      }),
+      7,
+      NOW,
+    );
+    const at = (series: { date: string; value: number }[], date: string) =>
+      series.find((p) => p.date === date)?.value;
+    // 1 Aug and 1 Jun are outside the trailing 7 days ending 12 Aug.
+    assert.equal(contacted.length, 7);
+    assert.equal(at(contacted, "2026-08-10"), 1);
+    assert.equal(at(contacted, "2026-08-11"), 0);
+    assert.equal(at(replied, "2026-08-10"), 1);
+    assert.equal(at(converted, "2026-08-10"), 0);
+  });
+
+  it("returns empty series for a non-positive window", () => {
+    assert.deepEqual(funnelTrendSeries(input({}), 0, NOW), {
+      contacted: [],
+      replied: [],
+      converted: [],
+    });
+  });
+});
+
 describe("sectorPerformance", () => {
   const sectorByOrg = new Map([
     ["org-1", "Environment"],
@@ -244,7 +307,7 @@ describe("sectorPerformance", () => {
     ["org-3", null],
   ]);
 
-  it("rolls reply and conversion rates up per sector", () => {
+  it("rolls the shared reply and win rates up per sector, in clients", () => {
     const rows = sectorPerformance(
       input({
         messages: [
@@ -272,14 +335,16 @@ describe("sectorPerformance", () => {
     assert.equal(environment.orgsContacted, 1);
     assert.equal(environment.emailsSent, 2);
     assert.equal(environment.replies, 1);
-    assert.equal(environment.replyRate, 0.5); // 1 reply ÷ 2 emails
-    assert.equal(environment.conversionRate, 1); // 1 converted ÷ 1 contacted org
+    // Two emails went to the one client, and one replied: the rate counts the
+    // client, not the emails — 1 of 1, not 1 of 2.
+    assert.equal(environment.replyRate, 1);
+    assert.equal(environment.winRate, 1); // the one client who responded converted
     assert.equal(environment.avgPriorityScore, 0.8);
 
     const education = rows.find((row) => row.sector === "Education");
     assert.ok(education);
-    assert.equal(education.replyRate, 1); // 1 reply ÷ 1 email
-    assert.equal(education.conversionRate, 0);
+    assert.equal(education.replyRate, 1); // 1 client contacted, 1 replied
+    assert.equal(education.winRate, 0);
     assert.equal(education.avgPriorityScore, 0.2);
   });
 

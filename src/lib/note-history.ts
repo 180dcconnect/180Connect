@@ -68,6 +68,7 @@ export function canManageNote(
   note: Pick<NoteRow, "author_id">,
   actor: { id: string; role: string },
 ): boolean {
+  if (actor.role === "viewer") return false;
   return actor.role === "admin" || note.author_id === actor.id;
 }
 

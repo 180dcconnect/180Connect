@@ -17,8 +17,12 @@
 export const INCOME_BAND_OPTIONS = [
   "under_10k",
   "10k_100k",
-  "100k_1m",
-  "over_1m",
+  "100k_500k",
+  "500k_1m",
+  "1m_10m",
+  "10m_50m",
+  "50m_100m",
+  "over_100m",
 ] as const;
 
 export type IncomeBand = (typeof INCOME_BAND_OPTIONS)[number];
@@ -26,22 +30,34 @@ export type IncomeBand = (typeof INCOME_BAND_OPTIONS)[number];
 export const INCOME_BAND_LABELS: Record<IncomeBand, string> = {
   under_10k: "Under £10k",
   "10k_100k": "£10k – £100k",
-  "100k_1m": "£100k – £1m",
-  over_1m: "Over £1m",
+  "100k_500k": "£100k – £500k",
+  "500k_1m": "£500k – £1m",
+  "1m_10m": "£1m – £10m",
+  "10m_50m": "£10m – £50m",
+  "50m_100m": "£50m – £100m",
+  over_100m: "Over £100m",
 };
 
 export const INCOME_BAND_DESCRIPTIONS: Record<IncomeBand, string> = {
   under_10k: "Micro / grassroots (< £10k)",
   "10k_100k": "Small non-profit (£10k – £100k)",
-  "100k_1m": "Medium charity (£100k – £1m)",
-  over_1m: "Large institution (> £1m)",
+  "100k_500k": "Emerging mid-size (£100k – £500k)",
+  "500k_1m": "Established mid-size (£500k – £1m)",
+  "1m_10m": "Large non-profit (£1m – £10m)",
+  "10m_50m": "Regional anchor (£10m – £50m)",
+  "50m_100m": "Major national charity (£50m – £100m)",
+  over_100m: "Mega-NGO & global institution (> £100m)",
 };
 
 export const INCOME_BAND_SHORT_NAMES: Record<IncomeBand, string> = {
   under_10k: "Micro",
   "10k_100k": "Small",
-  "100k_1m": "Medium",
-  over_1m: "Large",
+  "100k_500k": "Emerging",
+  "500k_1m": "Mid-size",
+  "1m_10m": "Large",
+  "10m_50m": "Anchor",
+  "50m_100m": "National",
+  over_100m: "Mega",
 };
 
 const GBP_FORMATTER = new Intl.NumberFormat("en-GB", {
@@ -81,6 +97,10 @@ export function deriveIncomeBand(totalIncome: number | null | undefined): Income
   }
   if (totalIncome < 10_000) return "under_10k";
   if (totalIncome <= 100_000) return "10k_100k";
-  if (totalIncome <= 1_000_000) return "100k_1m";
-  return "over_1m";
+  if (totalIncome <= 500_000) return "100k_500k";
+  if (totalIncome <= 1_000_000) return "500k_1m";
+  if (totalIncome <= 10_000_000) return "1m_10m";
+  if (totalIncome <= 50_000_000) return "10m_50m";
+  if (totalIncome <= 100_000_000) return "50m_100m";
+  return "over_100m";
 }

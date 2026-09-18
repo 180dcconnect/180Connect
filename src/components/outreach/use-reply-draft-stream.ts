@@ -81,6 +81,7 @@ export function useReplyDraftStream() {
       register: EmailRegister;
       closing: ReplyClosingApproach;
       replyEventId?: string;
+      skipNews?: boolean;
     }): Promise<ReplyDraftStreamOutcome> => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -143,6 +144,7 @@ export function useReplyDraftStream() {
             register: input.register,
             closing: input.closing,
             replyEventId: input.replyEventId,
+            skipNews: input.skipNews,
           }),
           signal: controller.signal,
         });

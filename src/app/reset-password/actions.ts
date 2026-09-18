@@ -23,7 +23,10 @@ export async function setNewPassword(
   formData: FormData,
 ): Promise<ResetPasswordState> {
   const parsed = safeValidate(newPasswordSchema, {
-    fullName: formData.get("fullName"),
+    // A recovery submission carries no name field at all (the form only asks
+    // on setup), and `FormData.get` returns null for an absent field — which
+    // an optional string schema rejects. Absent has to read as absent.
+    fullName: formData.get("fullName") ?? undefined,
     password: formData.get("password"),
     confirmPassword: formData.get("confirmPassword"),
   });

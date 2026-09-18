@@ -202,7 +202,7 @@ async function defaultLoadIdentifiers(): Promise<OrganisationIdentifier[]> {
  * Commission's shape. Not yet resolved: at 2 req/sec, a run against
  * thousands of identifiers will run well past a serverless timeout — the
  * same unresolved risk already flagged on the Charity Commission admin page
- * (src/app/admin/charity-commission/page.tsx), restated here rather than
+ * (src/app/(app)/admin/charity-commission/page.tsx), restated here rather than
  * silently repeated.
  */
 export function createThreeSixtyGivingAdapter(

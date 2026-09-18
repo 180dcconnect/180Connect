@@ -620,3 +620,6 @@
 | 04 Entities | AI_GENERATION_RATE_LIMIT | window_started_at | timestamp |  | When the current fixed window opened |
 | 04 Entities | AI_GENERATION_RATE_LIMIT | created_at | timestamp |  | Row creation timestamp |
 | 04 Entities | AI_GENERATION_RATE_LIMIT | updated_at | timestamp |  | Last time the counter changed |
+| 04 Entities | ORGANISATIONS | website_absent_at | timestamptz |  | When someone confirmed this client has no website |
+| 04 Entities | ORGANISATIONS | website_absent_by | uuid | USERS | Who confirmed the client has no website |
+| 04 Entities | EDIT_SUGGESTIONS | proposed_absent | boolean |  | Proposal that the field should hold nothing at all, rather than a replacement value |

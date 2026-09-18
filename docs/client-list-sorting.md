@@ -6,7 +6,7 @@ outreach status, #63), **F059** (sort by priority score, #61), and the
 personalised default order of **F094** (#93).
 
 The code is `sortClients()` and `prioritiseQueue()` in
-[`src/app/clients/visible-clients.ts`](../src/app/clients/visible-clients.ts);
+[`src/app/(app)/clients/visible-clients.ts`](../src/app/(app)/clients/visible-clients.ts);
 the control is the "Sorted by …" sentence above the list.
 
 ## The two sort controls on this page are different things

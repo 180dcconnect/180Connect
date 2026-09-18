@@ -8,7 +8,7 @@ async function source(relative: string) {
 
 describe("F136 add note from reply contract", () => {
   it("uses the existing F072 endpoint and note insert", async () => {
-    const form = await source("../app/clients/[id]/add-note-form.tsx");
+    const form = await source("../app/(app)/clients/[id]/add-note-form.tsx");
     const route = await source("../app/api/clients/[id]/notes/route.ts");
 
     assert.match(form, /`\/api\/clients\/\$\{organisationId\}\/notes`/);
@@ -26,8 +26,8 @@ describe("F136 add note from reply contract", () => {
   });
 
   it("only offers the add-note action to users with client edit permission", async () => {
-    const page = await source("../app/clients/[id]/outreach/page.tsx");
-    const notes = await source("../app/clients/[id]/notes-section.tsx");
+    const page = await source("../app/(app)/clients/[id]/outreach/page.tsx");
+    const notes = await source("../app/(app)/clients/[id]/notes-section.tsx");
 
     // The add-note form is gated on canEdit in the outreach page and rendered
     // via the addNoteForm prop on NotesSection.

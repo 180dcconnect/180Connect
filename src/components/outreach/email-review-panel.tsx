@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { CalendarClock } from "lucide-react";
 
 import { OriginButton } from "@/components/ui/origin-button";
@@ -10,10 +11,9 @@ import {
 } from "@/components/outreach/schedule-send-dialog";
 import { ConfirmSendDialog } from "@/components/outreach/confirm-send-dialog";
 import { SendButton } from "@/components/ui/send-button";
-import { RichTextEmailEditor } from "@/components/rich-text-email-editor";
 import { validateClientEmail } from "@/lib/client-email-validation";
 import { emailHtmlToPlainText, isRichEmailHtml, plainTextToEditorHtml } from "@/lib/outreach/email-html";
-import { AttachmentPicker } from "@/app/clients/[id]/attachment-picker";
+import { AttachmentPicker } from "@/app/(app)/clients/[id]/attachment-picker";
 import type { Attachment } from "@/lib/attachments";
 import {
   discardEmailDraft,
@@ -21,7 +21,33 @@ import {
   scheduleReviewedEmail,
   sendReviewedEmail,
   updateScheduledEmail,
-} from "@/app/clients/[id]/outreach-actions";
+} from "@/app/(app)/clients/[id]/outreach-actions";
+
+/**
+ * The body editor loads on demand.
+ *
+ * It is TipTap and ProseMirror underneath — the heaviest code on the inbox and
+ * the client record's Outreach tab — and it is only needed once a draft is open
+ * for review, which most visits to either page never do. Importing it statically
+ * put it in the JavaScript every one of those visits downloaded and parsed.
+ *
+ * `ssr: false` costs nothing: the editor already renders on the client only
+ * (`immediatelyRender: false`). The placeholder holds the toolbar and the
+ * writing area at their real sizes so nothing below jumps when it arrives.
+ */
+const RichTextEmailEditor = dynamic(
+  () => import("@/components/rich-text-email-editor").then((mod) => mod.RichTextEmailEditor),
+  { ssr: false, loading: () => <EditorPlaceholder /> },
+);
+
+function EditorPlaceholder() {
+  return (
+    <div aria-hidden="true">
+      <div className="h-[42px] rounded-t-lg border border-black/10 bg-black/2" />
+      <div className="min-h-64 rounded-b-lg border border-t-0 border-black/10 bg-white" />
+    </div>
+  );
+}
 
 /**
  * The review-and-send half of an outreach draft: recipient, subject, body,
@@ -341,18 +367,20 @@ export function EmailReviewPanel({
             news fields are gone with the transient response) stays silent
             rather than implying a hook that cannot be checked. */}
         {draft.newsSource === "live" && draft.newsUrl && (
-          <p className="mt-1 text-xs text-dim">
-            News hook{draft.newsHook ? `: ${draft.newsHook}` : ""} — verify the{" "}
-            <a
-              className="font-semibold underline"
-              href={draft.newsUrl}
-              rel="noreferrer"
-              target="_blank"
-            >
-              source
-            </a>
-            .
-          </p>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-inset border border-rule bg-paper px-3 py-2 text-[12px] text-dim">
+            <div className="flex min-w-0 items-center gap-1.5 truncate">
+              <span className="shrink-0 font-medium text-ink">News story:</span>
+              <a
+                className="font-medium text-lead underline truncate"
+                href={draft.newsUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {draft.newsHook ?? "View source article"}
+              </a>
+            </div>
+            <span className="shrink-0 text-[11px] text-dim">Verify before approving</span>
+          </div>
         )}
       </div>
 

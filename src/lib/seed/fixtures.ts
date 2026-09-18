@@ -62,6 +62,8 @@ export type SeedOrganisation = {
   geographic_reach: GeographicReach | null;
   outreach_status: OutreachStatus;
   data_completeness_score: number;
+  /** Invented filed-purpose text, so screens that show a mission have one. */
+  charity_activities: string | null;
   is_seed: true;
 };
 
@@ -129,6 +131,20 @@ const NAME_SUBJECTS = [
 const NAME_SUFFIXES = [
   "Trust", "Foundation", "Alliance", "Network", "Association", "Initiative",
   "Partnership", "Project", "Society", "Collective",
+];
+
+/**
+ * Invented filed-purpose lines, one per record, interpolated with the record's
+ * own name subject so the mission reads like it belongs to the name. Cycled by
+ * index rather than picked from the PRNG, so adding them does not shift the
+ * deterministic stream every other field is drawn from.
+ */
+const MISSION_TEMPLATES: readonly ((subject: string) => string)[] = [
+  (subject) => `Running weekly ${subject.toLowerCase()} workshops, mentoring and outreach for people across the city.`,
+  (subject) => `Providing free ${subject.toLowerCase()} advice, practical support and community activities for local families.`,
+  (subject) => `Campaigning for better ${subject.toLowerCase()} outcomes while running frontline services for those most in need.`,
+  (subject) => `Bringing people together through ${subject.toLowerCase()} projects, volunteering and neighbourhood events.`,
+  (subject) => `Supporting vulnerable residents with ${subject.toLowerCase()} services, referrals and long-term casework.`,
 ];
 
 const UK_CITIES = [
@@ -225,10 +241,12 @@ export function generateOrganisations(
 
   return Array.from({ length: count }, (_, index) => {
     let legalName = "";
+    let nameSubject = NAME_SUBJECTS[0];
     do {
+      const subject = pick(random, NAME_SUBJECTS);
       legalName =
-        `${pick(random, NAME_PREFIXES)} ${pick(random, NAME_SUBJECTS)} ` +
-        pick(random, NAME_SUFFIXES);
+        `${pick(random, NAME_PREFIXES)} ${subject} ` + pick(random, NAME_SUFFIXES);
+      nameSubject = subject;
     } while (usedNames.has(legalName));
     usedNames.add(legalName);
 
@@ -286,6 +304,7 @@ export function generateOrganisations(
         ? ("international" as GeographicReach)
         : pick<GeographicReach>(random, ["local", "regional", "national"]),
       outreach_status: statuses[index],
+      charity_activities: MISSION_TEMPLATES[index % MISSION_TEMPLATES.length](nameSubject),
       is_seed: true as const,
     };
 

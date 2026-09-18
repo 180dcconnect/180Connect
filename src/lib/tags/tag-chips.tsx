@@ -10,6 +10,23 @@
 // the notch out of the tinted surface; the delete button sits in the empty
 // space the notch leaves beside the tag, so removal reads as an affordance
 // next to the tag rather than a glyph printed on it.
+//
+// ── One chip, everywhere (Sept 2026) ──
+//
+// `TagChip` is the tag as it appears wherever a tag appears: the client
+// record's card, the tags screen's list and its colour picker. Before it there
+// were two renderings of the same data and they disagreed — the record drew a
+// notched chip in the tag's colour, the admin list drew a `rounded-full` pill,
+// and a tag with *no* colour came out brand-green on one screen and a second,
+// different brand tint on the other.
+//
+// **No colour is neutral now**: `bg-paper-sunk text-ink`, the app's own neutral
+// fill (`docs/app-design-system.md` §Surfaces). A tag is the one thing a person
+// genuinely chooses the colour of, which is exactly why "I chose nothing" must
+// not silently arrive as 180DC green — a green chip on a record reads as a
+// status, and `--brand` is not an app colour at all. The `/clients` filter bar
+// already treated an uncoloured tag as neutral; this makes the chip agree with
+// it.
 
 import { useState, useTransition } from "react";
 import { X } from "lucide-react";
@@ -17,11 +34,45 @@ import { X } from "lucide-react";
 import { removeTagAction } from "@/lib/tags/tag-actions";
 import { tagPillStyle } from "@/lib/tags/tag-colours";
 
-export type TagChip = { id: string; name: string; colour?: string | null };
+/** A tag, as the chips need it. Named apart from the `TagChip` component below. */
+export type TagChipData = { id: string; name: string; colour?: string | null };
 
 /** The V notch: 8px deep, apex centred on the right edge. */
 export const TAG_NOTCH_CLIP =
   "polygon(0 0, 100% 0, calc(100% - 8px) 50%, 100% 100%, 0 100%)";
+
+/**
+ * A tag with no colour (or one we no longer recognise): the neutral pill. F194
+ * AC4's graceful degradation, on the system's neutral rather than a brand tint.
+ */
+export const TAG_CHIP_NEUTRAL = "bg-paper-sunk text-ink";
+
+/**
+ * The read-only tag: the notched chip, tinted with the tag's own colour where
+ * it has one. Nothing here is interactive — the remove button is `TagChips`'
+ * job, and a picker wraps this in its own radio.
+ */
+export function TagChip({
+  label,
+  colour,
+  className = "",
+}: {
+  label: string;
+  colour?: string | null;
+  className?: string;
+}) {
+  const tint = tagPillStyle(colour);
+  return (
+    <span
+      style={{ clipPath: TAG_NOTCH_CLIP, ...(tint ?? undefined) }}
+      className={`inline-flex items-center py-1 pr-3 pl-2.5 font-body text-xs font-medium ${
+        tint ? "" : TAG_CHIP_NEUTRAL
+      } ${className}`}
+    >
+      {label}
+    </span>
+  );
+}
 
 export function TagChips({
   organisationId,
@@ -30,7 +81,7 @@ export function TagChips({
   onRemoved,
 }: {
   organisationId: string;
-  tags: TagChip[];
+  tags: TagChipData[];
   canEdit: boolean;
   onRemoved?: (tagId: string) => void;
 }) {
@@ -65,26 +116,16 @@ export function TagChips({
   return (
     <div className="flex flex-wrap items-center gap-2">
       {tags.map((tag) => {
-        // F194 AC2/AC4: a tag with a colour renders as a surface tinted with
-        // it; absent/unrecognised falls back to today's brand styling.
-        const pillStyle = tagPillStyle(tag.colour);
         return (
           <span key={tag.id} className="inline-flex items-center">
-            <span
-              style={{ clipPath: TAG_NOTCH_CLIP, ...(pillStyle ?? undefined) }}
-              className={`inline-flex items-center py-1 pl-2.5 pr-3 text-xs font-medium ${
-                pillStyle ? "" : "bg-brand/12 text-brand-hover"
-              }`}
-            >
-              {tag.name}
-            </span>
+            <TagChip label={tag.name} colour={tag.colour} />
             {canEdit && (
               <button
                 type="button"
                 onClick={() => handleRemove(tag.id)}
                 disabled={pending}
                 aria-label={`Remove ${tag.name}`}
-                className="ml-1 inline-flex size-4 shrink-0 items-center justify-center rounded-full text-dim opacity-60 transition-colors hover:bg-black/[0.06] hover:text-ink hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
+                className="ml-1 inline-flex size-4 shrink-0 items-center justify-center rounded-full text-dim opacity-60 transition-colors hover:bg-paper-sunk hover:text-ink hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead disabled:cursor-not-allowed disabled:opacity-30"
               >
                 <X aria-hidden="true" className="size-3" strokeWidth={2.5} />
               </button>
@@ -93,7 +134,7 @@ export function TagChips({
         );
       })}
       {errorTagId && (
-        <span className="text-xs font-medium text-destructive" role="alert">
+        <span className="font-body text-[13px] text-stop" role="alert">
           Couldn&apos;t remove that tag. Try again.
         </span>
       )}

@@ -453,3 +453,31 @@ test("selectNewsHook skips articles whose url cannot be verified", () => {
   );
   assert.equal(result, null);
 });
+
+test("buildNewsQuery grounds query with city context", () => {
+  assert.equal(buildNewsQuery("Roundabout", { city: "Sheffield" }), '"Roundabout" charity Sheffield');
+  assert.equal(
+    buildNewsQuery("Sheffield Hospitals Charity", { city: "Sheffield" }),
+    '"Sheffield Hospitals Charity" charity',
+  );
+});
+
+test("selectNewsHook rejects foreign unrelated articles for single-token names", () => {
+  const foreignArticle = {
+    title: "CoCo Fresh Tea opens new branch in Beijing",
+    url: "https://www.chinadaily.com.cn/coco-tea",
+    publishedDate: isoDaysAgo(3),
+    author: "Li Wei",
+  };
+  assert.equal(selectNewsHook([foreignArticle], ["COCO"]), null);
+
+  const ukCharityArticle = {
+    title: "COCO community education projects receive funding boost",
+    url: "https://www.theguardian.com/coco-education",
+    publishedDate: isoDaysAgo(3),
+    author: "Jane Reporter",
+  };
+  const match = selectNewsHook([ukCharityArticle], ["COCO"]);
+  assert.ok(match);
+  assert.match(match.text, /COCO community education/);
+});

@@ -66,7 +66,7 @@ describe("previewCharity", () => {
       periodEnd: "2025-03-31",
       totalIncome: 250_000,
       totalExpenditure: 240_000,
-      incomeBand: "100k_1m",
+      incomeBand: "100k_500k",
     });
   });
 

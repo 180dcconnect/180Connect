@@ -184,10 +184,18 @@ test("buildStageOnePrompt adapts its size guidance to the latest income band", (
   assert.match(buildStageOnePrompt({ ...context, incomeBand: "under_10k" }).system, /organisation is very small/);
   assert.equal(buildStageOnePrompt({ ...context, incomeBand: "10k_100k" }).sizeTemplate, "10k_100k");
   assert.match(buildStageOnePrompt({ ...context, incomeBand: "10k_100k" }).system, /organisation is small/);
-  assert.equal(buildStageOnePrompt({ ...context, incomeBand: "100k_1m" }).sizeTemplate, "100k_1m");
-  assert.match(buildStageOnePrompt({ ...context, incomeBand: "100k_1m" }).system, /established and mid-sized/);
-  assert.equal(buildStageOnePrompt({ ...context, incomeBand: "over_1m" }).sizeTemplate, "over_1m");
-  assert.match(buildStageOnePrompt({ ...context, incomeBand: "over_1m" }).system, /large and well established/);
+  assert.equal(buildStageOnePrompt({ ...context, incomeBand: "100k_500k" }).sizeTemplate, "100k_500k");
+  assert.match(buildStageOnePrompt({ ...context, incomeBand: "100k_500k" }).system, /emerging mid-sized charity/);
+  assert.equal(buildStageOnePrompt({ ...context, incomeBand: "500k_1m" }).sizeTemplate, "500k_1m");
+  assert.match(buildStageOnePrompt({ ...context, incomeBand: "500k_1m" }).system, /established and mid-sized/);
+  assert.equal(buildStageOnePrompt({ ...context, incomeBand: "1m_10m" }).sizeTemplate, "1m_10m");
+  assert.match(buildStageOnePrompt({ ...context, incomeBand: "1m_10m" }).system, /substantial and well established/);
+  assert.equal(buildStageOnePrompt({ ...context, incomeBand: "10m_50m" }).sizeTemplate, "10m_50m");
+  assert.match(buildStageOnePrompt({ ...context, incomeBand: "10m_50m" }).system, /regional anchor institution/);
+  assert.equal(buildStageOnePrompt({ ...context, incomeBand: "50m_100m" }).sizeTemplate, "50m_100m");
+  assert.match(buildStageOnePrompt({ ...context, incomeBand: "50m_100m" }).system, /major national non-profit/);
+  assert.equal(buildStageOnePrompt({ ...context, incomeBand: "over_100m" }).sizeTemplate, "over_100m");
+  assert.match(buildStageOnePrompt({ ...context, incomeBand: "over_100m" }).system, /major global or national institution/);
   const fallback = buildStageOnePrompt(context);
   assert.equal(fallback.sizeTemplate, "default");
   assert.match(fallback.system, /Organisation size is not known/);
@@ -366,7 +374,7 @@ test("the track record is stated, never embellished or diagnosed around", () => 
 });
 
 test("size never surfaces, not even as an adjective", () => {
-  for (const band of ["under_10k", "over_1m", null] as const) {
+  for (const band of ["under_10k", "over_100m", null] as const) {
     const { system } = buildStageOnePrompt({
       organisationName: "Example",
       organisationType: "charity",

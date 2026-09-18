@@ -14,9 +14,10 @@ import { useEffect, useRef, useState } from "react";
  * password link to each other, so the second page is reached by a client-side
  * navigation: the script never runs again, the freshly mounted container is
  * never rendered into, and the visitor is left with a hint pointing at a widget
- * that does not exist and a submit button that can never enable. `onReady` fires
- * on first load *and* on every subsequent mount, which is what makes an explicit
- * `render()` call reliable across navigations.
+ * that does not exist and a submit button that can never enable. Rendering
+ * explicitly, once this component has seen `window.turnstile` for itself, is
+ * what makes the widget reliable across navigations *and* across two of these
+ * mounted at the same time — see the readiness effect below.
  *
  * The site key is public by design — it identifies the widget, and only the
  * paired secret (held by Supabase) can validate a token. Read as a static
@@ -37,6 +38,13 @@ const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
  * visitor slowly working through an interactive challenge is unaffected.
  */
 const SCRIPT_TIMEOUT_MS = 10_000;
+
+/**
+ * How often to check whether `api.js` has defined the global yet. Short enough
+ * that a remount where the script is already in memory renders its widget
+ * without a visible pause.
+ */
+const READY_POLL_MS = 50;
 
 /** The subset of the Turnstile browser API this component uses. */
 type TurnstileOptions = {
@@ -118,10 +126,38 @@ export function TurnstileChallenge({
     onSolvedChangeRef.current = onSolvedChange;
   }, [onSolvedChange]);
 
-  // Flipped by `<Script onReady>`, which fires both on first load and on every
-  // later mount — including mounts where the script is already in memory, which
-  // is exactly the client-side navigation case that implicit rendering misses.
+  // Whether `api.js` has defined `window.turnstile`, established by asking the
+  // page rather than by trusting `<Script onReady>`.
+  //
+  // `onReady` cannot be trusted here because this component is mounted more
+  // than once at a time. The auth dialog keeps its sign-in and forgot-password
+  // panels both mounted so they can slide between each other, so two instances
+  // render two `<Script>` tags with the same `src`. `next/script` de-duplicates
+  // those: the first instance injects the tag, and every later instance takes
+  // the `ScriptCache.has(src)` branch, which calls `onLoad` and **never**
+  // `onReady` (`next/dist/client/script.js`). The second panel's `scriptReady`
+  // therefore stayed false forever — no widget, and ten seconds later the
+  // timeout below told the visitor to disable their ad blocker for a script
+  // that had in fact loaded perfectly.
+  //
+  // Polling the global is immune to all of it: mount order, de-duplication,
+  // client-side navigation, and a remount where the script is long since
+  // loaded. It costs a 50 ms interval that stops the moment the answer is yes.
   const [scriptReady, setScriptReady] = useState(false);
+
+  useEffect(() => {
+    const startedAt = Date.now();
+    const poll = setInterval(() => {
+      if (window.turnstile) {
+        clearInterval(poll);
+        setScriptReady(true);
+      } else if (Date.now() - startedAt >= SCRIPT_TIMEOUT_MS) {
+        clearInterval(poll);
+        setUnavailable(true);
+      }
+    }, READY_POLL_MS);
+    return () => clearInterval(poll);
+  }, []);
 
   // Rendering and teardown share one effect on purpose, so that every widget is
   // removed by the same cycle that created it. Splitting them (render from
@@ -174,14 +210,6 @@ export function TurnstileChallenge({
     };
   }, [scriptReady]);
 
-  useEffect(() => {
-    if (window.turnstile) return;
-    const timer = setTimeout(() => {
-      if (!widgetIdRef.current) setUnavailable(true);
-    }, SCRIPT_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, []);
-
   // Compared rather than watched by identity alone, so the initial value does
   // not count as a change and reset a widget nobody has touched yet.
   const previousResetKey = useRef(resetKey);
@@ -202,7 +230,6 @@ export function TurnstileChallenge({
       <Script
         src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
         strategy="afterInteractive"
-        onReady={() => setScriptReady(true)}
         onError={() => setUnavailable(true)}
       />
       {/* min-h holds the widget's normal 65px so the row does not pop in when

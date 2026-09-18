@@ -19,7 +19,8 @@ import {
  * the same person can never see different numbers.
  */
 
-/** F212 AC3 — how far below the team a CAM has to sit before it is worth saying. */
+/** F212 AC3 — how far below the team a CAM has to sit before it is worth saying.
+ *  `SUPPORT_CONVERSION_FACTOR` compares win rates (converted ÷ responded). */
 export const SUPPORT_CONVERSION_FACTOR = 0.5;
 export const SUPPORT_RESPONSE_FACTOR = 1.5;
 /** Below this many contacted clients, a CAM's rates are not yet a signal. */
@@ -81,7 +82,7 @@ export function conversionsOverTime(
 }
 
 export type SupportFlag = {
-  kind: "no_outreach" | "low_conversion" | "slow_response";
+  kind: "no_outreach" | "low_win_rate" | "slow_response";
   message: string;
 };
 
@@ -173,20 +174,20 @@ function supportFlagsFor(
     (other) => other.totals.contacted >= MIN_CONTACTED_FOR_COMPARISON,
   );
 
-  const conversionMedian = median(
+  const winMedian = median(
     comparable
-      .map((other) => other.totals.conversionRate)
+      .map((other) => other.totals.winRate)
       .filter((rate): rate is number => rate !== null),
   );
   if (
-    conversionMedian !== null &&
-    conversionMedian > 0 &&
-    row.totals.conversionRate !== null &&
-    row.totals.conversionRate < conversionMedian * SUPPORT_CONVERSION_FACTOR
+    winMedian !== null &&
+    winMedian > 0 &&
+    row.totals.winRate !== null &&
+    row.totals.winRate < winMedian * SUPPORT_CONVERSION_FACTOR
   ) {
     flags.push({
-      kind: "low_conversion",
-      message: "Converting at less than half the team's typical rate.",
+      kind: "low_win_rate",
+      message: "Winning less than half the clients the team typically wins from those who reply.",
     });
   }
 
@@ -217,8 +218,14 @@ export type TeamAnalyticsTotals = {
   contacted: number;
   emailsSent: number;
   respondingClients: number;
+  /** Replied ∪ converted, summed across the CAMs' books. */
+  respondedClients: number;
   conversions: number;
   camsNeedingSupport: number;
+  /** Replies ÷ contacted clients; null when nobody has been contacted. */
+  replyRate: number | null;
+  /** Conversions ÷ responded clients; null when nobody has responded. */
+  winRate: number | null;
 };
 
 export type UncountedClients = {
@@ -288,15 +295,23 @@ export function describeUncountedClients(uncounted: UncountedClients): string | 
   return `${uncounted.total.toLocaleString()} ${clients} not counted below: ${parts.join("; ")}.`;
 }
 
-/** F212 AC1 — the team headline, summed from the same per-CAM rows shown below it. */
+/**
+ * F212 AC1 — the team headline, summed from the same per-CAM rows shown below it.
+ *
+ * Summing client counts is exact here because each client has one owner, so no
+ * client appears in two CAMs' books; each row's `respondedClients` already
+ * resolved the replied-∪-converted union within its own set. The two rates are
+ * then the shared ones, over those sums — never a fresh division of events.
+ */
 export function teamTotals(rows: readonly CamAnalyticsRow[]): TeamAnalyticsTotals {
-  return rows.reduce<TeamAnalyticsTotals>(
+  const summed = rows.reduce(
     (totals, row) => ({
       cams: totals.cams + 1,
       clientsOwned: totals.clientsOwned + row.totals.clientsOwned,
       contacted: totals.contacted + row.totals.contacted,
       emailsSent: totals.emailsSent + row.totals.emailsSent,
       respondingClients: totals.respondingClients + row.totals.respondingClients,
+      respondedClients: totals.respondedClients + row.totals.respondedClients,
       conversions: totals.conversions + row.totals.conversions,
       camsNeedingSupport: totals.camsNeedingSupport + (row.flags.length > 0 ? 1 : 0),
     }),
@@ -306,19 +321,73 @@ export function teamTotals(rows: readonly CamAnalyticsRow[]): TeamAnalyticsTotal
       contacted: 0,
       emailsSent: 0,
       respondingClients: 0,
+      respondedClients: 0,
       conversions: 0,
       camsNeedingSupport: 0,
     },
   );
+
+  return {
+    ...summed,
+    replyRate: summed.contacted > 0 ? summed.respondingClients / summed.contacted : null,
+    winRate: summed.respondedClients > 0 ? summed.conversions / summed.respondedClients : null,
+  };
 }
 
 /** Worst first, so the people who need attention are at the top of the table. */
 export function sortByNeed(rows: readonly CamAnalyticsRow[]): CamAnalyticsRow[] {
   return [...rows].sort((a, b) => {
     if (a.flags.length !== b.flags.length) return b.flags.length - a.flags.length;
-    const aRate = a.totals.conversionRate ?? Number.POSITIVE_INFINITY;
-    const bRate = b.totals.conversionRate ?? Number.POSITIVE_INFINITY;
+    const aRate = a.totals.winRate ?? Number.POSITIVE_INFINITY;
+    const bRate = b.totals.winRate ?? Number.POSITIVE_INFINITY;
     if (aRate !== bRate) return aRate - bRate;
     return a.camName.localeCompare(b.camName);
   });
+}
+
+export type CycleTeamTotals = {
+  emailsSent: number;
+  /** Distinct clients emailed at least once in the window. */
+  contactedClients: number;
+  /** Distinct clients who replied at least once in the window. */
+  respondingClients: number;
+  /** Distinct clients who converted in the window. */
+  conversions: number;
+  /** Replies ÷ contacted clients; null when nothing was contacted. */
+  replyRate: number | null;
+  /** Conversions ÷ responded clients (replied ∪ converted); null when none. */
+  winRate: number | null;
+};
+
+/**
+ * The team headline for one outreach cycle ("Spring 26 vs Autumn 25").
+ *
+ * The inputs arrive pre-filtered to the cycle's window (see
+ * `filterByWindow` in outreach-cycles.ts) — this only counts. Rates follow
+ * `teamTotals` exactly (same definitions, same nulls), so a cycle's figures
+ * reconcile with the all-time ones rather than inventing a second vocabulary.
+ *
+ * The attribution rule this bakes in: emails count in the cycle they left in,
+ * replies and conversions in the cycle they arrived in. The analytics page
+ * states that next to the tiles, because a reply to a Spring email that lands
+ * in June belongs to no cycle under any rule without saying which.
+ */
+export function cycleTeamTotals(input: {
+  messages: readonly { organisation_id: string }[];
+  replies: readonly { organisation_id: string }[];
+  conversions: readonly { organisation_id: string }[];
+}): CycleTeamTotals {
+  const contacted = new Set(input.messages.map((message) => message.organisation_id));
+  const responded = new Set(input.replies.map((reply) => reply.organisation_id));
+  const converted = new Set(input.conversions.map((conversion) => conversion.organisation_id));
+  const respondedUnion = new Set([...responded, ...converted]);
+
+  return {
+    emailsSent: input.messages.length,
+    contactedClients: contacted.size,
+    respondingClients: responded.size,
+    conversions: converted.size,
+    replyRate: contacted.size > 0 ? responded.size / contacted.size : null,
+    winRate: respondedUnion.size > 0 ? converted.size / respondedUnion.size : null,
+  };
 }

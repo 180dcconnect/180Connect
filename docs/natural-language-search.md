@@ -100,4 +100,4 @@ someone must write — tracked as its own issue.
 | `src/lib/search/run-nl-search.ts` | The order of the decisions above — where the cost story lives. |
 
 The UI is the `ask` prop on `BrandSearchBar` (opt-in, additive) plus the
-interpretation banner in `src/app/clients/page.tsx`.
+interpretation banner in `src/app/(app)/clients/page.tsx`.

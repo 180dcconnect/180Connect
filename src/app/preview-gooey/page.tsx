@@ -24,6 +24,7 @@ import { GooeyEmailInput } from "@/components/ui/gooey-email-input";
 import { BrandCta } from "@/components/brand/brand-cta";
 import { GooeyBrandCta } from "@/components/brand/gooey-brand-cta";
 import { BackButton } from "@/components/ui/back-button";
+import { StickSlider } from "@/components/ui/stick-slider";
 import { DarkEmailPlayground } from "./dark-email-playground";
 
 type ThemeVariant = "light" | "brand" | "dark" | "glass";
@@ -63,6 +64,9 @@ export default function PreviewGooeyPage() {
   // Secondary demo states: Gooey Tabs
   const [activeTab, setActiveTab] = React.useState<number>(0);
   const tabsList = ["Overview", "Analytics", "Settings", "Activity"];
+
+  // Secondary demo states: Score Settings Slider
+  const [previewScore, setPreviewScore] = React.useState<number>(45);
 
   const handleResetControls = () => {
     setVariant("light");
@@ -816,7 +820,7 @@ export function NewsletterSignup() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {/* Gooey Tabs with Rubber Droplet Trail */}
             <div
               className={`rounded-3xl border p-6 sm:p-8 flex flex-col items-center justify-between min-h-[300px] transition-colors ${
@@ -1013,6 +1017,54 @@ export function NewsletterSignup() {
                 }`}
               >
                 Click the + button — three satellite droplets bud out from the center with fluid surface tension.
+              </p>
+            </div>
+
+            {/* Score Settings Slider with Gooey Circle Handle */}
+            <div
+              className={`rounded-3xl border p-6 sm:p-8 flex flex-col justify-between min-h-[300px] transition-colors ${
+                isDarkPage
+                  ? "bg-[#14151b] border-white/[0.08]"
+                  : "bg-white border-black/[0.07] shadow-sm"
+              }`}
+            >
+              <div
+                className={`w-full flex items-center justify-between text-xs mb-2 ${
+                  isDarkPage ? "text-white/50" : "text-neutral-600"
+                }`}
+              >
+                <span className="font-bold text-neutral-900 dark:text-white">Score Settings Slider</span>
+                <span className="font-mono text-[11px] bg-neutral-100 dark:bg-white/10 px-2 py-0.5 rounded-full">
+                  effect=&quot;move&quot;
+                </span>
+              </div>
+              <div className="my-auto py-6 w-full space-y-4">
+                <div className="flex justify-between items-baseline text-xs">
+                  <span className={`font-semibold ${isDarkPage ? "text-white" : "text-neutral-900"}`}>
+                    Priority Check Gauge
+                  </span>
+                  <span className="font-mono text-xs text-neutral-500 dark:text-white/50">
+                    Scores <span className={`font-bold font-mono ${isDarkPage ? "text-[#e6f5c0]" : "text-neutral-900"}`}>{previewScore}</span> out of 100
+                  </span>
+                </div>
+                <div className="px-1">
+                  <StickSlider
+                    id="preview-gooey-score-slider"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={previewScore}
+                    onValueChange={setPreviewScore}
+                    aria-valuetext={`${previewScore} out of 100`}
+                  />
+                </div>
+              </div>
+              <p
+                className={`text-[11px] text-center ${
+                  isDarkPage ? "text-white/40" : "text-neutral-500"
+                }`}
+              >
+                Drag the white handle — the circle moves with viscous rubber tension and a trailing droplet.
               </p>
             </div>
           </div>

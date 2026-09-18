@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import LegalPage from "@/components/legal-page";
 
+// Static legal copy — no cookies, no user, no fetch. Prerendered once.
+export const dynamic = "force-static";
+
 export const metadata: Metadata = {
   title: "Terms of Service | 180Connect",
   description:

@@ -259,12 +259,20 @@ export function recoveryCookieOptions(): RecoveryCookieOptions {
  * `/forgot-password` and `/login` are the ways out: blocking them would trap
  * someone who abandoned the reset in a redirect loop with no escape but waiting
  * for the cookie to expire.
+ *
+ * `/terms` and `/privacy` are the legal pages the form links to (and previews
+ * in an iframe on hover). They are public, signed-out pages holding no account
+ * data, so letting a mid-recovery session read them gives away nothing — and
+ * confining them instead silently renders the reset page inside its own hover
+ * preview, which is what the redirect returns.
  */
 const RECOVERY_ALLOWED_PREFIXES = [
   "/reset-password",
   "/forgot-password",
   "/login",
   "/auth/",
+  "/terms",
+  "/privacy",
 ];
 
 /** Whether a mid-recovery session is allowed to see `pathname`. */

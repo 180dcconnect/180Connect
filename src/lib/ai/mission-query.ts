@@ -2,7 +2,7 @@
  * F215 Search by Mission — AC2 (semantic half).
  *
  * The keyword half of mission search (`searchClientsByMission` in
- * src/app/clients/visible-clients.ts) matches whole words, so a CAM who types
+ * src/app/(app)/clients/visible-clients.ts) matches whole words, so a CAM who types
  * "helping refugees" only finds charities that use those exact words. This
  * module widens that: it asks Gemini for a handful of *alternative* words and
  * short phrases that mean the same thing ("asylum seekers", "displaced

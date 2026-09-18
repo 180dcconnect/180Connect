@@ -1199,17 +1199,22 @@ begin
   perform set_config('request.jwt.claims', null, true);
   return next is(v_count, 0::bigint, 'CAM sees zero raw source records');
 
+  -- Leadership (viewer) reads what an admin reads — 20261004180000, Q-06 revised.
+  -- Compared against the unfiltered count so the assertion cannot pass on an
+  -- empty table.
   perform tests.login_as(v_viewer);
   select count(*) into v_count from public.ingestion_runs;
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
-  return next is(v_count, 0::bigint, 'viewer sees zero ingestion runs');
+  return next is(v_count, (select count(*) from public.ingestion_runs),
+    'viewer (leadership) reads every ingestion run, as an admin does');
 
   perform tests.login_as(v_viewer);
   select count(*) into v_count from public.raw_source_records;
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
-  return next is(v_count, 0::bigint, 'viewer sees zero raw source records');
+  return next is(v_count, (select count(*) from public.raw_source_records),
+    'viewer (leadership) reads every raw source record, as an admin does');
 
   -- INSERT on ingestion_runs is admin-only, so a CAM triggering a run is refused.
   v_state := tests.sqlstate_of(v_cam_a,
@@ -1482,10 +1487,14 @@ declare
   v_action_a    uuid := '00000000-0000-4000-c000-000000000001';
   v_act_mine    uuid := '00000000-0000-4000-c000-000000000021';
   v_act_theirs  uuid := '00000000-0000-4000-c000-000000000022';
+  v_team_task   uuid := '00000000-0000-4000-c000-000000000023';
   v_assignee    uuid;
   v_status      public.action_status;
   v_completed_at timestamptz;
   v_completed_by uuid;
+  v_priority    smallint;
+  v_title       text;
+  v_updated_at  timestamptz;
   v_count       bigint;
 begin
   if not tests.tables_exist('actions', 'organisations', 'users') then
@@ -1627,6 +1636,132 @@ begin
   select count(*) into v_count from public.actions where id = v_act_theirs;
   return next is(v_count, 1::bigint,
     'CAM cannot delete an action they raised once it belongs to someone else');
+
+  -- Team tasks tracker: priority is stored compactly but edited only through
+  -- the audited admin RPC. Viewer and CAM controls are hidden in the app; these
+  -- refusals are the load-bearing backstop if either reaches the write anyway.
+  if to_regprocedure(
+       'public.update_team_task(uuid,text,text,date,smallint,uuid,timestamp with time zone)'
+     ) is null
+     or to_regprocedure(
+       'public.set_team_task_status(uuid,public.action_status,timestamp with time zone)'
+     ) is null then
+    return next skip(13, 'Team tasks tracker RPCs not yet migrated');
+    return;
+  end if;
+
+  insert into public.actions
+    (id, organisation_id, assignee_user_id, created_by_user_id, title)
+  values
+    (v_team_task, v_org_cam_a, v_cam_a, v_admin, 'Prepare the renewal pack');
+
+  select priority, updated_at
+    into v_priority, v_updated_at
+    from public.actions where id = v_team_task;
+  return next is(v_priority, 2::smallint,
+    'existing writers get Normal priority by default');
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'update public.actions set priority = 1 where id = %L', v_team_task)),
+    '42501',
+    'admin cannot change task priority by direct write — the audited RPC is required'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.update_team_task(%L, %L, null, null, 1::smallint, %L, %L)',
+      v_team_task, 'CAM edit', v_cam_b, v_updated_at)),
+    '42501',
+    'CAM cannot use the Team tasks edit RPC'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.update_team_task(%L, %L, null, null, 1::smallint, %L, %L)',
+      v_team_task, 'Viewer edit', v_cam_b, v_updated_at)),
+    '42501',
+    'viewer cannot use the Team tasks edit RPC'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.update_team_task(%L, %L, %L, %L, 1::smallint, %L, %L)',
+      v_team_task, 'Prepare and send the renewal pack', 'Include the revised figures',
+      '2026-10-01', v_cam_b, v_updated_at)),
+    null,
+    'admin can edit and reassign a team task through the RPC'
+  );
+
+  select title, priority, assignee_user_id, updated_at
+    into v_title, v_priority, v_assignee, v_updated_at
+    from public.actions where id = v_team_task;
+  return next ok(
+    v_title = 'Prepare and send the renewal pack'
+      and v_priority = 1
+      and v_assignee = v_cam_b,
+    'the Team tasks edit RPC changes the requested fields together'
+  );
+  return next ok(
+    exists (
+      select 1 from public.audit_log
+       where target_table = 'actions' and target_id = v_team_task
+         and action = 'action_updated'
+    ) and exists (
+      select 1 from public.audit_log
+       where target_table = 'actions' and target_id = v_team_task
+         and action = 'action_reassigned'
+    ),
+    'editing and reassigning a team task records both audit events'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.update_team_task(%L, %L, null, null, 2::smallint, %L, %L)',
+      v_team_task, 'Stale edit', v_cam_a, v_updated_at - interval '1 second')),
+    '40001',
+    'a stale team task edit is refused instead of overwriting newer work'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.set_team_task_status(%L, ''cancelled'', %L)',
+      v_team_task, v_updated_at)),
+    '42501',
+    'viewer cannot change a team task status'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_team_task_status(%L, ''cancelled'', %L)',
+      v_team_task, v_updated_at)),
+    null,
+    'admin can cancel a team task through the audited RPC'
+  );
+  select status, updated_at into v_status, v_updated_at
+    from public.actions where id = v_team_task;
+  return next is(v_status, 'cancelled'::public.action_status,
+    'the cancelled task remains on record');
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_team_task_status(%L, ''open'', %L)',
+      v_team_task, v_updated_at)),
+    null,
+    'admin can restore a cancelled task to Open from the same screen'
+  );
+  return next ok(
+    exists (
+      select 1 from public.audit_log
+       where target_table = 'actions' and target_id = v_team_task
+         and action = 'action_cancelled'
+    ) and exists (
+      select 1 from public.audit_log
+       where target_table = 'actions' and target_id = v_team_task
+         and action = 'action_reopened'
+    ),
+    'cancel and restore each leave an audit event'
+  );
 end;
 $$;
 
@@ -3454,7 +3589,8 @@ begin
   perform tests.login_as(v_viewer);
   select count(*) into v_count from public.data_handling_rules;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
-  return next is(v_count, 0::bigint, 'viewer cannot read the data handling rules');
+  return next is(v_count, (select count(*) from public.data_handling_rules),
+    'viewer (leadership) reads the data handling rules, as an admin does');
 
   perform tests.login_as(v_admin);
   select count(*) into v_count from public.data_handling_rules;
@@ -3667,8 +3803,8 @@ begin
   );
   return next is(
     tests.sqlstate_of(v_viewer, 'select * from public.data_handling_coverage()'),
-    'P0001',
-    'viewer cannot read data handling coverage'
+    null,
+    'viewer (leadership) reads data handling coverage'
   );
   return next is(
     tests.sqlstate_of(v_dead_admin, 'select * from public.data_handling_coverage()'),
@@ -4229,7 +4365,7 @@ declare
   v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
   v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
   v_admin  uuid := '00000000-0000-4000-a000-000000000001';
-  v_viewer uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer uuid := '00000000-0000-4000-a000-000000000005';
   v_count  bigint;
 begin
   if not tests.tables_exist('outreach_preferences') then
@@ -4277,12 +4413,14 @@ begin
   perform set_config('request.jwt.claims', null, true);
   return next is(v_count, 1::bigint, 'an admin can view a CAM''s outreach preferences (F187)');
 
-  -- Viewer cannot read another CAM's preferences
+  -- Leadership (viewer) reads a CAM's preferences as an admin does, and cannot
+  -- write them (no write policy names viewers).
   perform tests.login_as(v_viewer);
   select count(*) into v_count from public.outreach_preferences where user_id = v_cam_a;
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
-  return next is(v_count, 0::bigint, 'a viewer cannot read a CAM''s outreach preferences');
+  return next is(v_count, (select count(*) from public.outreach_preferences where user_id = v_cam_a),
+    'a viewer (leadership) reads a CAM''s outreach preferences, as an admin does');
 end;
 $$;
 
@@ -4450,7 +4588,8 @@ begin
    where organisation_id = v_org;
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
-  return next is(v_count, 0::bigint, 'a viewer sees no suggestions at all');
+  return next is(v_count, (select count(*) from public.edit_suggestions where organisation_id = v_org),
+    'a viewer (leadership) sees every suggestion, as an admin does');
 
   perform tests.login_as(v_admin);
   select count(*) into v_count from public.edit_suggestions
@@ -5130,8 +5269,17 @@ begin
   select count(*) into v_count from public.restricted_edit_fields;
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
-  return next is(v_count, 0::bigint,
-    'a viewer sees no restricted-field configuration');
+  return next is(v_count, (select count(*) from public.restricted_edit_fields),
+    'a viewer (leadership) reads the restricted-field configuration, as an admin does');
+  return next is(
+    tests.sqlstate_of(v_viewer, 'select * from public.list_restrictable_edit_fields()'),
+    null,
+    'a viewer (leadership) may list the restrictable fields');
+  return next is(
+    tests.sqlstate_of(v_viewer,
+      'select public.add_restricted_edit_field(''trading_name'', ''leadership trying to lock'')'),
+    '42501',
+    'a viewer (leadership) still cannot restrict a field');
 
   -- Who may change the configuration: admins only, with a reason, on real text
   -- columns only.
@@ -5415,6 +5563,100 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------------
+-- Outreach cycles: shared read, admin-only writes
+-- ---------------------------------------------------------------------------
+create or replace function tests.suite_cycles()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_count       bigint;
+begin
+  if not tests.tables_exist('outreach_cycles') then
+    return next skip(10, 'outreach cycles not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  return next is(
+    tests.sqlstate_of(v_admin,
+      'insert into public.outreach_cycles (name, starts_on, ends_on) values (''Spring 26'', ''2026-01-12'', ''2026-04-03'')'),
+    null,
+    'an admin defines a cycle'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      'insert into public.outreach_cycles (name, starts_on, ends_on) values (''CAM cycle'', ''2026-04-04'', ''2026-06-01'')'),
+    '42501',
+    'a CAM cannot define a cycle'
+  );
+
+  -- A cycle is a name and two dates — no personal data — so every active role
+  -- reads the definitions the analytics pickers list.
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.outreach_cycles;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'a viewer reads cycle definitions');
+
+  perform tests.login_as(v_deactivated);
+  select count(*) into v_count from public.outreach_cycles;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a deactivated user reads no cycles');
+
+  -- Names collide case-insensitively: "spring 26" cannot sit beside "Spring 26".
+  return next is(
+    tests.sqlstate_of(v_admin,
+      'insert into public.outreach_cycles (name, starts_on, ends_on) values (''spring 26'', ''2026-04-04'', ''2026-06-01'')'),
+    '23505',
+    'a duplicate cycle name is refused case-insensitively'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin,
+      'insert into public.outreach_cycles (name, starts_on, ends_on) values (''Backwards'', ''2026-06-01'', ''2026-04-04'')'),
+    '23514',
+    'an end before the start is refused'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      'update public.outreach_cycles set name = ''Renamed'''),
+    null,
+    'a CAM cannot rename a cycle'
+  );
+
+  perform tests.login_as(v_admin);
+  update public.outreach_cycles set name = 'Spring 26 (revised)' where name = 'Spring 26';
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.outreach_cycles where name = 'Spring 26 (revised)';
+  return next is(v_count, 1::bigint, 'an admin renames a cycle');
+
+  -- A blocked DELETE removes zero rows and raises nothing (§4), so the assertion
+  -- is that the row survives someone else trying.
+  perform tests.login_as(v_cam_a);
+  delete from public.outreach_cycles;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.outreach_cycles;
+  return next is(v_count, 1::bigint, 'a CAM cannot delete a cycle');
+
+  perform tests.login_as(v_admin);
+  delete from public.outreach_cycles;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.outreach_cycles;
+  return next is(v_count, 0::bigint, 'an admin deletes a cycle');
+end;
+$$;
+
 select * from tests.suite_rls_initplan();
 select * from tests.suite_core();
 select * from tests.suite_viewer();
@@ -5449,6 +5691,7 @@ select * from tests.suite_url_import();
 select * from tests.suite_onboarding();
 select * from tests.suite_outreach_preferences();
 select * from tests.suite_saved_views();
+select * from tests.suite_cycles();
 select * from tests.suite_client_criteria();
 select * from tests.suite_data_handling_rules();
 select * from tests.suite_personal_data_exclusion();

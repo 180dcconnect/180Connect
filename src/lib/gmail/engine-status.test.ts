@@ -157,6 +157,7 @@ describe("getOutreachEngineHealth", () => {
     );
     assert.equal(health.replySync.status, "unconfigured");
     assert.equal(health.scheduledSend.status, "unconfigured");
+    assert.match(health.replySync.detail, /runs every 5 minutes/);
   });
 
   it("marks both cron jobs degraded when the RPC errors", async () => {
@@ -209,8 +210,12 @@ describe("getOutreachEngineHealth", () => {
     assert.equal(health.scheduledSend.status, "degraded");
   });
 
-  it("marks a cron job degraded when its last successful run is stale", async () => {
-    const staleTimestamp = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  it("marks a cron job degraded when it is the one that stopped", async () => {
+    // Two hours silent is well past the hour bound, and the sibling job has
+    // reported since — so the scheduler is demonstrably awake and this job is
+    // not. Not a boundary value: the check is `>`, so a fixture at exactly the
+    // bound would depend on how many milliseconds the test itself took.
+    const staleTimestamp = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     const health = await quiet(() =>
       getOutreachEngineHealth(
         stubSupabase(async () => ({
@@ -220,6 +225,12 @@ describe("getOutreachEngineHealth", () => {
               last_run_at: staleTimestamp,
               last_run_succeeded: true,
             },
+            {
+              // The 30-second check is what proves the schedule is awake.
+              job_name: "gmail_reply_check",
+              last_run_at: new Date().toISOString(),
+              last_run_succeeded: true,
+            },
           ],
           error: null,
         })),
@@ -227,6 +238,87 @@ describe("getOutreachEngineHealth", () => {
       ),
     );
     assert.equal(health.replySync.status, "degraded");
+  });
+
+  it("stays active shortly after the hour bound, before it is proof of a break", async () => {
+    const health = await quiet(() =>
+      getOutreachEngineHealth(
+        stubSupabase(async () => ({
+          data: [
+            {
+              job_name: "gmail_reply_sync",
+              last_run_at: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+              last_run_succeeded: true,
+            },
+            {
+              job_name: "gmail_reply_check",
+              last_run_at: new Date().toISOString(),
+              last_run_succeeded: true,
+            },
+          ],
+          error: null,
+        })),
+        {},
+      ),
+    );
+    assert.equal(health.replySync.status, "active");
+  });
+
+  it("stays active when every job is stale together, which is a sleeping platform", async () => {
+    // The free plan's database pauses between visits, so the first load of the
+    // day wakes it and the jobs come back hours stale at once, catching up
+    // seconds later. That is not a stalled pipeline and must not raise a banner.
+    const staleTimestamp = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
+    const health = await quiet(() =>
+      getOutreachEngineHealth(
+        stubSupabase(async () => ({
+          data: [
+            {
+              job_name: "gmail_reply_sync",
+              last_run_at: staleTimestamp,
+              last_run_succeeded: true,
+            },
+            {
+              job_name: "scheduled_outreach_delivery",
+              last_run_at: staleTimestamp,
+              last_run_succeeded: true,
+            },
+            {
+              job_name: "gmail_reply_check",
+              last_run_at: staleTimestamp,
+              last_run_succeeded: true,
+            },
+          ],
+          error: null,
+        })),
+        {},
+      ),
+    );
+    assert.equal(health.replySync.status, "active");
+    assert.equal(health.scheduledSend.status, "active");
+    // The reading is kept even though the alarm is withheld: the note still
+    // says when it last reported.
+    assert.match(health.replySync.detail, /Last run completed at /);
+  });
+
+  it("keeps the 30-second check off the card — it is only a liveness clock", async () => {
+    const health = await quiet(() =>
+      getOutreachEngineHealth(
+        stubSupabase(async () => ({
+          data: [
+            {
+              job_name: "gmail_reply_check",
+              last_run_at: new Date().toISOString(),
+              last_run_succeeded: false,
+            },
+          ],
+          error: null,
+        })),
+        {},
+      ),
+    );
+    assert.equal(health.replySync.status, "unconfigured");
+    assert.equal(health.scheduledSend.status, "unconfigured");
   });
 
   it("describes what a healthy job does instead of only when it last ran", async () => {

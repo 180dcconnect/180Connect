@@ -84,6 +84,15 @@ export function ResetPasswordForm({
   const [password, setPassword] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const needsName = !existingFullName;
+  // Setting up an account asks for a name and the terms; coming back through a
+  // forgot-password link does not. That person already has an account, already
+  // agreed to the terms, and knows which address they asked to reset — showing
+  // their own name and email back to them is noise on a form whose only job is
+  // the two password fields. A recovery account that somehow has no name still
+  // gets the field, because the Server Action refuses to finish without one.
+  const showName = Boolean(isInvite) || needsName;
+  const showEmail = Boolean(isInvite) && Boolean(email);
+  const showTerms = Boolean(isInvite);
 
   if (linkError) {
     return (
@@ -118,7 +127,7 @@ export function ResetPasswordForm({
         </div>
       )}
 
-      {email && (
+      {showEmail && (
         <div className="flex flex-col gap-1">
           <div className="relative">
             <FloatingInput
@@ -134,25 +143,27 @@ export function ResetPasswordForm({
         </div>
       )}
 
-      <div className="flex flex-col gap-1">
-        <FloatingLabelInput
-          id="fullName"
-          name="fullName"
-          type="text"
-          autoComplete="name"
-          defaultValue={existingFullName ?? ""}
-          aria-invalid={Boolean(state.fieldErrors?.fullName)}
-          className={fieldClass("light")}
-          label="Your name"
-          required={needsName}
-          maxLength={120}
-        />
-        {state.fieldErrors?.fullName?.[0] && (
-          <p className={fieldErrorClass("light")}>
-            {state.fieldErrors.fullName[0]}
-          </p>
-        )}
-      </div>
+      {showName && (
+        <div className="flex flex-col gap-1">
+          <FloatingLabelInput
+            id="fullName"
+            name="fullName"
+            type="text"
+            autoComplete="name"
+            defaultValue={existingFullName ?? ""}
+            aria-invalid={Boolean(state.fieldErrors?.fullName)}
+            className={fieldClass("light")}
+            label="Your name"
+            required={needsName}
+            maxLength={120}
+          />
+          {state.fieldErrors?.fullName?.[0] && (
+            <p className={fieldErrorClass("light")}>
+              {state.fieldErrors.fullName[0]}
+            </p>
+          )}
+        </div>
+      )}
 
       <NewPasswordField
         id="password"
@@ -177,54 +188,58 @@ export function ResetPasswordForm({
         )}
       </div>
 
-      {/* Terms & Conditions Checkbox with PreviewLinkCard */}
-      <div className="pt-1">
-        <label htmlFor="terms" className="flex items-center gap-3 cursor-pointer select-none font-body text-xs leading-snug text-[#0c1014]/75">
-          <Checkbox
-            id="terms"
-            name="terms"
-            checked={acceptedTerms}
-            onCheckedChange={(checked) => setAcceptedTerms(Boolean(checked))}
-            required
-            className="border-[#0c1014]/30 data-[state=checked]:bg-[#0c1014] data-[state=checked]:text-[#f4f4ef]"
-          />
-          <span>
-            I agree to the{" "}
-            <PreviewLinkCard>
-              <PreviewLinkCardTrigger
-                render={
-                  <Link
-                    href="/terms"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-0.5 font-semibold text-[#0c1014] underline underline-offset-4 hover:opacity-80"
-                  >
-                    Terms &amp; Conditions
-                  </Link>
-                }
-              />
-              <PagePreviewPanel href="/terms" title="Terms & Conditions" />
-            </PreviewLinkCard>{" "}
-            and{" "}
-            <PreviewLinkCard>
-              <PreviewLinkCardTrigger
-                render={
-                  <Link
-                    href="/privacy"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-0.5 font-semibold text-[#0c1014] underline underline-offset-4 hover:opacity-80"
-                  >
-                    Privacy Policy
-                  </Link>
-                }
-              />
-              <PagePreviewPanel href="/privacy" title="Privacy Policy" />
-            </PreviewLinkCard>
-            .
-          </span>
-        </label>
-      </div>
+      {/* Terms & Conditions — account setup only. A password reset is not a
+          new agreement: the person accepted these when they set the account
+          up, so asking again would be a gate with nothing behind it. */}
+      {showTerms && (
+        <div className="pt-1">
+          <label htmlFor="terms" className="flex items-center gap-3 cursor-pointer select-none font-body text-xs leading-snug text-[#0c1014]/75">
+            <Checkbox
+              id="terms"
+              name="terms"
+              checked={acceptedTerms}
+              onCheckedChange={(checked) => setAcceptedTerms(Boolean(checked))}
+              required
+              className="border-[#0c1014]/30 data-[state=checked]:bg-[#0c1014] data-[state=checked]:text-[#f4f4ef]"
+            />
+            <span>
+              I agree to the{" "}
+              <PreviewLinkCard>
+                <PreviewLinkCardTrigger
+                  render={
+                    <Link
+                      href="/terms"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-0.5 font-semibold text-[#0c1014] underline underline-offset-4 hover:opacity-80"
+                    >
+                      Terms &amp; Conditions
+                    </Link>
+                  }
+                />
+                <PagePreviewPanel href="/terms" title="Terms & Conditions" />
+              </PreviewLinkCard>{" "}
+              and{" "}
+              <PreviewLinkCard>
+                <PreviewLinkCardTrigger
+                  render={
+                    <Link
+                      href="/privacy"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-0.5 font-semibold text-[#0c1014] underline underline-offset-4 hover:opacity-80"
+                    >
+                      Privacy Policy
+                    </Link>
+                  }
+                />
+                <PagePreviewPanel href="/privacy" title="Privacy Policy" />
+              </PreviewLinkCard>
+              .
+            </span>
+          </label>
+        </div>
+      )}
 
       <BrandCtaButton
         label={
@@ -234,7 +249,7 @@ export function ResetPasswordForm({
               ? "Create account"
               : "Set new password"
         }
-        disabled={pending || !acceptedTerms}
+        disabled={pending || (showTerms && !acceptedTerms)}
         className="mt-2 self-start"
       />
     </form>

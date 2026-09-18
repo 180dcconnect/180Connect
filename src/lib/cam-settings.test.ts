@@ -52,11 +52,17 @@ describe("cam-settings helpers (F187)", () => {
       }
     });
 
-    it("blocks active viewers from accessing user:manage permission", () => {
+    it("lets an active viewer see CAM settings but refuses them the change", () => {
+      // Q-06 revised 15 Sep 2026: leadership opens the page (`view`) and is
+      // refused the save (`use`) with the view-only reason.
+      assert.equal(
+        authorizeUserProfile({ id: "u-viewer" }, viewerProfile, "user:manage", "view").ok,
+        true,
+      );
       const auth = authorizeUserProfile({ id: "u-viewer" }, viewerProfile, "user:manage");
       assert.equal(auth.ok, false);
       if (!auth.ok) {
-        assert.equal(auth.reason, "forbidden");
+        assert.equal(auth.reason, "view_only");
         assert.equal(adminRouteDestination(auth.reason), ADMIN_ACCESS_DENIED_PATH);
       }
     });
@@ -121,7 +127,7 @@ describe("cam-settings helpers (F187)", () => {
         user_id: "u-1",
         preferred_geographic_reach: [],
         preferred_sectors: [],
-        preferred_income_bands: ["100k_1m"],
+        preferred_income_bands: ["100k_500k"],
       };
       assert.equal(hasConfiguredPreferences(prefs), true);
     });
@@ -138,9 +144,9 @@ describe("cam-settings helpers (F187)", () => {
     });
 
     it("formats income band labels properly", () => {
-      assert.deepEqual(getIncomeBandLabels(["under_10k", "over_1m"]), [
+      assert.deepEqual(getIncomeBandLabels(["under_10k", "over_100m"]), [
         "Under £10k",
-        "Over £1m",
+        "Over £100m",
       ]);
       assert.deepEqual(getIncomeBandLabels([]), []);
       assert.deepEqual(getIncomeBandLabels(null), []);

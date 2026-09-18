@@ -10,7 +10,9 @@ describe("F135 reply follow-up contract", () => {
   it("accepts only a reply id from the browser and loads the actual reply under the client", async () => {
     const route = await source("../../app/api/clients/[id]/outreach-drafts/stage-two/route.ts");
 
-    assert.match(route, /replyEventId: z\.uuid\(\)\.optional\(\)/);
+    // `uuidField()` is the shared-validation half of `z.uuid()` (lib/validation.ts),
+    // so either spelling means the same schema: a well-formed UUID and nothing else.
+    assert.match(route, /replyEventId: (z\.uuid|uuidField)\(\)\.optional\(\)/);
     assert.doesNotMatch(route, /replyBody: z\./, "reply text must never be trusted from the browser");
     assert.match(route, /\.from\("reply_events"\)[\s\S]*?\.eq\("id", parsed\.data\.replyEventId\)[\s\S]*?\.eq\("organisation_id", organisationId\)/);
     assert.match(route, /replyBody: replyEvent\?\.reply_body/);

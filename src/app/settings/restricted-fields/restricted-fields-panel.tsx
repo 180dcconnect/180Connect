@@ -1,7 +1,8 @@
 "use client";
 
 import { useId, useState } from "react";
-import { Check, Loader2, Lock } from "lucide-react";
+import { Check, Loader2, Lock, Unlock } from "lucide-react";
+import { Switch } from "@/components/ui/material-design-3-switch";
 import { Rise } from "@/components/dashboard-stage";
 import {
   Select,
@@ -23,8 +24,8 @@ import {
   FOOTNOTE,
   INPUT,
   PRIMARY_BUTTON,
+  QUIET_BUTTON,
   ROW,
-  ROW_ACTION,
   SELECT_CONTENT,
   SELECT_ITEM,
   SELECT_TRIGGER,
@@ -49,10 +50,12 @@ const NETWORK_ERROR = "Could not reach the server. Check your connection and try
 export function RestrictedFieldsPanel({
   initialFields,
   lockableFields,
+  readOnly = false,
 }: {
   initialFields: RestrictedFieldRow[];
   /** Every field the database will let an admin lock, locked or not. */
   lockableFields: string[];
+  readOnly?: boolean;
 }) {
   const [rows, setRows] = useState(initialFields);
   const [fieldName, setFieldName] = useState("");
@@ -60,15 +63,24 @@ export function RestrictedFieldsPanel({
   const [notice, setNotice] = useState<Notice>(null);
   const [adding, setAdding] = useState(false);
   const [working, setWorking] = useState<string | null>(null);
+  // Unlocking a field lets CAMs change it directly again, so it waits in this
+  // pending slot until the admin confirms in the sticky bar at the bottom of
+  // the screen (the same position as the score settings save bar). The switch
+  // is controlled and stays visibly locked until then — the unlock animation
+  // plays when the save lands and the row refreshes. The row never leaves the
+  // list: unlocked fields stay where they are with their switch off, so locking
+  // one again is the same toggle.
+  const [pendingUnlock, setPendingUnlock] = useState<string | null>(null);
   const selectId = useId();
   const reasonId = useId();
 
-  const active = rows.filter((row) => row.active);
-  const unlocked = rows.filter((row) => !row.active);
-  const lockedNames = new Set(active.map((row) => row.field_name));
+  // Every field ever locked stays in the main list, locked or not — so the
+  // "lock another field" dropdown only offers what is not already there.
+  const existingNames = new Set(rows.map((row) => row.field_name));
   const available = lockableFields
-    .filter((field) => !lockedNames.has(field))
+    .filter((field) => !existingNames.has(field))
     .sort((a, b) => restrictedFieldLabel(a).localeCompare(restrictedFieldLabel(b)));
+  const pendingRow = rows.find((row) => row.field_name === pendingUnlock) ?? null;
 
   const selectedDescription = fieldName ? restrictedFieldDescription(fieldName) : null;
 
@@ -125,13 +137,14 @@ export function RestrictedFieldsPanel({
       if (await send("DELETE", { fieldName: field })) {
         setNotice({
           tone: "success",
-          text: `${restrictedFieldLabel(field)} is unlocked. CAMs can change it directly again — you can lock it again below.`,
+          text: `${restrictedFieldLabel(field)} is unlocked. CAMs can change it directly again — it stays in the list above, so you can lock it again with the same switch.`,
         });
         await refresh();
       }
     } catch {
       setNotice({ tone: "error", text: NETWORK_ERROR });
     } finally {
+      setPendingUnlock(null);
       setWorking(null);
     }
   }
@@ -187,33 +200,55 @@ export function RestrictedFieldsPanel({
           </p>
 
           <ul className="mt-4">
-            {active.map((row) => (
+            {rows.map((row) => (
               <li key={row.field_name} className={`${ROW} items-start`}>
                 <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-1.5 text-sm font-medium text-ink">
-                    <Lock aria-hidden="true" className="size-3.5 shrink-0 text-faint" strokeWidth={2} />
+                  <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-ink">
+                    {row.active ? (
+                      <Lock aria-hidden="true" className="size-3.5 shrink-0 text-faint" strokeWidth={2} />
+                    ) : (
+                      <Unlock aria-hidden="true" className="size-3.5 shrink-0 text-faint" strokeWidth={2} />
+                    )}
                     {restrictedFieldLabel(row.field_name)}
+                    {!row.active && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-paper px-2 py-0.5 text-[11px] font-medium text-dim">
+                        Unlocked
+                      </span>
+                    )}
                   </p>
                   <p className="mt-1 text-[13px] leading-[1.55] text-dim">
                     <span className="text-faint">Why: </span>
                     {row.reason}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => unlock(row.field_name)}
-                  disabled={working === row.field_name}
-                  aria-busy={working === row.field_name || undefined}
-                  className={`${ROW_ACTION} inline-flex items-center gap-1.5 disabled:pointer-events-none disabled:opacity-50`}
-                >
-                  {working === row.field_name && (
-                    <Loader2 aria-hidden="true" className="size-3 animate-spin" strokeWidth={2.2} />
-                  )}
-                  Unlock<span className="sr-only"> {restrictedFieldLabel(row.field_name)}</span>
-                </button>
+                {!readOnly && (
+                  <Switch
+                    role="switch"
+                    aria-label={`Lock on ${restrictedFieldLabel(row.field_name)}`}
+                    checked={row.active}
+                    aria-busy={working === row.field_name || undefined}
+                    onCheckedChange={(checked) => {
+                      if (!checked) {
+                        // The switch stays locked until the bottom bar confirms —
+                        // flipping it here would lie about what CAMs can do.
+                        if (row.active) {
+                          setNotice(null);
+                          setPendingUnlock(row.field_name);
+                        }
+                      } else if (!row.active) {
+                        void relock(row);
+                      }
+                    }}
+                    disabled={working === row.field_name}
+                    variant="destructive"
+                    showIcons
+                    checkedIcon={<Lock aria-hidden="true" className="size-3" />}
+                    uncheckedIcon={<Unlock aria-hidden="true" className="size-3" />}
+                  />
+                )}
               </li>
             ))}
-            {active.length === 0 && (
+            {rows.length === 0 && (
               <li className={`${ROW} text-[13px] text-dim`}>
                 No fields are locked. CAMs can change every detail on a client record directly.
               </li>
@@ -222,8 +257,9 @@ export function RestrictedFieldsPanel({
         </section>
       </Rise>
 
-      <Rise>
-        <section aria-labelledby="lock-heading" className={CARD}>
+      {!readOnly && (
+        <Rise>
+          <section aria-labelledby="lock-heading" className={CARD}>
           <h2 id="lock-heading" className={CARD_TITLE}>
             Lock another field
           </h2>
@@ -290,38 +326,43 @@ export function RestrictedFieldsPanel({
             </form>
           )}
 
-          {unlocked.length > 0 && (
-            <div className="mt-6">
-              <h3 className="text-[13px] font-medium text-ink">Previously locked</h3>
-              <ul className="mt-2">
-                {unlocked.map((row) => (
-                  <li key={row.field_name} className={`${ROW} items-start`}>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm text-ink">{restrictedFieldLabel(row.field_name)}</p>
-                      <p className="mt-1 text-[13px] leading-[1.55] text-dim">
-                        <span className="text-faint">Was locked because: </span>
-                        {row.reason}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => relock(row)}
-                      disabled={working === row.field_name}
-                      aria-busy={working === row.field_name || undefined}
-                      className={`${ROW_ACTION} inline-flex items-center gap-1.5 disabled:pointer-events-none disabled:opacity-50`}
-                    >
-                      {working === row.field_name && (
-                        <Loader2 aria-hidden="true" className="size-3 animate-spin" strokeWidth={2.2} />
-                      )}
-                      Lock again<span className="sr-only"> {restrictedFieldLabel(row.field_name)}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </section>
       </Rise>
+      )}
+
+      {/* Unlocking confirms here, at the bottom of the screen — the same
+          position as the score settings save bar — so the toggle in the list
+          never moves and the row stays where it is, locked or not. */}
+      {!readOnly && pendingRow && (
+        <div className="sticky bottom-4 z-10 mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-2 rounded-panel border border-rule bg-white px-4 py-3 sm:flex-nowrap">
+          <p aria-live="polite" className="mr-auto min-w-0 flex-1 text-[13px] leading-[1.55] text-ink">
+            Unlock {restrictedFieldLabel(pendingRow.field_name).toLowerCase()}? CAMs can
+            change it directly again.
+          </p>
+          <span className="flex shrink-0 items-center gap-x-3">
+            <button
+              type="button"
+              onClick={() => setPendingUnlock(null)}
+              disabled={working !== null}
+              className={QUIET_BUTTON}
+            >
+              Keep it locked
+            </button>
+            <button
+              type="button"
+              onClick={() => void unlock(pendingRow.field_name)}
+              disabled={working !== null}
+              aria-busy={working === pendingRow.field_name || undefined}
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-inset border border-stop bg-stop px-2.5 py-1 whitespace-nowrap text-[13px] font-medium text-white transition-colors hover:bg-stop/90 focus-visible:ring-2 focus-visible:ring-stop/30 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+            >
+              {working === pendingRow.field_name && (
+                <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+              )}
+              {working === pendingRow.field_name ? "Unlocking…" : "Yes, unlock it"}
+            </button>
+          </span>
+        </div>
+      )}
     </>
   );
 }

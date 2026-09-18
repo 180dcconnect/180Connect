@@ -13,7 +13,7 @@ export default function PreviewClientIndex() {
             This is a <strong>1:1 duplicate</strong> of <code className="font-mono">/clients/[id]</code> at <code className="font-mono">/preview-client/[id]</code>. Edit the
             preview files freely — <code className="font-mono">src/app/preview-client/[id]/page.tsx</code> and{" "}
             <code className="font-mono">layout.tsx</code> — without touching the real record. Copy the final JSX back to{" "}
-            <code className="font-mono">src/app/clients/[id]/</code> when happy.
+            <code className="font-mono">src/app/(app)/clients/[id]/</code> when happy.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Link href="/clients" className="rounded-full bg-black px-4 py-2 text-xs font-bold text-white">
@@ -33,7 +33,7 @@ export default function PreviewClientIndex() {
             </li>
             <li>
               Edit <code className="font-mono">src/app/preview-client/[id]/page.tsx</code> and <code className="font-mono">layout.tsx</code> (and any re-exported
-              sections). The real files under <code className="font-mono">src/app/clients/[id]/</code> stay untouched.
+              sections). The real files under <code className="font-mono">src/app/(app)/clients/[id]/</code> stay untouched.
             </li>
           </ol>
         </div>

@@ -120,6 +120,10 @@ export const AUDIT_ACTIONS: Record<string, ActionSpec> = {
     icon: "ownership",
   },
   action_reassigned: { label: "Task reassigned", verb: "reassigned a task on", tone: "neutral", icon: "ownership" },
+  action_updated: { label: "Task updated", verb: "updated a task on", tone: "neutral", icon: "flag" },
+  action_completed: { label: "Task completed", verb: "completed a task on", tone: "positive", icon: "flag" },
+  action_cancelled: { label: "Task cancelled", verb: "cancelled a task on", tone: "caution", icon: "flag" },
+  action_reopened: { label: "Task restored", verb: "restored a task on", tone: "neutral", icon: "flag" },
   actions_moved: { label: "Tasks moved", verb: "moved the open tasks of", tone: "neutral", icon: "ownership" },
 
   status_changed: { label: "Pipeline status changed", verb: "moved", tone: "neutral", icon: "pipeline" },
@@ -174,6 +178,19 @@ export const AUDIT_ACTIONS: Record<string, ActionSpec> = {
     label: "Data issue resolved",
     verb: "resolved a data issue on",
     tone: "positive",
+    icon: "quality",
+  },
+
+  website_marked_absent: {
+    label: "No website recorded",
+    verb: "recorded that there is no website for",
+    tone: "neutral",
+    icon: "quality",
+  },
+  website_absent_cleared: {
+    label: "Website needed again",
+    verb: "put a website back on the list for",
+    tone: "neutral",
     icon: "quality",
   },
 

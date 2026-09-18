@@ -156,6 +156,12 @@ function Crop({ crop, delay, index }: { crop: CropSpec; delay: number; index: nu
   // Settles into a soft blur rather than fully sharp — depth-of-field, not a
   // second entrance state, so it still resolves from the same blur(10px) start.
   const restBlur = crop.blur ? "blur(4px)" : "blur(0px)";
+  // Crops hidden below a breakpoint still download (CSS hiding fetches), so
+  // only the always-visible ones are eager; the rest lazy-load and never cost
+  // a mobile first paint. `sizes` lets the optimizer serve the rendered width
+  // instead of the full PNG — previously `unoptimized` shipped full bytes.
+  const alwaysVisible = crop.className === "" && !crop.hero;
+  const eager = index < 2 || alwaysVisible;
 
   return (
     <motion.div
@@ -186,7 +192,16 @@ function Crop({ crop, delay, index }: { crop: CropSpec; delay: number; index: nu
           ease: "easeInOut",
         }}
       >
-        <Image src={crop.src} alt="" width={crop.size} height={crop.size} className="w-full h-full" unoptimized />
+        <Image
+          src={crop.src}
+          alt=""
+          width={crop.size}
+          height={crop.size}
+          sizes={`${crop.size}px`}
+          loading={eager ? "eager" : "lazy"}
+          priority={index === 0}
+          className="w-full h-full"
+        />
       </motion.div>
     </motion.div>
   );

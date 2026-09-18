@@ -1,8 +1,10 @@
 import { redirect } from "next/navigation";
-import { getCurrentActor } from "@/lib/auth/actor";
+import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
+import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
+import { isViewOnly } from "@/lib/auth/permissions";
 import { loadFilterActivity, loadRules } from "./actions";
 import { FilterActivityPanel } from "./filter-activity";
 import { RulesPanel } from "./rules-panel";
@@ -27,11 +29,14 @@ import { RulesPanel } from "./rules-panel";
  * ── The layout ──
  *
  * Filed Record (`docs/app-design-system.md`), as the other settings pages: a
- * heading, one rail of facts, then a card per job — what is protected, turning a
- * protection on, and what has been removed so far.
+ * heading, one rail of facts, then a card per job. The order is the order the
+ * question is asked: what is protected, what the protections have actually
+ * removed, and last the card that changes them — under the heading that warns
+ * it is a developer's job. This page owns that order; `RulesPanel` takes the
+ * evidence card as a slot for that reason (see its note on card order).
  */
 export default async function DataHandlingRulesPage() {
-  const authorization = await getCurrentActor("user:manage", {
+  const authorization = await getViewingActor("user:manage", {
     route: "/settings/data-handling-rules",
   });
   if (!authorization.ok) redirect(adminRouteDestination(authorization.reason));
@@ -60,6 +65,9 @@ export default async function DataHandlingRulesPage() {
               Personal details are removed before anything imported is saved
             </span>
           </p>
+          {isViewOnly(authorization.actor.role) && (
+            <p className="mt-2 text-sm text-dim">{VIEW_ONLY_CONTROL_NOTE}</p>
+          )}
         </Rise>
 
         {error && (
@@ -69,10 +77,16 @@ export default async function DataHandlingRulesPage() {
         )}
 
         <Group className="space-y-4">
-          <RulesPanel initialRules={rules} initialVersion={version} />
-          <Rise>
-            <FilterActivityPanel activity={activity} />
-          </Rise>
+          <RulesPanel
+            initialRules={rules}
+            initialVersion={version}
+            readOnly={isViewOnly(authorization.actor.role)}
+            removedSoFar={
+              <Rise>
+                <FilterActivityPanel activity={activity} />
+              </Rise>
+            }
+          />
         </Group>
       </Stage>
     </div>

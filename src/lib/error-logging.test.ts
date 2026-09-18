@@ -5,6 +5,7 @@ import {
   REDACTED,
   buildReport,
   buildSentryEnvelope,
+  isNextRouterError,
   parseDsn,
   reportError,
   resolveConfig,
@@ -210,6 +211,68 @@ describe("resolveConfig", () => {
   });
 });
 
+describe("isNextRouterError", () => {
+  it("identifies Error instances with message NEXT_REDIRECT", () => {
+    assert.equal(isNextRouterError(new Error("NEXT_REDIRECT")), true);
+  });
+
+  it("identifies Next.js redirect errors with digest", () => {
+    const error = new Error("NEXT_REDIRECT");
+    (error as Error & { digest?: string }).digest =
+      "NEXT_REDIRECT;replace;/dashboard;307;";
+    assert.equal(isNextRouterError(error), true);
+  });
+
+  it("identifies plain objects with redirect digest", () => {
+    assert.equal(
+      isNextRouterError({ digest: "NEXT_REDIRECT;push;/admin/users;307;" }),
+      true,
+    );
+  });
+
+  it("identifies Next.js not-found errors", () => {
+    assert.equal(isNextRouterError(new Error("NEXT_NOT_FOUND")), true);
+    assert.equal(
+      isNextRouterError({ digest: "NEXT_HTTP_ERROR_FALLBACK;404" }),
+      true,
+    );
+    assert.equal(isNextRouterError({ digest: "NEXT_NOT_FOUND" }), true);
+  });
+
+  it("identifies CSR bailout errors", () => {
+    assert.equal(
+      isNextRouterError({ digest: "BAILOUT_TO_CLIENT_SIDE_RENDERING" }),
+      true,
+    );
+  });
+
+  it("identifies string sentinels", () => {
+    assert.equal(isNextRouterError("NEXT_REDIRECT"), true);
+    assert.equal(isNextRouterError("NEXT_NOT_FOUND"), true);
+  });
+
+  it("identifies wrapped router errors in cause", () => {
+    const wrapped = new Error("Action failed", {
+      cause: new Error("NEXT_REDIRECT"),
+    });
+    assert.equal(isNextRouterError(wrapped), true);
+  });
+
+  it("returns false for regular application errors", () => {
+    assert.equal(isNextRouterError(new Error("Database connection lost")), false);
+    assert.equal(isNextRouterError(new TypeError("Cannot read properties of null")), false);
+    assert.equal(isNextRouterError({ message: "Network timeout" }), false);
+    assert.equal(isNextRouterError({ digest: "PGRST202" }), false);
+  });
+
+  it("returns false for non-error primitives and empty values", () => {
+    assert.equal(isNextRouterError(null), false);
+    assert.equal(isNextRouterError(undefined), false);
+    assert.equal(isNextRouterError(42), false);
+    assert.equal(isNextRouterError("Something went wrong"), false);
+  });
+});
+
 describe("reportError", () => {
   it("never throws, even on a broken value, and logs without a DSN", async () => {
     const previous = { ...process.env };
@@ -228,6 +291,41 @@ describe("reportError", () => {
     } finally {
       console.error = originalError;
       Object.assign(process.env, previous);
+    }
+  });
+
+  it("silently ignores Next.js redirect control-flow errors", async () => {
+    const originalError = console.error;
+    let logged = "";
+    console.error = (...args: unknown[]) => {
+      logged += args.join(" ");
+    };
+    try {
+      const redirectError = new Error("NEXT_REDIRECT");
+      (redirectError as Error & { digest?: string }).digest =
+        "NEXT_REDIRECT;replace;/admin/users;307;";
+
+      await reportError(redirectError, {
+        context: { source: "unhandledrejection", url: "/admin/users" },
+      });
+
+      assert.equal(logged, "");
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  it("silently ignores Next.js not-found control-flow errors", async () => {
+    const originalError = console.error;
+    let logged = "";
+    console.error = (...args: unknown[]) => {
+      logged += args.join(" ");
+    };
+    try {
+      await reportError(new Error("NEXT_NOT_FOUND"));
+      assert.equal(logged, "");
+    } finally {
+      console.error = originalError;
     }
   });
 });

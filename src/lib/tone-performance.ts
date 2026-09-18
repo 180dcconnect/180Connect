@@ -18,12 +18,12 @@
  * warmth the CAM never chose.
  *
  * Responses: `reply_events.outreach_message_id` — the exact sent email a reply
- * answers (written by capture_outreach_reply/capture_gmail_reply). Rate is
- * *responding emails* over sent emails with tone recorded, matching the
- * convention everywhere else in the repo that a four-reply thread with one
- * charity is one responding unit per email — the email is the thing whose tone
- * was set, so the email is the denominator's unit. Deduplicated: a client who
- * sends three replies to one email is still one response to it.
+ * answers (written by capture_outreach_reply/capture_gmail_reply). Both rates
+ * are the shared client-based pair (`lib/outreach-rates.ts`): reply rate is
+ * replied clients over contacted clients, win rate converted clients over
+ * clients who responded. A client counts as contacted by a tone when they were
+ * sent an email carrying it, and a four-reply thread with one charity is one
+ * responding client, not four.
  *
  * Conversions: the email's client's current `outreach_status`. F107's settings
  * ride on individual emails, so attribution is per-email-by-client: a tone
@@ -36,13 +36,16 @@
  * figure cannot disagree with them.
  *
  * Ac1's wording is "response rate broken down by tone"; conversion is stated
- * in the same breath, and both are shown per dial. Ac2's insufficient-data
+ * in the same breath, and both are shown per dial — reported as the shared
+ * reply rate and win rate, so a tone's numbers can be added up against the
+ * funnel above them. Ac2's insufficient-data
  * indicator is a per-row note, not a hidden row: a tone with too few sends
  * still appears, marked as too early to read — hiding it would look like the
  * tone vanished. Threshold matches MIN_SAMPLE_FOR_RATIO (5), the same bar the
  * conversion-ratio card on this page already defends.
  */
 import { isConverted } from "./dashboard-metrics.ts";
+import { outreachRates } from "./outreach-rates.ts";
 import {
   EMAIL_LENGTH_LABELS,
   EMAIL_LENGTHS,
@@ -85,14 +88,18 @@ export type ToneStatusRow = {
 export type ToneBreakdownRow = {
   value: string;
   label: string;
-  /** Sent emails carrying this tone and a usable status — the denominator. */
+  /** Sent emails carrying this tone — the sample size a rate is judged on. */
   sent: number;
-  /** Distinct sent emails that drew at least one reply. */
-  responses: number;
-  responseRate: number | null;
-  /** Distinct clients with a tone-recorded email in this bucket that converted. */
-  conversions: number;
-  conversionRate: number | null;
+  /** Distinct clients sent an email carrying this tone. */
+  contactedClients: number;
+  /** Distinct clients who replied to one of those emails. */
+  repliedClients: number;
+  /** Distinct clients in this bucket whose current status is converted. */
+  convertedClients: number;
+  /** replied clients ÷ contacted clients; null when nothing was sent. */
+  replyRate: number | null;
+  /** converted clients ÷ responded clients (replied ∪ converted). */
+  winRate: number | null;
   hasEnoughData: boolean;
   threshold: number;
 };
@@ -111,32 +118,55 @@ export type TonePerformanceSummary = {
   threshold: number;
 };
 
-const pct = (part: number, whole: number): number | null =>
-  whole === 0 ? null : part / whole;
+/**
+ * What one dial value accumulated. `clients` and `replied` are keyed by client
+ * id, not counted, because both rates are ratios of clients and win rate's
+ * denominator is a union — counts cannot express either.
+ */
+type ToneBucket = {
+  sent: number;
+  clients: Set<string>;
+  replied: Set<string>;
+  converted: Set<string>;
+};
+
+function buildRow(
+  value: string,
+  label: string,
+  bucket: ToneBucket | undefined,
+  threshold: number,
+): ToneBreakdownRow {
+  const sent = bucket?.sent ?? 0;
+  const contacted = bucket?.clients ?? new Set<string>();
+  const replied = bucket?.replied ?? new Set<string>();
+  const converted = bucket?.converted ?? new Set<string>();
+  const rates = outreachRates({ contacted, replied, converted });
+  return {
+    value,
+    label,
+    sent,
+    contactedClients: rates.contactedClients,
+    repliedClients: rates.repliedClients,
+    convertedClients: rates.convertedClients,
+    replyRate: rates.replyRate,
+    winRate: rates.winRate,
+    // The sample is judged on sends, not clients: a tone is a property of an
+    // email, and "warm" having gone out three times is three readings of how
+    // the wording lands however many clients they reached.
+    hasEnoughData: sent >= threshold,
+    threshold,
+  };
+}
 
 function buildRows(
   values: readonly string[],
   labels: Record<string, string>,
-  sample: ReadonlyMap<string, { sent: number; responses: number; clients: Set<string>; converted: Set<string> }>,
+  sample: ReadonlyMap<string, ToneBucket>,
   threshold: number,
 ): ToneBreakdownRow[] {
-  return values.map((value) => {
-    const bucket = sample.get(value);
-    const sent = bucket?.sent ?? 0;
-    const responses = bucket?.responses ?? 0;
-    const conversions = bucket?.converted.size ?? 0;
-    return {
-      value,
-      label: labels[value] ?? value,
-      sent,
-      responses,
-      responseRate: pct(responses, sent),
-      conversions,
-      conversionRate: pct(conversions, sent),
-      hasEnoughData: sent >= threshold,
-      threshold,
-    };
-  });
+  return values.map((value) =>
+    buildRow(value, labels[value] ?? value, sample.get(value), threshold),
+  );
 }
 
 /**
@@ -165,7 +195,7 @@ function summariseDial(
   convertedClientsByMessage: ReadonlyMap<string, string>,
   threshold: number,
 ): ToneBreakdownRow[] {
-  const sample = new Map<string, { sent: number; responses: number; clients: Set<string>; converted: Set<string> }>();
+  const sample = new Map<string, ToneBucket>();
   const extra = new Set<string>();
 
   for (const row of rows) {
@@ -173,10 +203,11 @@ function summariseDial(
     // Null dial = never recorded (AC3): dropped here; countUntracked reports
     // the volume separately so the exclusion stays visible.
     if (!value) continue;
-    const bucket = sample.get(value) ?? { sent: 0, responses: 0, clients: new Set<string>(), converted: new Set<string>() };
+    const bucket =
+      sample.get(value) ?? { sent: 0, clients: new Set<string>(), replied: new Set<string>(), converted: new Set<string>() };
     bucket.sent += 1;
     bucket.clients.add(row.organisation_id);
-    if (respondedMessageIds.has(row.id)) bucket.responses += 1;
+    if (respondedMessageIds.has(row.id)) bucket.replied.add(row.organisation_id);
     const converted = convertedClientsByMessage.get(row.id);
     if (converted) bucket.converted.add(converted);
     sample.set(value, bucket);
@@ -187,23 +218,9 @@ function summariseDial(
   // A value outside the current enum accumulated a real bucket above — keep
   // its responses and conversions. Zeroing them (as this branch once did)
   // made genuine results vanish from the row the email is displayed under.
-  const unknown: ToneBreakdownRow[] = Array.from(extra).map((value) => {
-    const bucket = sample.get(value);
-    const sent = bucket?.sent ?? 0;
-    const responses = bucket?.responses ?? 0;
-    const conversions = bucket?.converted.size ?? 0;
-    return {
-      value,
-      label: value,
-      sent,
-      responses,
-      responseRate: pct(responses, sent),
-      conversions,
-      conversionRate: pct(conversions, sent),
-      hasEnoughData: sent >= threshold,
-      threshold,
-    };
-  });
+  const unknown: ToneBreakdownRow[] = Array.from(extra).map((value) =>
+    buildRow(value, value, sample.get(value), threshold),
+  );
   return [...known, ...unknown];
 }
 

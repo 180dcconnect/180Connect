@@ -286,8 +286,9 @@ Click **Dashboard** in the sidebar.
 
 - **Total Organisations** — size of the client pool.
 - **Performance** — conversion rate and conversions over time.
-- **Recent updates** and **Recent team activity** — what's been happening
-across the branch.
+- **Your actions** and **Sending capacity today** — work due this week, unsent
+drafts, and how much of the branch's daily sending limit is left.
+- **Recent updates** — what's been happening across the branch, in one feed.
 - As admin, the things waiting on you: ownership requests, suppression
 requests and suggested edits.
 

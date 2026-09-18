@@ -26,6 +26,7 @@
   --foreground: #414042;
   --brand: #72b744;
   --brand-hover: #2E3C2F;
+  --ground: #f4f4ef;
 
   /**
    * Tokens the shadcn/animate-ui components are written against. Derived from
@@ -105,6 +106,26 @@
   /* Text selection inside those controls (`selection:bg-primary`). */
   --primary: var(--brand);
   --primary-foreground: #ffffff;
+
+  /**
+   * Provider-status buttons on the System health card. The makers' own brand
+   * colours — same exemption as their logo marks in the card — so an admin can
+   * tell the three status pages apart at a glance. Tokens, never hex in the
+   * component: Supabase green, Vercel black, Google blue.
+   */
+  --provider-supabase: #3ecf8e;
+  --provider-vercel: #000000;
+  --provider-google: #4285f4;
+
+  /**
+   * The Google "G" on the dashboard inbox button. The inbox is the branch
+   * Gmail mailbox, so the button wears the maker's own mark — same exemption
+   * as the provider colours above. Tokens, never hex in the component.
+   */
+  --google-blue: #4285f4;
+  --google-red: #ea4335;
+  --google-yellow: #fbbc05;
+  --google-green: #34a853;
 }
 
 @theme inline {
@@ -112,6 +133,7 @@
   --color-foreground: var(--foreground);
   --color-brand: var(--brand);
   --color-brand-hover: var(--brand-hover);
+  --color-ground: var(--ground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-card: var(--card);
@@ -150,6 +172,17 @@
   --color-hold-wash: var(--hold-wash);
   --color-stop: var(--stop);
   --color-stop-wash: var(--stop-wash);
+
+  /* Provider-status buttons — see the block above for why these exist. */
+  --color-provider-supabase: var(--provider-supabase);
+  --color-provider-vercel: var(--provider-vercel);
+  --color-provider-google: var(--provider-google);
+
+  /* Google logo mark — see the block above for why these exist. */
+  --color-google-blue: var(--google-blue);
+  --color-google-red: var(--google-red);
+  --color-google-yellow: var(--google-yellow);
+  --color-google-green: var(--google-green);
 
   /* 10px reads as a document; rounded-2xl reads as a 2021 app card. */
   --radius-panel: 10px;
@@ -699,5 +732,42 @@ html[data-status-colours="colour-blind"] {
     top: 0;
     width: 100%;
     padding: 0;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Accordion smooth collapse / expand animation
+ * Used by admin cards (the approvals queue, incomplete records, the suppression
+ * lists) to fold open and shut without an abrupt visual snap.
+ *
+ * THE CLIPPING IS PERMANENT. The wrapper keeps `overflow: hidden` even once the
+ * card is open, because what animates is the row height. Anything with a popover
+ * inside — a dropdown, a date picker, a searchable select — must use the Motion
+ * reveal in `clients/new/disclosure-section.tsx` instead, which drops the clip
+ * when the panel settles. Inside this class a dropdown is cut off at the card's
+ * edge, which reads as the control being broken rather than the card clipping.
+ * ------------------------------------------------------------------------- */
+.card-collapse-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 280ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 200ms ease-out;
+}
+
+.card-collapse-grid[data-expanded="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.card-collapse-grid > div {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-collapse-grid {
+    transition: none;
   }
 }

@@ -42,6 +42,7 @@ export type GmailThreadRowProps = {
   onToggleSector?: (sector: string, e: React.MouseEvent) => void;
   isSectorActive?: boolean;
   sectorBg?: string;
+  isViewer?: boolean;
 };
 
 /** Row select box. Same draw-on tick as the Terms & Conditions checkbox
@@ -123,6 +124,7 @@ export function GmailThreadRow({
   onToggleSector,
   isSectorActive = false,
   sectorBg,
+  isViewer = false,
 }: GmailThreadRowProps) {
   const isUnread = !thread.isRead;
 
@@ -203,24 +205,40 @@ export function GmailThreadRow({
         />
 
         {/* Star */}
-        <button
-          type="button"
-          onClick={(e) => onToggleStar(thread.id, e)}
-          title={thread.isStarred ? "Starred" : "Not starred"}
-          className={`p-1 rounded-inset hover:bg-paper-sunk text-faint transition-opacity duration-150 cursor-pointer ${
-            showStar
-              ? "opacity-100"
-              : "opacity-0 group-hover:opacity-100 focus:opacity-100"
-          }`}
-        >
-          <Star
-            className={`h-4 w-4 ${
-              thread.isStarred
-                ? "fill-amber-400 text-amber-500"
-                : "text-faint hover:text-dim"
+        {isViewer ? (
+          <span
+            className={`p-1 rounded-inset text-faint transition-opacity duration-150 pointer-events-none select-none ${
+              thread.isStarred ? "opacity-100" : "opacity-0"
             }`}
-          />
-        </button>
+          >
+            <Star
+              className={`h-4 w-4 ${
+                thread.isStarred
+                  ? "fill-amber-400 text-amber-500"
+                  : "text-faint"
+              }`}
+            />
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={(e) => onToggleStar(thread.id, e)}
+            title={thread.isStarred ? "Starred" : "Not starred"}
+            className={`p-1 rounded-inset hover:bg-paper-sunk text-faint transition-opacity duration-150 cursor-pointer ${
+              showStar
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 focus:opacity-100"
+            }`}
+          >
+            <Star
+              className={`h-4 w-4 ${
+                thread.isStarred
+                  ? "fill-amber-400 text-amber-500"
+                  : "text-faint hover:text-dim"
+              }`}
+            />
+          </button>
+        )}
       </div>
 
       {/* Sender / Organisation Column */}
@@ -365,28 +383,30 @@ export function GmailThreadRow({
         )}
 
         {/* Hover Quick Actions */}
-        <div className="hidden group-hover:flex items-center justify-end gap-1">
-          <button
-            type="button"
-            onClick={(e) => onDelete(thread.id, e)}
-            title="Delete"
-            className="p-1 rounded-inset hover:bg-paper-sunk text-faint hover:text-stop transition-colors cursor-pointer"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={(e) => onToggleRead(thread.id, e)}
-            title={thread.isRead ? "Mark as unread" : "Mark as read"}
-            className="p-1 rounded-inset hover:bg-paper-sunk text-faint hover:text-ink transition-colors cursor-pointer"
-          >
-            {thread.isRead ? (
-              <Mail className="h-3.5 w-3.5" />
-            ) : (
-              <MailOpen className="h-3.5 w-3.5" />
-            )}
-          </button>
-        </div>
+        {!isViewer && (
+          <div className="hidden group-hover:flex items-center justify-end gap-1">
+            <button
+              type="button"
+              onClick={(e) => onDelete(thread.id, e)}
+              title="Delete"
+              className="p-1 rounded-inset hover:bg-paper-sunk text-faint hover:text-stop transition-colors cursor-pointer"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => onToggleRead(thread.id, e)}
+              title={thread.isRead ? "Mark as unread" : "Mark as read"}
+              className="p-1 rounded-inset hover:bg-paper-sunk text-faint hover:text-ink transition-colors cursor-pointer"
+            >
+              {thread.isRead ? (
+                <Mail className="h-3.5 w-3.5" />
+              ) : (
+                <MailOpen className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

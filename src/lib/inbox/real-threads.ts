@@ -22,7 +22,7 @@
  * rest of @/lib follows.
  */
 
-import { CANONICAL_SECTOR_GROUPS } from "../../app/clients/visible-clients.ts";
+import { CANONICAL_SECTOR_GROUPS } from "../../app/(app)/clients/visible-clients.ts";
 import { formatOrganisationType } from "../organisation-format.ts";
 import {
   isRecentReply,
@@ -143,7 +143,7 @@ type Sector = InboxThreadView["sector"];
 /**
  * The mailbox's five label sectors, mapped from the seven canonical groups the
  * client list already classifies organisations into (CANONICAL_SECTOR_GROUPS in
- * @/app/clients/visible-clients). Reused rather than reinvented so a client
+ * @/app/(app)/clients/visible-clients). Reused rather than reinvented so a client
  * filtered as "Health" on /clients never carries a different label here.
  *
  * "Grants & Foundations" has no canonical group behind it — it exists in the

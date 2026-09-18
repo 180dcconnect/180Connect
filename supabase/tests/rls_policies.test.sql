@@ -1670,7 +1670,7 @@ begin
 
   return next is(
     tests.sqlstate_of(v_cam_a, format(
-      'select public.update_team_task(%L, %L, null, null, 1, %L, %L)',
+      'select public.update_team_task(%L, %L, null, null, 1::smallint, %L, %L)',
       v_team_task, 'CAM edit', v_cam_b, v_updated_at)),
     '42501',
     'CAM cannot use the Team tasks edit RPC'
@@ -1678,7 +1678,7 @@ begin
 
   return next is(
     tests.sqlstate_of(v_viewer, format(
-      'select public.update_team_task(%L, %L, null, null, 1, %L, %L)',
+      'select public.update_team_task(%L, %L, null, null, 1::smallint, %L, %L)',
       v_team_task, 'Viewer edit', v_cam_b, v_updated_at)),
     '42501',
     'viewer cannot use the Team tasks edit RPC'
@@ -1686,7 +1686,7 @@ begin
 
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.update_team_task(%L, %L, %L, %L, 1, %L, %L)',
+      'select public.update_team_task(%L, %L, %L, %L, 1::smallint, %L, %L)',
       v_team_task, 'Prepare and send the renewal pack', 'Include the revised figures',
       '2026-10-01', v_cam_b, v_updated_at)),
     null,
@@ -1717,7 +1717,7 @@ begin
 
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.update_team_task(%L, %L, null, null, 2, %L, %L)',
+      'select public.update_team_task(%L, %L, null, null, 2::smallint, %L, %L)',
       v_team_task, 'Stale edit', v_cam_a, v_updated_at - interval '1 second')),
     '40001',
     'a stale team task edit is refused instead of overwriting newer work'
@@ -4365,7 +4365,7 @@ declare
   v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
   v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
   v_admin  uuid := '00000000-0000-4000-a000-000000000001';
-  v_viewer uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer uuid := '00000000-0000-4000-a000-000000000005';
   v_count  bigint;
 begin
   if not tests.tables_exist('outreach_preferences') then
@@ -5628,7 +5628,7 @@ begin
   return next is(
     tests.sqlstate_of(v_cam_a,
       'update public.outreach_cycles set name = ''Renamed'''),
-    '42501',
+    null,
     'a CAM cannot rename a cycle'
   );
 

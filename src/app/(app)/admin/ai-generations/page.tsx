@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
+import { isUuid } from "@/lib/validation";
 import {
   groupByDay,
   groupByModel,
@@ -162,12 +162,11 @@ export default async function AiGenerationsPage({
 
   const params = await searchParams;
   const metric: GenerationMetric = isMetric(params.metric) ? params.metric : "count";
-  const clientFilter =
-    params.client && z.uuid().safeParse(params.client).success ? params.client : undefined;
+  const clientFilter = params.client && isUuid(params.client) ? params.client : undefined;
   const models = parseModels(params.model);
   const search = cleanSearchTerm(params.q);
   const edited = parseEdited(params.edited);
-  const sentBy = params.sentBy && z.uuid().safeParse(params.sentBy).success ? params.sentBy : undefined;
+  const sentBy = params.sentBy && isUuid(params.sentBy) ? params.sentBy : undefined;
   const { page, pageSize } = parseGenerationPage(params.page, params.pageSize);
 
   const supabase = await createClient();

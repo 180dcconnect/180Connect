@@ -27,21 +27,7 @@ alter type public.income_band add value if not exists '10m_50m';
 alter type public.income_band add value if not exists '50m_100m';
 alter type public.income_band add value if not exists 'over_100m';
 
--- 2. Backfill public.financial_periods.income_band from total_income
-update public.financial_periods
-   set income_band = case
-     when total_income < 10000 then 'under_10k'::public.income_band
-     when total_income <= 100000 then '10k_100k'::public.income_band
-     when total_income <= 500000 then '100k_500k'::public.income_band
-     when total_income <= 1000000 then '500k_1m'::public.income_band
-     when total_income <= 10000000 then '1m_10m'::public.income_band
-     when total_income <= 50000000 then '10m_50m'::public.income_band
-     when total_income <= 100000000 then '50m_100m'::public.income_band
-     else 'over_100m'::public.income_band
-   end
- where total_income is not null;
-
--- 3. Update public.set_scout_config function with 8 size keys
+-- 2. Update public.set_scout_config function with 8 size keys
 create or replace function public.set_scout_config(p_config jsonb)
 returns uuid
 language plpgsql
@@ -239,7 +225,7 @@ revoke execute on function public.set_scout_config(jsonb) from public;
 revoke execute on function public.set_scout_config(jsonb) from anon;
 grant execute on function public.set_scout_config(jsonb) to authenticated;
 
--- 4. Update the active SCOUT config in model_versions to carry the 8 band defaults
+-- 3. Update the active SCOUT config in model_versions to carry the 8 band defaults
 update public.model_versions
    set config = jsonb_set(
      config,

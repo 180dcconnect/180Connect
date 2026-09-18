@@ -131,14 +131,11 @@ export async function readEmailFromWebsiteAction(input: {
   if (pageResult.status !== "fetched") {
     return {
       kind: "skipped",
-      message:
-        pageResult.status === "disallowed_by_robots"
-          ? "This website does not allow automated reading (robots.txt). Check it manually in your browser."
-          : pageResult.reason || "The website could not be fetched.",
+      message: pageResult.message,
     };
   }
 
-  const html = pageResult.body;
+  const html = pageResult.html;
   const extraction = extractOrganisation(html, pageResult.finalUrl);
   let hostname = "";
   try {
@@ -264,14 +261,11 @@ export async function readLocationFromWebsiteAction(input: {
   if (pageResult.status !== "fetched") {
     return {
       kind: "skipped",
-      message:
-        pageResult.status === "disallowed_by_robots"
-          ? "This website does not allow automated reading (robots.txt). Check it manually in your browser."
-          : pageResult.reason || "The website could not be fetched.",
+      message: pageResult.message,
     };
   }
 
-  const html = pageResult.body;
+  const html = pageResult.html;
   const extraction = extractOrganisation(html, pageResult.finalUrl);
   let hostname = "";
   try {

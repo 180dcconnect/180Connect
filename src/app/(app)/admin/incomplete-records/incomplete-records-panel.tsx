@@ -340,7 +340,7 @@ export function IncompleteRecordsPanel({
               >
                 {tab.label}{" "}
                 <span className={`tabular-nums ${active ? "text-white/75" : "text-faint"}`}>
-                  {counts[tab.value].toLocaleString()}
+                  {counts[tab.value as Exclude<FilterTab, "audit">].toLocaleString()}
                 </span>
               </button>
             );

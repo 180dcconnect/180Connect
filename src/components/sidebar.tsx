@@ -4,13 +4,14 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ComponentType, type MouseEvent, type Ref } from "react";
-import { AnimatePresence, motion, useReducedMotionConfig, type Variants } from "motion/react";
+import { motion, useReducedMotionConfig, type Variants } from "motion/react";
 import {
   ChartLine,
   ClipboardCheck,
   ShieldCheck,
   SquareKanban,
   UserPlus,
+  X,
 } from "lucide-react";
 import { BookmarkPlusIcon, type BookmarkPlusIconHandle } from "@/components/ui/bookmark-plus";
 import { InboxIcon, type InboxIconHandle } from "@animateicons/react/lucide/inbox-icon";
@@ -24,7 +25,7 @@ import { PanelLeftClose } from "@/components/animate-ui/icons/panel-left-close";
 import { PanelLeftOpen } from "@/components/animate-ui/icons/panel-left-open";
 import { Settings } from "@/components/animate-ui/icons/settings";
 import { Users } from "@/components/animate-ui/icons/users";
-import { ThumbsUp} from "@/components/animate-ui/icons/thumbs-up";
+import { ThumbsUp } from "@/components/animate-ui/icons/thumbs-up";
 import UsersGroupIcon from "@/components/ui/users-group-icon";
 import { SidebarAccountMenu } from "@/components/sidebar-account-menu";
 import { NotificationBell } from "@/components/notifications/notification-bell";
@@ -231,6 +232,8 @@ export function Sidebar({
   roleLabel,
   onLogout,
   initialCollapsed = false,
+  mobileOpen = false,
+  onMobileClose,
   onboarding,
 }: {
   sections: SidebarSection[];
@@ -239,6 +242,10 @@ export function Sidebar({
   roleLabel: string;
   onLogout: () => Promise<void>;
   initialCollapsed?: boolean;
+  // Below `md` the rail is a drawer, not a rail — `AppShellFrame` owns the
+  // open/close state and passes it down.
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
   onboarding?: SidebarOnboarding;
 }) {
   const pathname = usePathname();
@@ -296,9 +303,9 @@ export function Sidebar({
 
   return (
     <aside
-      className={`sticky top-0 z-20 flex h-screen shrink-0 flex-col bg-white/55 backdrop-blur-2xl backdrop-saturate-150 transition-[width] duration-200 after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-linear-to-b after:from-white/90 after:via-black/12 after:to-white/50 ${
-        collapsed ? "w-16" : "w-64"
-      }`}
+      className={`fixed inset-y-0 left-0 z-50 flex h-screen w-64 shrink-0 flex-col bg-white/55 backdrop-blur-2xl backdrop-saturate-150 transition-transform duration-200 after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-linear-to-b after:from-white/90 after:via-black/12 after:to-white/50 md:sticky md:top-0 md:translate-x-0 md:transition-[width] ${
+        mobileOpen ? "translate-x-0" : "-translate-x-full"
+      } ${collapsed ? "md:w-16" : "md:w-64"}`}
     >
       {/*
        * One logo button, always the same size and DOM node, whether collapsed
@@ -335,19 +342,13 @@ export function Sidebar({
           </button>
         </AnimateIcon>
 
-        <AnimatePresence initial={false}>
-          {!collapsed && (
-            <motion.span
-              initial={reduceMotion ? false : { opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={reduceMotion ? undefined : { opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="min-w-0 flex-1 truncate text-base font-extrabold text-black tracking-tight"
-            >
-              180Connect
-            </motion.span>
-          )}
-        </AnimatePresence>
+        <span
+          className={`min-w-0 flex-1 truncate text-base font-extrabold text-black tracking-tight transition-opacity duration-150 ${
+            collapsed ? "md:hidden" : ""
+          }`}
+        >
+          180Connect
+        </span>
 
         {!collapsed && (
           <AnimateIcon animateOnHover={!reduceMotion} asChild>
@@ -355,19 +356,32 @@ export function Sidebar({
               type="button"
               onClick={() => handleToggleCollapse(true)}
               aria-label="Collapse sidebar"
-              className="ml-auto shrink-0 rounded-xl p-1.5 text-black/70 transition-all hover:bg-black/10 hover:text-black focus-visible:outline-none"
+              className="ml-auto hidden shrink-0 rounded-xl p-1.5 text-black/70 transition-all hover:bg-black/10 hover:text-black focus-visible:outline-none md:inline-flex"
             >
               <PanelLeftClose className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
             </button>
           </AnimateIcon>
         )}
+
+        <button
+          type="button"
+          onClick={onMobileClose}
+          aria-label="Close navigation"
+          className="ml-auto shrink-0 rounded-xl p-1.5 text-black/70 transition-all hover:bg-black/10 hover:text-black focus-visible:outline-none md:hidden"
+        >
+          <X className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+        </button>
       </div>
 
       <nav className="flex-1 space-y-6 overflow-y-auto overflow-x-hidden px-2 py-2" aria-label="Primary">
         {sections.map((section, index) => (
           <div key={section.label ?? index}>
-            {section.label && !collapsed && (
-              <p className="px-3 pb-1 text-xs font-bold uppercase tracking-wide text-black/40">
+            {section.label && (
+              <p
+                className={`px-3 pb-1 text-xs font-bold uppercase tracking-wide text-black/40 ${
+                  collapsed ? "md:hidden" : ""
+                }`}
+              >
                 {section.label}
               </p>
             )}
@@ -413,12 +427,14 @@ export function Sidebar({
                           <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden={true} />
                         ) : null}
                       </motion.span>
-                      {!collapsed && (
-                        <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                      )}
-                      {showCount && !collapsed && (
+                      <span className={`min-w-0 flex-1 truncate ${collapsed ? "md:hidden" : ""}`}>
+                        {item.label}
+                      </span>
+                      {showCount && (
                         <span
-                          className="shrink-0 rounded-full bg-lead px-2 py-0.5 text-[12px] font-bold tabular-nums text-paper"
+                          className={`shrink-0 rounded-full bg-lead px-2 py-0.5 text-[12px] font-bold tabular-nums text-paper ${
+                            collapsed ? "md:hidden" : ""
+                          }`}
                           aria-label={`${item.count} outstanding actions`}
                         >
                           {item.count! > 99 ? "99+" : item.count}
@@ -426,7 +442,7 @@ export function Sidebar({
                       )}
                       {showCount && collapsed && (
                         <span
-                          className="absolute top-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-lead px-1 text-[10px] font-bold tabular-nums text-paper"
+                          className="absolute top-1 right-1 hidden h-4 min-w-4 items-center justify-center rounded-full bg-lead px-1 text-[10px] font-bold tabular-nums text-paper md:flex"
                           aria-label={`${item.count} outstanding actions`}
                         >
                           {item.count! > 99 ? "99+" : item.count}

@@ -1,0 +1,2074 @@
+"use client";
+
+import {
+  useState,
+  useMemo,
+  useRef,
+  useEffect,
+  useCallback,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
+import { useRouter } from "next/navigation";
+import { isViewOnly, type AppRole } from "@/lib/auth/permissions";
+import { triggerViewOnlyNotice } from "@/lib/auth/view-only";
+import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
+import {
+  Inbox,
+  MessageSquare,
+  Clock,
+  AlarmClock,
+  CalendarClock,
+  Star,
+  Pencil,
+  SendHorizontal,
+  StickyNote,
+  Trash2,
+  Tag,
+  Check,
+  type LucideIcon,
+  X,
+} from "lucide-react";
+import {
+  formatGmailTimestamp,
+  resolveDateFilter,
+  searchThreads,
+  type InboxThreadTag,
+  type InboxThreadView,
+} from "@/lib/inbox-thread-view";
+import { threadMatchesLabels } from "@/lib/inbox/label-filter";
+import { InflightRequests } from "@/lib/inbox/inflight";
+import { createTagAction } from "@/lib/tags/tag-actions";
+import type { AddressableClient } from "@/lib/inbox/real-threads";
+import { DEFAULT_FOLLOW_UP_THRESHOLDS } from "@/lib/outreach/follow-up-recommendations";
+import {
+  applyThreadFlags,
+  getThreadFlagsServerSnapshot,
+  getThreadFlagsSnapshot,
+  seedThreadFlags,
+  subscribeToThreadFlags,
+  updateThreadFlags,
+  type InboxThreadStateRow,
+  type ThreadFlags,
+} from "@/lib/inbox/thread-flags";
+import {
+  applyInboxThreadFlags,
+  type InboxThreadFlagUpdate,
+} from "@/app/(app)/inbox/actions";
+import { GmailSidebar, SECTORS, type GmailFolder, type SidebarLabel } from "./gmail-sidebar";
+import type { OutreachEngineHealth } from "@/lib/gmail/engine-status.ts";
+import { GmailActionBar, type SelectionState } from "./gmail-action-bar";
+import { GmailThreadRow } from "./gmail-thread-row";
+import { GmailReadingPane } from "./gmail-reading-pane";
+import { cancelScheduledEmail, discardEmailDraft, rescheduleEmail, scheduleReviewedEmail, sendReviewedEmail } from "@/app/(app)/clients/[id]/outreach-actions";
+import { GmailComposeModal } from "./gmail-compose-modal";
+import type {
+  ComposerSnapshot,
+  PendingDiscardRequest,
+  PendingSendRequest,
+} from "./gmail-compose-modal";
+import { emailHtmlToPlainText } from "@/lib/outreach/email-html";
+import { BrandSearchBar } from "@/components/brand/search-bar";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import {
+  PRIORITY_SCORE_FILTERS,
+  SECTOR_FILTER_OPTIONS,
+} from "@/app/(app)/clients/visible-clients";
+import {
+  ORGANISATION_TYPES,
+  formatOrganisationType,
+} from "@/lib/organisation-format";
+import {
+  isClosedPipelineStatus,
+  isFollowUpExcludedPipelineStatus,
+  parseCategoryTabParam,
+  type InboxCategoryTab,
+} from "@/lib/inbox/category-tabs.ts";
+
+/** Kept for existing importers; the vocabulary lives in
+    @/lib/inbox/category-tabs.ts so the server page can derive it too. The
+    `sent` member is unrendered (no tab shows it) but kept so the filter's dead
+    branch still typechecks until it is removed. */
+export type GmailCategoryTab = InboxCategoryTab | "sent";
+
+const PAGE_SIZE = 50;
+
+interface CategoryTabConfig {
+  id: GmailCategoryTab;
+  label: string;
+  icon: LucideIcon;
+  iconClass?: string;
+  activeTextClass: string;
+  indicatorBg: string;
+  renderBadge?: (counts: CategoryBadgeCounts) => React.ReactNode;
+}
+
+interface CategoryBadgeCounts {
+  inbound: number;
+  awaiting: number;
+  followUpDue: number;
+}
+
+/** Shared count pill for the category tabs — hidden entirely when the count is
+    zero, so a tab only carries a number when it has something in it. */
+function countBadge(count: number, toneClass: string): React.ReactNode {
+  if (count <= 0) return null;
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ${toneClass}`}
+    >
+      {count}
+    </span>
+  );
+}
+
+const CATEGORY_TABS: readonly CategoryTabConfig[] = [
+  {
+    id: "primary",
+    label: "Primary",
+    icon: Inbox,
+    activeTextClass: "text-lead",
+    indicatorBg: "bg-lead",
+  },
+  {
+    id: "inbound",
+    label: "Inbound Replies",
+    icon: MessageSquare,
+    iconClass: "text-emerald-600",
+    activeTextClass: "text-emerald-700",
+    indicatorBg: "bg-emerald-600",
+    renderBadge: (counts) =>
+      countBadge(counts.inbound, "bg-emerald-100 text-emerald-800"),
+  },
+  {
+    id: "awaiting",
+    label: "Awaiting Response",
+    icon: Clock,
+    iconClass: "text-amber-800",
+    activeTextClass: "text-amber-900",
+    indicatorBg: "bg-amber-800",
+    renderBadge: (counts) =>
+      countBadge(counts.awaiting, "bg-amber-100 text-amber-900"),
+  },
+  {
+    id: "followup",
+    label: "Follow-up Due",
+    icon: AlarmClock,
+    iconClass: "text-rose-500",
+    activeTextClass: "text-rose-700",
+    indicatorBg: "bg-rose-500",
+    renderBadge: (counts) =>
+      countBadge(counts.followUpDue, "bg-rose-100 text-rose-800"),
+  },
+  {
+    id: "starred",
+    label: "Starred",
+    icon: Star,
+    iconClass: "text-amber-400",
+    activeTextClass: "text-amber-600",
+    indicatorBg: "bg-amber-500",
+  },
+];
+
+/** Follow-Up Due mirrors the real recommendation engine
+    (`src/lib/outreach/follow-up-recommendations.ts`): a thread counts when we
+    sent last and nothing has come back inside the CAM's first-follow-up
+    threshold.
+
+    That threshold is the viewer's own `outreach_preferences.first_follow_up_days`,
+    read by the page and passed in — it used to be hardcoded to 7 here, so a CAM
+    who had set their own threshold in Settings saw this tab disagree with the
+    dashboard's Needs Attention panel about the same clients.
+    `DEFAULT_FOLLOW_UP_THRESHOLDS.first` is the fallback, and is the same AC
+    default the database column carries. */
+function daysSilent(thread: InboxThreadView): number {
+  const elapsed = Date.now() - new Date(thread.lastActivityAt).getTime();
+  return Math.floor(elapsed / (24 * 60 * 60 * 1000));
+}
+
+function isFollowUpDue(thread: InboxThreadView, thresholdDays: number): boolean {
+  if (thread.status !== "awaiting" && thread.status !== "sent") return false;
+  // Decided and parked outcomes never count, however silent: nudging a
+  // converted — or deliberately parked — client contradicts the decision.
+  // `no_response` stays eligible, matching the dashboard engine.
+  if (isFollowUpExcludedPipelineStatus(thread.outreachStatus)) return false;
+  return daysSilent(thread) >= thresholdDays;
+}
+
+/**
+ * Date presets in the search panel. Copied verbatim from the import-status
+ * bar's DATE_OPTIONS (same labels, same values) so the two pickers agree;
+ * the bar's day/range pickers add ISO days and `from..to` ranges around them.
+ */
+const DATE_OPTIONS = [
+  { label: "Today", value: "today" },
+  { label: "Yesterday", value: "yesterday" },
+  { label: "Past 7 days", value: "7d" },
+  { label: "Past 30 days", value: "30d" },
+  { label: "This month", value: "this_month" },
+  { label: "Last month", value: "last_month" },
+];
+
+/** Query parameter the date category writes — the bar keys its date-picker UI
+ *  off this exact name, same as import-status. */
+const DATE_CATEGORY = "Filter by date";
+
+/**
+ * Empty states are per-folder, never generic: an empty Drafts and an empty
+ * Trash mean different things, and the screen should say which. Search and
+ * label empties are computed at render (they quote the query/label back).
+ */
+const FOLDER_EMPTY_STATES: Record<GmailFolder, { icon: LucideIcon; title: string; hint: string }> = {
+  inbox: {
+    icon: Inbox,
+    title: "All caught up",
+    hint: "Nothing waiting in the inbox right now.",
+  },
+  starred: {
+    icon: Star,
+    title: "No starred threads",
+    hint: "Star a thread to pin it here.",
+  },
+  scheduled: {
+    icon: CalendarClock,
+    title: "Nothing scheduled",
+    hint: "Messages you schedule from compose will wait here until they send.",
+  },
+  sent: {
+    icon: SendHorizontal,
+    title: "Nothing sent yet",
+    hint: "New outreach you send will appear here.",
+  },
+  drafts: {
+    icon: StickyNote,
+    title: "No drafts yet",
+    hint: "Drafts you save while composing will wait here.",
+  },
+  trash: {
+    icon: Trash2,
+    title: "Trash is empty",
+    hint: "Threads you delete will show up here.",
+  },
+};
+
+/** One open compose window. */
+type ComposeWindow = {
+  /** Stable identity: the draft's row id, or `new:<n>` for a blank compose. */
+  key: string;
+  /** The outreach_messages row being edited, or null for a fresh email. */
+  draftId: string | null;
+  recipient?: string;
+  subject?: string;
+  body?: string;
+  /** F110: live news hook restored from the draft row on resume. */
+  newsSource?: "live" | "stored" | "none";
+  newsHook?: string | null;
+  newsUrl?: string | null;
+  minimised: boolean;
+};
+
+/** Fail-closed default when the page omits engineHealth: every row reads
+    unconfigured (X), never a lie about a check that never ran. */
+const DEFAULT_ENGINE_HEALTH: OutreachEngineHealth = {
+  transport: { status: "unconfigured", sender: null, detail: "Not checked." },
+  replySync: { status: "unconfigured", detail: "Not checked." },
+  scheduledSend: { status: "unconfigured", detail: "Not checked." },
+};
+
+/** Two fit beside the sidebar on a laptop; a third does not. */
+const MAX_EXPANDED_COMPOSERS = 2;
+
+/** Widths the modal itself uses, needed here to stack the windows. */
+const COMPOSER_WIDTH_PX = 600;
+const COMPOSER_MINIMISED_WIDTH_PX = 320;
+const COMPOSER_GAP_PX = 12;
+const COMPOSER_EDGE_PX = 32;
+
+/** Gmail-style Undo window: how long a send/schedule/discard waits behind its
+    toast before committing. Dismissing the toast does NOT cancel — only Undo
+    does — and navigating away flushes pendings at once (see the shell). */
+const UNDO_WINDOW_MS = 5000;
+
+/** One shell toast. `actionLabel`/`onAction` turn a confirmation into an Undo
+    toast: the button beside the message that cancels the pending commit. */
+type ShellToast = {
+  key: number;
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+};
+
+export function GmailInboxShell({
+  initialThreads = [],
+  initialThreadId,
+  initialComposeClientId = null,
+  initialComposeRecipient = null,
+  initialTab = "primary",
+  viewerEmail = null,
+  viewerIsAdmin = false,
+  viewerId = null,
+  viewerRole = null,
+  addressableClients,
+  initialTags = [],
+  followUpDays = DEFAULT_FOLLOW_UP_THRESHOLDS.first,
+  initialThreadFlags = [],
+  engineHealth = DEFAULT_ENGINE_HEALTH,
+  className = "h-[calc(100vh-1.5rem)]",
+}: {
+  initialThreads?: InboxThreadView[];
+  initialThreadId?: string | null;
+  /** Organisation id from ?compose=, opened as an addressed compose window. */
+  initialComposeClientId?: string | null;
+  /**
+   * On-file address from ?to=, travelling alongside ?compose=. Fallback only:
+   * the directory hit wins whenever the id resolves (primary contact first),
+   * so addressable clients open exactly as before; this covers the ids the
+   * directory cannot resolve — seed rows are excluded from it by design —
+   * which otherwise opened a blank window. Send still needs a resolvable
+   * directory client, so a prefilled pill alone can never send.
+   */
+  initialComposeRecipient?: string | null;
+  /**
+   * The tab the shell mounts on: an explicit ?tab=, else the queue the
+   * deep-linked ?thread= belongs to, else Primary. After mount the tab is
+   * client state, written back to ?tab= on every click, so Back, refresh and
+   * shares all land where the CAM was.
+   */
+  initialTab?: InboxCategoryTab;
+  /** The viewer's login email, for the per-thread status-control gate. */
+  viewerEmail?: string | null;
+  /** Whether the viewer is an admin (same rule as the client record header). */
+  viewerIsAdmin?: boolean;
+  /** The viewer's user id and role, for the reading pane's ownership banner. */
+  viewerId?: string | null;
+  viewerRole?: AppRole | null;
+  /**
+   * Every tag (TAGS) in play across the loaded threads, de-duplicated and
+   * name-sorted by the page. Seeds the sidebar's custom-label rows and the
+   * compose window's "Add label" picker — the mailbox does not invent a
+   * label concept, it shows the client record's tags.
+   */
+  initialTags?: InboxThreadTag[];
+  /**
+   * Every client Compose may address — see `buildAddressableClients`. Distinct
+   * from the thread list on purpose: a client with no outreach yet has no
+   * thread, but is still someone a CAM can write the first email to. This prop
+   * replaced a `realThreads` one that fed the same directory, which is why
+   * Compose could only ever find clients that had already been emailed.
+   */
+  addressableClients?: AddressableClient[];
+  /** The viewer's own first-follow-up threshold, in days (F160). */
+  followUpDays?: number;
+  /**
+   * This viewer's stored mailbox flags, straight from INBOX_THREAD_STATE. The
+   * shell needs no viewer id of its own: the rows are already scoped to the
+   * caller by the table's RLS, and the server action keys its writes the same
+   * way.
+   */
+  initialThreadFlags?: InboxThreadStateRow[];
+  /**
+   * Live outreach-engine health from the page's server checks (Gmail
+   * transport, reply-sync and scheduled-send pg_cron jobs). Passed straight
+   * through to the sidebar's status card; fails closed to `unconfigured`
+   * (X, not tick) on every row when the page omits it. The page passes the
+   * checks still in flight, and the card streams them in.
+   */
+  engineHealth?: OutreachEngineHealth | Promise<OutreachEngineHealth>;
+  className?: string;
+}) {
+  const isViewer = viewerRole !== null && viewerRole !== undefined && isViewOnly(viewerRole);
+  const reduceMotion = useReducedMotionConfig();
+  // The list exactly as the server built it. Everything downstream reads
+  // `threads` below, which is this with the viewer's own flags laid over it.
+  const [serverThreads, setServerThreads] = useState<InboxThreadView[]>(initialThreads);
+  /**
+   * Starred / read / trashed, as this viewer last left them.
+   *
+   * Read from INBOX_THREAD_STATE by the page and seeded into the store during
+   * render, not in an effect: an effect would give one paint with no flags at
+   * all, so every starred thread would flicker unstarred on load. `seedThreadFlags`
+   * identity-compares the rows, so calling it each render is a no-op until the
+   * server actually sends new ones.
+   *
+   * The flags stay a pure overlay (`applyThreadFlags`) rather than being baked
+   * into the thread list, because the list is server data and these are not.
+   */
+  seedThreadFlags(initialThreadFlags);
+  const threadFlags: ThreadFlags = useSyncExternalStore(
+    subscribeToThreadFlags,
+    getThreadFlagsSnapshot,
+    getThreadFlagsServerSnapshot,
+  );
+
+  /**
+   * Applies a flag change optimistically, then persists it.
+   *
+   * `updates` is the list the server action receives, so a bulk action is one
+   * round trip rather than one per thread. A failed write rolls the store back
+   * and surfaces the reason — a star that silently failed to save is worse
+   * than one that visibly refuses.
+   */
+  const commitFlags = useCallback(
+    (update: (previous: ThreadFlags) => ThreadFlags, updates: InboxThreadFlagUpdate[]) => {
+      setFlagError(null);
+      void updateThreadFlags(
+        update,
+        () => applyInboxThreadFlags(updates),
+        (message) => setFlagError(message),
+      );
+    },
+    [],
+  );
+  const [activeFolder, setActiveFolder] = useState<GmailFolder>("inbox");
+  const [activeCategoryTab, setActiveCategoryTab] = useState<GmailCategoryTab>(initialTab);
+  // Unstar inside the Starred tab is not an instant vanish. The row stays put,
+  // showing its now-empty star, for a grace beat; then it is dropped from the
+  // list and AnimatePresence collapses it out. `graceUnstarIds` is the set
+  // still being shown past the filter, `graceTimers` the pending drop timers.
+  const [graceUnstarIds, setGraceUnstarIds] = useState<Set<string>>(new Set());
+  const graceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const GRACE_UNSTAR_MS = 2200;
+  const clearGraceUnstar = useCallback((id: string) => {
+    const timer = graceTimers.current.get(id);
+    if (timer) clearTimeout(timer);
+    graceTimers.current.delete(id);
+    setGraceUnstarIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+  // Each held row carries its own drop timer (GRACE_UNSTAR_MS), so the set
+  // drains itself even if the tab changes underneath it; this just sweeps any
+  // still-pending timers if the whole screen unmounts.
+  useEffect(() => {
+    const timers = graceTimers.current;
+    return () => timers.forEach((timer) => clearTimeout(timer));
+  }, []);
+  // Sector filtering has two independent sources, kept apart on purpose: the
+  // sidebar's label rows, and the search bar's "Filter by sector" chips. They
+  // used to share one Set, so a search could only ever add to the sidebar's
+  // selection and clearing one silently cleared the other.
+  const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set());
+  const [searchSectorLabels, setSearchSectorLabels] = useState<Set<string>>(new Set());
+  const router = useRouter();
+  // The one genuine loading state on this screen: a refresh re-runs the server
+  // component, and the list shows skeletons until React has the new tree.
+  // There used to be a second, `isLabelLoading`, driven by an invented 1.5s
+  // timer around an in-memory filter — see triggerLabelFilter.
+  const [isRefreshing, startRefresh] = useTransition();
+  // Set when a star / read / trash write is refused. The store has already put
+  // the flag back by now, so the banner explains a change the CAM can see
+  // has reverted.
+  const [flagError, setFlagError] = useState<string | null>(null);
+  // One-shot confirmations that outlive the window that earned them — a saved
+  // draft closes its compose window, which would take a modal-local message
+  // down with it. Bottom-left, auto-dismissed, latest wins. A toast dismisses
+  // only its own key, so a rapid second toast never eats the first one's tail.
+  const [toast, setToast] = useState<ShellToast | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastSeq = useRef(0);
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
+  function dismissToastKey(key: number) {
+    setToast((current) => (current?.key === key ? null : current));
+  }
+  function showToast(
+    message: string,
+    opts?: { actionLabel?: string; onAction?: () => void; durationMs?: number },
+  ) {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastSeq.current += 1;
+    const key = toastSeq.current;
+    setToast({ key, message, actionLabel: opts?.actionLabel, onAction: opts?.onAction });
+    toastTimer.current = setTimeout(() => {
+      dismissToastKey(key);
+      toastTimer.current = null;
+    }, opts?.durationMs ?? 3500);
+  }
+  // Pending delayed commits (send / schedule / discard), keyed by toast key so
+  // Undo cancels exactly the action its toast names. Latest toast wins the
+  // display; earlier pendings still commit on their own timers.
+  const pendingCommits = useRef(
+    new Map<number, { commit: () => void; timer: ReturnType<typeof setTimeout> }>(),
+  );
+  function stagePending(commit: () => void): number {
+    toastSeq.current += 1;
+    const key = toastSeq.current;
+    const timer = setTimeout(() => {
+      pendingCommits.current.delete(key);
+      commit();
+    }, UNDO_WINDOW_MS);
+    pendingCommits.current.set(key, { commit, timer });
+    return key;
+  }
+  function showUndoToast(key: number, message: string, snapshot: ComposerSnapshot) {
+    showToast(message, {
+      actionLabel: "Undo",
+      onAction: () => undoPending(key, snapshot),
+      durationMs: UNDO_WINDOW_MS,
+    });
+  }
+  // Undo windows must not die with the screen: navigating away mid-window
+  // commits every pending action at once, so an email never silently
+  // never-sends and a discard never silently un-discards. The map is a ref,
+  // so this subscribes once and only ever fires on a real unmount (an empty
+  // map makes it a no-op, including under StrictMode's mount simulation).
+  useEffect(() => {
+    const pending = pendingCommits.current;
+    return () => {
+      pending.forEach(({ timer, commit }) => {
+        clearTimeout(timer);
+        commit();
+      });
+      pending.clear();
+    };
+  }, []);
+  // The mailbox's custom labels ARE tags (TAGS/ORG_TAGS). Seeded from the
+  // page's server read and grown in place when the sidebar's + creates one, so
+  // a new tag shows without a full refresh. A refresh re-seeds it (below).
+  const [tags, setTags] = useState<InboxThreadTag[]>(initialTags);
+  const [seededTagsFrom, setSeededTagsFrom] = useState(initialTags);
+  if (seededTagsFrom !== initialTags) {
+    setSeededTagsFrom(initialTags);
+    setTags(initialTags);
+  }
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Active thread ID initialized from props, never from window during SSR/initial render
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(initialThreadId ?? null);
+  // A link to /inbox?thread=… followed while the mailbox is already open (a
+  // notification, a client record) no longer remounts the shell — see the note
+  // where page.tsx renders it — so the new param is picked up here. Only a new
+  // thread id acts: the shell's own URL sync hands back the thread already
+  // open, and a param that went away means a thread was closed here, not a
+  // request to close one.
+  const [seenThreadParam, setSeenThreadParam] = useState<string | null>(initialThreadId ?? null);
+  if ((initialThreadId ?? null) !== seenThreadParam) {
+    setSeenThreadParam(initialThreadId ?? null);
+    if (initialThreadId) setActiveThreadId(initialThreadId);
+  }
+  // Threads whose bodies are already in flight, so re-opening one mid-fetch
+  // does not fire a second request for the same conversation.
+  const inflightRef = useRef(new InflightRequests());
+  // Fetched bodies, by thread, so a reseed never blanks the open pane (see
+  // the activeThread memo below). Warmed whenever a merge lands bodies and
+  // pruned for threads that left the list — a ref rather than state, because
+  // the pane reads it only as a fallback and it must never render by itself.
+  const messageCacheRef = useRef(new Map<string, InboxThreadView["messages"]>());
+
+  // Sync state on popstate (browser back/forward button)
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      setActiveThreadId(params.get("thread"));
+      const tab = parseCategoryTabParam(params.get("tab"));
+      // An entry without a tab (old links, back past the first click) leaves
+      // the current tab alone rather than yanking it to Primary.
+      if (tab) setActiveCategoryTab(tab);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+  /**
+   * Open compose windows, oldest first, stacked right-to-left like Gmail's.
+   *
+   * Keyed by `key` — the outreach_messages id for a resumed draft, a generated
+   * id for a blank compose. Opening a draft that is already open focuses that
+   * window instead of adding a second: two windows over one row would race on
+   * save, last write winning silently while both still showed their own text.
+   *
+   * At most MAX_EXPANDED_COMPOSERS are expanded at once. This window is denser
+   * than Gmail's — AI settings drill, booklet and profile sheets, recipient
+   * search, attachment staging — so a third expanded one would not fit beside
+   * the sidebar on a laptop. A new window minimises the oldest expanded one
+   * rather than letting the row overflow off-screen.
+   */
+  const [composers, setComposers] = useState<ComposeWindow[]>([]);
+  const nextComposerKey = useRef(0);
+
+  /**
+   * Open a compose window, or focus the one already editing this draft.
+   *
+   * Reopening a draft restores rather than duplicates, which is what keeps two
+   * windows off one outreach_messages row. Opening past the expanded cap
+   * minimises the oldest expanded window instead of refusing to open — the CAM
+   * asked for this draft, so it appears; something else gets out of the way.
+   */
+  const openComposer = useCallback((spec: Omit<ComposeWindow, "key" | "minimised">) => {
+    if (viewerRole && isViewOnly(viewerRole)) {
+      triggerViewOnlyNotice();
+      return;
+    }
+    setComposers((open) => {
+      if (spec.draftId) {
+        const existing = open.find((w) => w.draftId === spec.draftId);
+        if (existing) return open.map((w) => (w === existing ? { ...w, minimised: false } : w));
+      }
+      const key = spec.draftId ?? `new:${nextComposerKey.current++}`;
+      let next = [...open, { ...spec, key, minimised: false }];
+      const expanded = next.filter((w) => !w.minimised);
+      if (expanded.length > MAX_EXPANDED_COMPOSERS) {
+        const oldest = expanded[0];
+        next = next.map((w) => (w === oldest ? { ...w, minimised: true } : w));
+      }
+      return next;
+    });
+  }, [viewerRole]);
+
+  const closeComposer = useCallback((key: string) => {
+    setComposers((open) => open.filter((w) => w.key !== key));
+  }, []);
+
+  /**
+   * Compose's full recipient directory, fetched when composing starts.
+   *
+   * The page hands over only the mailbox's own organisations (plus a ?compose=
+   * target) — enough to open a deep-linked composer addressed. Every other
+   * client a CAM might write to arrives from /api/inbox/directory the moment a
+   * compose window opens, rather than being read on every page load and every
+   * realtime refresh. It is re-read each time composing starts again, so a
+   * client added in between is findable. Until it lands, or if it fails, the
+   * windows search the page's own list.
+   */
+  const [fullDirectory, setFullDirectory] = useState<AddressableClient[] | null>(null);
+  const composing = composers.length > 0;
+  useEffect(() => {
+    if (!composing) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/inbox/directory");
+        if (!response.ok || cancelled) return;
+        const payload = (await response.json()) as { clients?: AddressableClient[] };
+        if (!cancelled && Array.isArray(payload.clients)) setFullDirectory(payload.clients);
+      } catch {
+        // Stays on the page's own list; the next compose session tries again.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [composing]);
+  const composeDirectory = fullDirectory ?? addressableClients;
+
+  const setComposerMinimised = useCallback((key: string, minimised: boolean) => {
+    setComposers((open) => {
+      const next = open.map((w) => (w.key === key ? { ...w, minimised } : w));
+      if (minimised) return next;
+      // Restoring one may push the row over the cap; the oldest other expanded
+      // window yields, never the one just restored.
+      const expanded = next.filter((w) => !w.minimised);
+      if (expanded.length <= MAX_EXPANDED_COMPOSERS) return next;
+      const victim = expanded.find((w) => w.key !== key);
+      return victim ? next.map((w) => (w === victim ? { ...w, minimised: true } : w)) : next;
+    });
+  }, []);
+
+  /**
+   * Right-edge offset for each window, stacked right-to-left in open order so
+   * a window never moves because a different one was minimised beside it.
+   */
+  /**
+   * ?compose=<organisation id> arrives from the client record's "Write to this
+   * client" link. Resolved against the addressable directory so the window
+   * opens with a real recipient already saved rather than a raw id — the page
+   * tops the directory up with the named client when it is missing from it,
+   * so this usually hits. An id that still matches nothing falls back to the
+   * ?to= address the record sent along, and only opens blank when neither has
+   * an address.
+   */
+  const openedComposeClientId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialComposeClientId) return;
+    // Strict Mode double-invokes mount effects, and every router.refresh
+    // passes the same param back in; openComposer's dedupe only matches on
+    // draftId, which is null here, so guard on the param or it opens again.
+    if (openedComposeClientId.current === initialComposeClientId) return;
+    openedComposeClientId.current = initialComposeClientId;
+    const client = addressableClients?.find((c) => c.id === initialComposeClientId);
+    const recipient =
+      client?.primaryContact?.email?.trim() || initialComposeRecipient?.trim() || undefined;
+    openComposer({ draftId: null, recipient });
+    // ?compose= is a one-time instruction, not a state of the mailbox. Left in
+    // the URL it reopened a compose window on reload, and — while the shell
+    // was keyed on it — on any refresh after opening a thread.
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("compose") || url.searchParams.has("to")) {
+      url.searchParams.delete("compose");
+      url.searchParams.delete("to");
+      window.history.replaceState(null, "", url);
+    }
+    // Keyed on the param: a later "Write to this client" link for another
+    // client arrives as a new value without remounting the shell.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialComposeClientId]);
+
+  const composerOffsets = useMemo(() => {
+    const offsets: number[] = [];
+    let right = COMPOSER_EDGE_PX;
+    for (let i = composers.length - 1; i >= 0; i -= 1) {
+      offsets[i] = right;
+      right += (composers[i]!.minimised ? COMPOSER_MINIMISED_WIDTH_PX : COMPOSER_WIDTH_PX) + COMPOSER_GAP_PX;
+    }
+    return offsets;
+  }, [composers]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [isAtBottom, setIsAtBottom] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  // The dropdown previews it live; Enter applies it to the list.
+  const [liveQuery, setLiveQuery] = useState("");
+  const [appliedQuery, setAppliedQuery] = useState("");
+  const [appliedDateValues, setAppliedDateValues] = useState<string[]>([]);
+  const [appliedStatusValues, setAppliedStatusValues] = useState<string[]>([]);
+
+  // A refresh re-runs the server component and hands down a new list; without
+  // this the shell would keep rendering the threads it mounted with and the
+  // refresh button would spin over stale rows. Adjusted during render rather
+  // than in an effect — React's own pattern for "reset state when a prop
+  // changes", and it avoids a second render pass showing the stale list.
+  const [seededFrom, setSeededFrom] = useState(initialThreads);
+  if (seededFrom !== initialThreads) {
+    setSeededFrom(initialThreads);
+    setServerThreads(initialThreads);
+  }
+
+  /** What the whole shell renders: server threads under this viewer's flags. */
+  const threads = useMemo(
+    () => applyThreadFlags(serverThreads, threadFlags),
+    [serverThreads, threadFlags],
+  );
+
+  // Tags rendered as sidebar label rows: a tag's palette colour, or the deep
+  // lead the sidebar already falls a colourless label back to.
+  const customLabels = useMemo<SidebarLabel[]>(
+    () => tags.map((tag) => ({ name: tag.name, bg: tag.colour ?? "var(--lead)" })),
+    [tags],
+  );
+
+  const allLabels = useMemo(
+    () => [...SECTORS, ...customLabels],
+    [customLabels],
+  );
+
+  // organisation_id → its tags, so the compose window's "Add label" picker can
+  // mark what is already on a client. Built from the server threads because
+  // that is where the per-org tag lists were merged in.
+  const tagsByClientId = useMemo(() => {
+    const map = new Map<string, InboxThreadTag[]>();
+    for (const thread of serverThreads) {
+      if (thread.tags && thread.tags.length > 0) map.set(thread.id, thread.tags);
+    }
+    return map;
+  }, [serverThreads]);
+
+  const labelColorMap = useMemo(() => {
+    const map = new Map<string, string>();
+    allLabels.forEach((l) => map.set(l.name, l.bg));
+    if (map.has("Health & Well-being") && !map.has("Health & Wellbeing")) {
+      map.set("Health & Wellbeing", map.get("Health & Well-being")!);
+    }
+    return map;
+  }, [allLabels]);
+
+  /** What the list actually filters on: the sidebar's labels plus the search
+      bar's sector chips. */
+  const appliedLabels = useMemo(
+    () => new Set([...selectedLabels, ...searchSectorLabels]),
+    [selectedLabels, searchSectorLabels],
+  );
+
+  const activeLabels = useMemo(() => {
+    return Array.from(appliedLabels).map((name) => ({
+      name,
+      bg: labelColorMap.get(name) ?? "var(--lead)",
+    }));
+  }, [appliedLabels, labelColorMap]);
+
+  // Threads matching the applied query, for the list filter below.
+  const queryMatchIds = useMemo(
+    () => new Set(searchThreads(threads, appliedQuery).map((thread) => thread.id)),
+    [threads, appliedQuery],
+  );
+
+  // Date ranges from the applied date selections (several combine with OR,
+  // like every other multi-select here). Unparseable values resolve to null
+  // and are ignored rather than matching nothing.
+  const dateRanges = useMemo(() => {
+    const now = new Date();
+    return appliedDateValues
+      .map((value) => resolveDateFilter(value, now))
+      .filter((range): range is { from: number; to: number } => range !== null);
+  }, [appliedDateValues]);
+
+  // Filter threads based on folder, category tab, label, and the applied
+  // search query (Enter in the bar; the dropdown previews it live).
+  const filteredThreads = useMemo(() => {
+    return threads.filter((thread) => {
+      // 1. Folder filter
+      if (activeFolder === "starred") {
+        if (!thread.isStarred) return false;
+        // Starring is a flag on a thread, not a folder, so this branch has to
+        // exclude trash itself: it was the only folder filter testing nothing
+        // but the star, which left a starred thread visible here after it was
+        // trashed. A starred draft or scheduled email is deliberately still
+        // listed — clicking a draft opens the composer, so it is reachable
+        // rather than misleading.
+        if (thread.folder === "trash") return false;
+      } else if (activeFolder === "sent") {
+        if (thread.folder === "trash" || thread.folder === "scheduled" || thread.folder === "drafts") return false;
+        // Sent keeps a thread forever once it has an outbound email, same as
+        // Gmail's own Sent folder — a client reply changes `status` (who sent
+        // last) but must not evict the thread from here. `hasSentMessage` is
+        // fixed at build time from the event stream, unlike `messages`, which
+        // is empty for every list-level thread until it is opened.
+        if (!thread.hasSentMessage) return false;
+      } else if (activeFolder === "scheduled") {
+        if (thread.folder !== "scheduled") return false;
+      } else if (activeFolder === "drafts") {
+        if (thread.folder !== "drafts") return false;
+      } else if (activeFolder === "trash") {
+        if (thread.folder !== "trash") return false;
+      } else {
+        // Inbox folder: only active conversation threads belong here —
+        // exclude drafts, scheduled sends, and trash.
+        if (thread.folder !== "inbox") return false;
+      }
+
+      // 2. Sector / Label filter (multi-select / additive). A built-in sector
+      //    label matches thread.sector; a tag label matches one of the thread's
+      //    tags — see threadMatchesLabels.
+      if (!threadMatchesLabels(thread, appliedLabels)) return false;
+
+      // 3. Category Tab filter (only applies inside Inbox when no label filter is active)
+      // Triage queues retire human-closed outcomes (converted, hard_no,
+      // soft_no): a decided engagement stops nagging, while staying readable
+      // in Primary, Sent and search.
+      if (activeFolder === "inbox" && appliedLabels.size === 0) {
+        if (activeCategoryTab === "inbound") {
+          if (thread.status !== "replied") return false;
+          if (isClosedPipelineStatus(thread.outreachStatus)) return false;
+        } else if (activeCategoryTab === "awaiting") {
+          if (thread.status !== "awaiting") return false;
+          if (isClosedPipelineStatus(thread.outreachStatus)) return false;
+        } else if (activeCategoryTab === "followup") {
+          if (!isFollowUpDue(thread, followUpDays)) return false;
+        } else if (activeCategoryTab === "starred") {
+          if (!thread.isStarred && !graceUnstarIds.has(thread.id)) return false;
+        } else if (activeCategoryTab === "sent") {
+          if (thread.status !== "sent") return false;
+        }
+      }
+
+      // 4. Search query filter
+      if (appliedQuery.trim() && !queryMatchIds.has(thread.id)) return false;
+
+      // 5. Date filter (panel selections, applied on submit)
+      if (dateRanges.length > 0) {
+        const sentAt = new Date(thread.lastActivityAt).getTime();
+        const inRange = dateRanges.some(
+          (range) => sentAt >= range.from && sentAt <= range.to,
+        );
+        if (!inRange) return false;
+      }
+
+      // 6. Status filter (panel selections, applied on submit)
+      if (appliedStatusValues.length > 0) {
+        if (!appliedStatusValues.includes(thread.status)) return false;
+      }
+
+      return true;
+    });
+  }, [threads, activeFolder, activeCategoryTab, appliedLabels, queryMatchIds, appliedQuery, dateRanges, appliedStatusValues, followUpDays, graceUnstarIds]);
+
+  // Paginated slice
+  const paginatedThreads = useMemo(() => {
+    const start = pageIndex * PAGE_SIZE;
+    return filteredThreads.slice(start, start + PAGE_SIZE);
+  }, [filteredThreads, pageIndex]);
+
+  // Folder Counts
+  const unreadCount = useMemo(
+    () => threads.filter((t) => !t.isRead && t.folder === "inbox").length,
+    [threads]
+  );
+  const starredCount = useMemo(
+    () => threads.filter((t) => t.isStarred && t.folder !== "trash").length,
+    [threads]
+  );
+  const followUpDueCount = useMemo(
+    () => threads.filter((t) => t.folder !== "trash" && isFollowUpDue(t, followUpDays)).length,
+    [threads, followUpDays]
+  );
+  // Category-tab counts mirror each tab's own filter (see the category filter
+  // block in filteredThreads): only active inbox threads.
+  const inboxScoped = (t: InboxThreadView) => t.folder === "inbox";
+  const inboundCount = useMemo(
+    () =>
+      threads.filter(
+        (t) => inboxScoped(t) && t.status === "replied" && !isClosedPipelineStatus(t.outreachStatus),
+      ).length,
+    [threads]
+  );
+  const awaitingCount = useMemo(
+    () =>
+      threads.filter(
+        (t) => inboxScoped(t) && t.status === "awaiting" && !isClosedPipelineStatus(t.outreachStatus),
+      ).length,
+    [threads]
+  );
+  const categoryBadgeCounts = useMemo<CategoryBadgeCounts>(
+    () => ({
+      inbound: inboundCount,
+      awaiting: awaitingCount,
+      followUpDue: followUpDueCount,
+    }),
+    [inboundCount, awaitingCount, followUpDueCount]
+  );
+  const scheduledCount = useMemo(
+    () => threads.filter((t) => t.folder === "scheduled").length,
+    [threads]
+  );
+  const sentCount = useMemo(
+    () =>
+      threads.filter(
+        (t) =>
+          t.folder !== "trash" &&
+          t.folder !== "scheduled" &&
+          t.folder !== "drafts" &&
+          t.hasSentMessage
+      ).length,
+    [threads]
+  );
+  const draftsCount = useMemo(
+    () => threads.filter((t) => t.folder === "drafts").length,
+    [threads]
+  );
+  const trashCount = useMemo(
+    () => threads.filter((t) => t.folder === "trash").length,
+    [threads]
+  );
+  // Threads per sector label, in the view a label tap lands on (the inbox,
+  // trash excluded) — so each chip's number is exactly how many threads
+  // selecting it will reveal.
+  const labelCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    threads.forEach((thread) => {
+      if (thread.folder === "trash") return;
+      counts[thread.sector] = (counts[thread.sector] ?? 0) + 1;
+    });
+    return counts;
+  }, [threads]);
+
+  // Selection State
+  const selectionState: SelectionState = useMemo(() => {
+    if (paginatedThreads.length === 0 || selectedIds.size === 0) return "none";
+    const allSelected = paginatedThreads.every((t) => selectedIds.has(t.id));
+    if (allSelected) return "all";
+    return "some";
+  }, [paginatedThreads, selectedIds]);
+
+  // Active Thread — with stale-while-revalidate bodies. Every server action
+  // (mark-read on open, star, trash…) re-runs the page, which hands down
+  // fresh threads with `messages: []` (bodies are per-thread fetches), and the
+  // reseed above swaps them in. Without this the open pane would blank for one
+  // fetch roundtrip on every one of those writes — the emails visibly vanish
+  // and reappear. While the fresh fetch is in flight the pane keeps showing
+  // the previous bodies; the hydrate effect below still sees the thread's OWN
+  // messages as empty, so it refetches and the display always converges to
+  // fresh. Pass-through when hydrated, so the common case keeps a stable ref.
+  const activeThread = useMemo(() => {
+    const thread = threads.find((t) => t.id === activeThreadId);
+    if (!thread || thread.messages.length > 0) return thread;
+    const cached = messageCacheRef.current.get(thread.id);
+    if (!cached || cached.length === 0) return thread;
+    return { ...thread, messages: cached };
+  }, [threads, activeThreadId]);
+
+  // Warms and prunes the body cache above: every merge that lands bodies is
+  // kept, and threads that left the list stop being kept. An effect (not
+  // render) so StrictMode's double render can never corrupt it — and it only
+  // maintains, so the first paint after a reseed still finds the previous
+  // bodies warm.
+  useEffect(() => {
+    const cache = messageCacheRef.current;
+    const live = new Set<string>();
+    for (const thread of threads) {
+      live.add(thread.id);
+      if (thread.messages.length > 0) cache.set(thread.id, thread.messages);
+    }
+    for (const id of [...cache.keys()]) {
+      if (!live.has(id)) cache.delete(id);
+    }
+  }, [threads]);
+
+  // Same gate as the client record header (record-header.tsx: `isAdmin ||
+  // isSelf`): the owning CAM or an admin may move the pipeline status from
+  // the reading pane. The thread carries the owner's email, not their user
+  // id, so this matches on address; the set_outreach_status RPC re-checks
+  // server-side, so a stale address fails closed on save, never on read.
+  const viewerEmailLower = viewerEmail?.trim().toLowerCase() ?? "";
+  const canSetStatusForThread = (thread: InboxThreadView): boolean => {
+    if (isViewer) return false;
+    return (
+      viewerIsAdmin ||
+      (viewerEmailLower !== "" &&
+        thread.camOwner.email.trim().toLowerCase() === viewerEmailLower)
+    );
+  };
+
+  // Keep `?thread=` in step with what is open, so the URL is always a link to
+  // the current view — copyable, and what a new tab reads on load. `replace`,
+  // not `push`: opening threads should not stack up in the back button.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    const currentThread = url.searchParams.get("thread");
+    if (activeThreadId) {
+      if (currentThread !== activeThreadId) {
+        url.searchParams.set("thread", activeThreadId);
+        window.history.replaceState(null, "", url);
+      }
+    } else if (currentThread !== null) {
+      url.searchParams.delete("thread");
+      window.history.replaceState(null, "", url);
+    }
+  }, [activeThreadId]);
+
+  const threadHref = (threadId: string) => `?thread=${encodeURIComponent(threadId)}`;
+
+  // Keep `?tab=` in step with the tab bar, next to the `?thread=` sync above:
+  // opening threads uses `replace`, not `push`, so the tab is what makes
+  // Back, refresh and a copied URL land where the CAM was rather than on
+  // Primary. A separate effect from the thread one so the two params never
+  // fight over the same replaceState.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("tab") !== activeCategoryTab) {
+      url.searchParams.set("tab", activeCategoryTab);
+      window.history.replaceState(null, "", url);
+    }
+  }, [activeCategoryTab]);
+
+  // Owner options for the search panel, derived from whoever holds threads
+  // right now — there is no separate team endpoint, so the data is the list.
+  const ownerOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    threads.forEach((thread) => {
+      if (!seen.has(thread.camOwner.email)) {
+        seen.set(thread.camOwner.email, thread.camOwner.name);
+      }
+    });
+    return [
+      { label: "Unassigned", value: "unassigned" },
+      ...[...seen.entries()].map(([value, label]) => ({ label, value })),
+    ];
+  }, [threads]);
+
+  // Suggestion rows for the bar's dropdown, recomputed on every keystroke.
+  const suggestions = useMemo(
+    () =>
+      searchThreads(threads, liveQuery)
+        .slice(0, 6)
+        .map((thread) => ({
+          id: thread.id,
+          title: thread.subject,
+          subtitle: `${thread.orgName} · ${thread.primaryContact.name}`,
+          meta: formatGmailTimestamp(thread.lastActivityAt),
+        })),
+    [threads, liveQuery],
+  );
+
+  const handleListScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    const atBottom =
+      scrollHeight <= clientHeight ||
+      scrollTop + clientHeight >= scrollHeight - 8;
+    setIsAtBottom((prev) => (prev !== atBottom ? atBottom : prev));
+  };
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+
+    const checkAtBottom = () => {
+      const atBottom =
+        el.scrollHeight <= el.clientHeight ||
+        el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+      setIsAtBottom((prev) => (prev !== atBottom ? atBottom : prev));
+    };
+
+    checkAtBottom();
+
+    const observer = new ResizeObserver(checkAtBottom);
+    observer.observe(el);
+  }, [paginatedThreads, activeCategoryTab, activeFolder, appliedLabels, activeThreadId]);
+
+  /**
+   * Applies a label filter.
+   *
+   * The 1.5s delay that used to sit here was simulated — a spinner invented to
+   * make an instant, in-memory `Array.filter` feel like it had gone somewhere.
+   * Against real threads it was a second and a half of nothing, every time a
+   * sector was toggled, so it is gone: the filter applies on the same tick.
+   */
+  function triggerLabelFilter(nextLabels: Set<string>) {
+    setSelectedLabels(nextLabels);
+    setPageIndex(0);
+    listRef.current?.scrollTo({ top: 0 });
+  }
+
+  function handleToggleLabel(labelName: string) {
+    const next = new Set(selectedLabels);
+    if (next.has(labelName)) {
+      next.delete(labelName);
+    } else {
+      next.add(labelName);
+    }
+    setActiveThreadId(null);
+    triggerLabelFilter(next);
+  }
+
+  /* The chip row above the list shows the union of both sources, so removing
+     one has to reach both — a sector chip that arrived from the search bar
+     would otherwise be undeletable from here. */
+  function handleRemoveLabel(labelName: string) {
+    const next = new Set(selectedLabels);
+    next.delete(labelName);
+    setSearchSectorLabels((prev) => {
+      if (!prev.has(labelName)) return prev;
+      const remaining = new Set(prev);
+      remaining.delete(labelName);
+      return remaining;
+    });
+    triggerLabelFilter(next);
+  }
+
+  function handleClearAllLabels() {
+    setSearchSectorLabels(new Set());
+    triggerLabelFilter(new Set());
+  }
+
+  /**
+   * The sidebar's + creates a real tag (TAGS). On success it joins `tags`, so
+   * the new label row and its filter work at once without a refresh; the next
+   * server render re-seeds `tags` from `initialTags` and this optimistic entry
+   * is replaced by the canonical one.
+   */
+  async function handleCreateLabel(
+    name: string,
+    colour: string | null,
+  ): Promise<{ ok: boolean; message?: string }> {
+    const result = await createTagAction(name, colour);
+    if (!result.ok) {
+      return { ok: false, message: result.message };
+    }
+    setTags((prev) =>
+      prev.some((tag) => tag.id === result.tag.id)
+        ? prev
+        : [...prev, { id: result.tag.id, name: result.tag.name, colour: result.tag.colour ?? null }],
+    );
+    return { ok: true };
+  }
+
+  // Handlers
+  function handleSelectThread(id: string) {
+    const next = new Set(selectedIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedIds(next);
+  }
+
+  function handleSelectAll() {
+    setSelectedIds(new Set(paginatedThreads.map((t) => t.id)));
+  }
+
+  function handleDeselectAll() {
+    setSelectedIds(new Set());
+  }
+
+  function handleSelectRead() {
+    setSelectedIds(new Set(paginatedThreads.filter((t) => t.isRead).map((t) => t.id)));
+  }
+
+  function handleSelectUnread() {
+    setSelectedIds(new Set(paginatedThreads.filter((t) => !t.isRead).map((t) => t.id)));
+  }
+
+  function handleSelectStarred() {
+    setSelectedIds(new Set(paginatedThreads.filter((t) => t.isStarred).map((t) => t.id)));
+  }
+
+  /* Star / read / trash write to the viewer's flags rather than editing the
+     thread list in place. Same visible behaviour, except that it now survives
+     a reload: these edits used to live only in React state, so every one of
+     them was undone by the next navigation. See @/lib/inbox/thread-flags. */
+
+  function setStarred(ids: readonly string[], starred: boolean) {
+    commitFlags(
+      (prev) => {
+        const next = new Set(prev.starred);
+        ids.forEach((id) => (starred ? next.add(id) : next.delete(id)));
+        return { ...prev, starred: next };
+      },
+      ids.map((organisationId) => ({ organisationId, isStarred: starred })),
+    );
+  }
+
+  /** Read state has two override sets, since both directions are deliberate —
+      a marked-unread thread must not be flipped back by the server's own
+      derivation on the next load. */
+  function setRead(ids: readonly string[], read: boolean) {
+    commitFlags(
+      (prev) => {
+        const nextRead = new Set(prev.read);
+        const nextUnread = new Set(prev.unread);
+        ids.forEach((id) => {
+          if (read) {
+            nextRead.add(id);
+            nextUnread.delete(id);
+          } else {
+            nextUnread.add(id);
+            nextRead.delete(id);
+          }
+        });
+        return { ...prev, read: nextRead, unread: nextUnread };
+      },
+      ids.map((organisationId) => ({ organisationId, read })),
+    );
+  }
+
+  function setTrashed(ids: readonly string[]) {
+    commitFlags(
+      (prev) => {
+        const next = new Set(prev.trashed);
+        ids.forEach((id) => next.add(id));
+        return { ...prev, trashed: next };
+      },
+      ids.map((organisationId) => ({ organisationId, isTrashed: true })),
+    );
+  }
+
+  function handleToggleStar(id: string) {
+    if (isViewer) return;
+    const thread = threads.find((t) => t.id === id);
+    const wasStarred = !!thread?.isStarred;
+    setStarred([id], !wasStarred);
+
+    const inStarredTab =
+      activeFolder === "inbox" &&
+      appliedLabels.size === 0 &&
+      activeCategoryTab === "starred";
+
+    if (inStarredTab && wasStarred && !reduceMotion) {
+      // Just unstarred while looking at the Starred tab: hold the row in place
+      // for a grace beat before it is dropped and animated out.
+      setGraceUnstarIds((prev) => new Set(prev).add(id));
+      const timer = setTimeout(() => clearGraceUnstar(id), GRACE_UNSTAR_MS);
+      graceTimers.current.set(id, timer);
+    } else if (graceTimers.current.has(id)) {
+      // Re-starred during the grace beat: cancel the drop, the row stays.
+      clearGraceUnstar(id);
+    }
+  }
+
+  function handleToggleRead(id: string) {
+    if (isViewer) return;
+    const thread = threads.find((t) => t.id === id);
+    setRead([id], !thread?.isRead);
+  }
+
+  function handleDeleteThread(id: string) {
+    if (isViewer) return;
+    setTrashed([id]);
+    if (activeThreadId === id) setActiveThreadId(null);
+  }
+
+  /**
+   * The reading pane's scheduled-send controls. Cancel returns the row to
+   * draft, and success closes the pane and refetches, since the thread just
+   * changed folders. Reschedule and in-place edit keep the thread open — it is
+   * still scheduled — and only refetch. Editing no longer cancels first and
+   * reopens Compose: closing that window left the email silently unscheduled.
+   * See rescheduleEmail / updateScheduledEmail for how the change stays safe.
+   */
+  async function handleCancelScheduled(
+    thread: InboxThreadView,
+    messageId: string,
+  ): Promise<string | null> {
+    if (isViewer) return "You have view-only access.";
+    const result = await cancelScheduledEmail({ organisationId: thread.id, messageId });
+    if (!result.ok) return result.message;
+    setActiveThreadId(null);
+    router.refresh();
+    return null;
+  }
+
+  async function handleRescheduleScheduled(
+    thread: InboxThreadView,
+    messageId: string,
+    when: Date,
+  ): Promise<string | null> {
+    if (isViewer) return "You have view-only access.";
+    const result = await rescheduleEmail({
+      organisationId: thread.id,
+      messageId,
+      scheduledAt: when.toISOString(),
+    });
+    // A failure may still have changed the row (put back, or left a draft), so
+    // refresh either way and let the thread show what is true now.
+    router.refresh();
+    return result.ok ? null : result.message;
+  }
+
+  // Bulk Handlers
+  function handleMarkAsRead() {
+    if (isViewer) return;
+    setRead([...selectedIds], true);
+    setSelectedIds(new Set());
+  }
+
+  function handleMarkAsUnread() {
+    if (isViewer) return;
+    setRead([...selectedIds], false);
+    setSelectedIds(new Set());
+  }
+
+  /** Gmail's own rule for a mixed selection: if anything is unstarred, star
+      everything; only an all-starred selection unstars. */
+  function handleToggleStarSelected() {
+    if (isViewer) return;
+    const selected = threads.filter((t) => selectedIds.has(t.id));
+    const starring = selected.some((t) => !t.isStarred);
+    setStarred(selected.map((t) => t.id), starring);
+    setSelectedIds(new Set());
+  }
+
+  function handleDeleteSelected() {
+    if (isViewer) return;
+    setTrashed([...selectedIds]);
+    setSelectedIds(new Set());
+    if (activeThreadId && selectedIds.has(activeThreadId)) {
+      setActiveThreadId(null);
+    }
+  }
+
+  /**
+   * Refresh actually refetches now.
+   *
+   * It used to be a 450ms spinner over unchanged state — the one control on
+   * the screen whose entire job is "show me what arrived since", doing nothing
+   * of the kind. `router.refresh()` re-runs the server component, so the four
+   * table reads behind the list run again and new replies appear; the spinner
+   * runs until React has the new tree.
+   */
+  function handleRefresh() {
+    startRefresh(() => {
+      router.refresh();
+    });
+  }
+
+  function handleOpenThread(thread: InboxThreadView) {
+    // A draft is not something you can read — it is an email you have not
+    // finished writing — so opening one resumes it in a compose window rather
+    // than rendering a reading pane for a message nobody ever received. The
+    // test is the thread's folder, not the current one, so this holds wherever
+    // the draft was clicked: Drafts, Starred, search results.
+    if (thread.folder === "drafts") {
+      void resumeDraft(thread);
+      return;
+    }
+    // Mark as read automatically when opening
+    setRead([thread.id], true);
+    setActiveThreadId(thread.id);
+    void hydrate(thread);
+  }
+
+  /**
+   * Open a draft thread in a compose window, with whatever it already holds.
+   *
+   * The list query omits message bodies (see `hydrate`), so the body is fetched
+   * first and the window opens with the real text rather than blank. A failed
+   * fetch still opens the window — on the draft's own row, with recipient and
+   * subject — because losing the body is better than the click doing nothing.
+   */
+  async function resumeDraft(thread: InboxThreadView) {
+    const hydrated = await hydrate(thread).catch(() => null);
+    const source = hydrated ?? thread;
+    // A thread with history holds old sent mail too — resuming means the
+    // unsent text, scheduled first (it wins ties everywhere else), else the
+    // draft, else whatever is newest. Before queued rows hydrated, this took
+    // the last message outright and a draft reopened showing old sent mail.
+    const pending =
+      source.messages.find((message) => message.pendingKind === "scheduled") ??
+      source.messages.find((message) => message.pendingKind === "draft");
+    const last = pending ?? source.messages[source.messages.length - 1];
+    openComposer({
+      draftId: pending?.id ?? last?.id ?? thread.id,
+      recipient: thread.primaryContact?.email ?? undefined,
+      subject: thread.subject,
+      body: last?.body ? emailHtmlToPlainText(last.body) : undefined,
+      // F110: a reopened Stage 2 draft restores its verification link from
+      // the row — without this the source exists only in the transient
+      // generation response and cannot be checked on reopen.
+      newsSource: last?.newsSource,
+      newsHook: last?.newsHook,
+      newsUrl: last?.newsUrl,
+    });
+  }
+
+  /**
+   * Message bodies arrive per thread, on open.
+   *
+   * The list query deliberately does not select `outreach_messages.body` —
+   * pulling every email's HTML for every organisation would move megabytes on
+   * every page load, to render subjects and one-line snippets. A thread
+   * therefore reaches the browser with `messages: []`, and an empty `messages`
+   * is exactly the signal that it has not been hydrated yet.
+   */
+  async function hydrate(thread: InboxThreadView): Promise<InboxThreadView | null> {
+    // Callers that need the bodies inline (resumeDraft) read the return value,
+    // so hand back the thread with its messages rather than only mutating list
+    // state: an already-hydrated thread comes straight back, and a fresh fetch
+    // returns the merged copy. Concurrent activations share the in-flight
+    // request — a second hydrate that fired its own fetch would resolve with
+    // no data and open a duplicate body-less composer the draft-id dedupe in
+    // openComposer cannot collapse.
+    if (thread.messages.length > 0) return thread;
+    return inflightRef.current.run(thread.id, async () => {
+      try {
+        const response = await fetch(`/api/inbox/${thread.id}/thread`);
+        if (!response.ok) return null;
+        const hydrated = (await response.json()) as InboxThreadView;
+        // Message bodies are server data, not a viewer flag — they belong on the
+        // underlying list.
+        setServerThreads((prev) =>
+          prev.map((t) => (t.id === thread.id ? { ...t, messages: hydrated.messages } : t)),
+        );
+        return { ...thread, messages: hydrated.messages };
+      } catch {
+        // A failed hydration leaves the pane's header and metadata intact; the
+        // conversation simply stays empty rather than the thread failing to open.
+        return null;
+      }
+    });
+  }
+
+  // A thread reached by deep link (?thread=, or a browser back) opens without
+  // anyone clicking a row, so it needs the same body fetch handleOpenThread
+  // does. `hydrate` no-ops on a thread that already has its messages, which is
+  // what keeps this from re-fetching on every unrelated re-render.
+  useEffect(() => {
+    if (!activeThreadId) return;
+    const thread = threads.find((candidate) => candidate.id === activeThreadId);
+    if (thread) void hydrate(thread);
+  }, [activeThreadId, threads]);
+
+  /**
+   * Cancels one pending commit and reopens its composer from the snapshot.
+   * The draft row was never sent or deleted, so it is still exactly what the
+   * snapshot describes — reopening resumes the same row (windows dedupe on
+   * draftId) and the refresh surfaces it in Drafts.
+   */
+  function undoPending(key: number, snapshot: ComposerSnapshot) {
+    const pending = pendingCommits.current.get(key);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingCommits.current.delete(key);
+    dismissToastKey(key);
+    openComposer({
+      draftId: snapshot.draftId,
+      recipient: snapshot.recipient,
+      subject: snapshot.subject,
+      body: snapshot.body,
+      newsSource: snapshot.newsSource,
+      newsHook: snapshot.newsHook,
+      newsUrl: snapshot.newsUrl,
+    });
+    router.refresh();
+  }
+
+  /**
+   * Commits a held send: the actual Gmail send (or schedule) behind "Sending…
+   * · Undo". The draft row carries the content; the request carries the exact
+   * HTML captured at Send time. A refused send is not a lost email — the row
+   * is untouched, so the refresh parks it in Drafts and the toast says so.
+   */
+  async function commitSend(request: PendingSendRequest): Promise<void> {
+    try {
+      const input = {
+        organisationId: request.organisationId,
+        messageId: request.messageId,
+        recipient: request.to,
+        subject: request.subject,
+        body: request.bodyHtml,
+        explicitlyApproved: true as const,
+        attachFlyer: request.attachFlyer,
+      };
+      const result = request.scheduledFor
+        ? await scheduleReviewedEmail({ ...input, scheduledAt: request.scheduledFor })
+        : await sendReviewedEmail(input);
+      router.refresh();
+      showToast(
+        result.ok
+          ? request.scheduledFor
+            ? "Message scheduled"
+            : "Message sent"
+          : result.message || "The email could not be sent. The draft was kept.",
+      );
+    } catch {
+      router.refresh();
+      showToast("The network dropped before the email could be sent. The draft was kept.");
+    }
+  }
+
+  /**
+   * Commits a held discard: the audited discard RPC behind "Draft discarded ·
+   * Undo". Null ids mean a compose that never reached the server — nothing to
+   * remove, so the commit is a no-op by design rather than a call that must
+   * fail. A refused delete refreshes (the row is still there) and says so.
+   */
+  async function commitDiscard(request: PendingDiscardRequest): Promise<void> {
+    if (!request.organisationId || !request.messageId) return;
+    try {
+      const result = await discardEmailDraft({
+        organisationId: request.organisationId,
+        messageId: request.messageId,
+      });
+      router.refresh();
+      showToast(result.ok ? "Draft discarded" : result.message);
+    } catch {
+      router.refresh();
+      showToast("The draft could not be discarded. Refresh and try again.");
+    }
+  }
+
+  /**
+   * A prepared send arrives here and waits out the Undo window instead of
+   * sending at once — Gmail-style delayed commit. The composer is already
+   * closed; the toast is the only thing standing between the click and the
+   * Gmail API. Real data throughout: the commit refreshes from Supabase, so
+   * the list shows the row the server actually wrote.
+   */
+  function handleSendRequest(request: PendingSendRequest) {
+    const key = stagePending(() => void commitSend(request));
+    showUndoToast(key, request.scheduledFor ? "Scheduling…" : "Sending…", request.snapshot);
+  }
+
+  /**
+   * A discard arrives here and waits out the Undo window instead of deleting
+   * at once. The row still exists until the commit fires, which is what makes
+   * Undo a reopen rather than a resurrection.
+   */
+  function handleDiscardRequest(request: PendingDiscardRequest) {
+    const key = stagePending(() => void commitDiscard(request));
+    showUndoToast(key, "Draft discarded", request.snapshot);
+  }
+
+  return (
+    <div className={`flex flex-col w-full gap-2 font-sans bg-[#f6f8fc] min-h-0 overflow-hidden pt-2 ${className}`}>
+      {/* Header: compose and search share one line, always. The compose box
+          mirrors the sidebar's width, so the search starts where the surface
+          starts and the sidebar's Inbox row meets the surface top. */}
+      <div className="flex items-center gap-2 shrink-0">
+        <div className="w-64 shrink-0 pr-3">
+          <div className="px-1">
+            <button
+              onClick={() => {
+                if (isViewer) {
+                  triggerViewOnlyNotice();
+                  return;
+                }
+                openComposer({ draftId: null });
+              }}
+              type="button"
+              className="flex items-center gap-3 rounded-2xl bg-[#c2e7ff] hover:bg-[#b3dcf8] active:scale-[0.98] transition-all px-5 py-3.5 shadow-sm text-slate-800 font-semibold text-sm hover:shadow-md cursor-pointer"
+            >
+              <Pencil className="h-5 w-5 text-slate-900 stroke-[2.5]" />
+              <span>Compose</span>
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <BrandSearchBar
+            tone="light"
+            clearRowOnOpen
+            placeholder="Search"
+            busy={isRefreshing}
+            subjects={["organisations", "contacts", "subjects"]}
+            onQueryChange={setLiveQuery}
+            suggestions={suggestions}
+            onSuggestionSelect={(id) => {
+              const thread = threads.find((t) => t.id === id);
+              if (thread) handleOpenThread(thread);
+            }}
+            onSubmitQuery={(query, filters) => {
+              /* A submission is the whole filter state, not a set of additions.
+                 The sector chips used to be UNIONED into `selectedLabels`,
+                 which meant a search could only ever add sectors — clearing
+                 the chips and searching again left the old ones applied — and
+                 a later "clear" branch then wiped the SIDEBAR's label
+                 selection too, which the search bar had never touched. The two
+                 sources are kept apart now: the bar owns `searchSectorLabels`,
+                 the sidebar owns `selectedLabels`, and the list filters on the
+                 union of the two (see `appliedLabels`). Submitting with no
+                 sector chips clears the bar's contribution and leaves the
+                 sidebar's alone. */
+              setAppliedQuery(query);
+              setAppliedDateValues(
+                filters
+                  .filter((filter) => filter.category === DATE_CATEGORY)
+                  .map((filter) => filter.value),
+              );
+              setAppliedStatusValues(
+                filters
+                  .filter((filter) => filter.category === "Filter by status")
+                  .map((filter) => filter.value),
+              );
+              setSearchSectorLabels(
+                new Set(
+                  filters
+                    .filter((filter) => filter.category === "Filter by sector")
+                    .map((filter) => {
+                      const opt = SECTOR_FILTER_OPTIONS.find((s) => s.value === filter.value);
+                      return opt ? opt.label : filter.label || filter.value;
+                    }),
+                ),
+              );
+              setPageIndex(0);
+              listRef.current?.scrollTo({ top: 0 });
+            }}
+            recentKey="preview-inbox-before"
+            chipsBelow={false}
+            categories={{
+              [DATE_CATEGORY]: DATE_OPTIONS,
+              "Filter by sector": SECTOR_FILTER_OPTIONS,
+              "Filter by status": [
+                { label: "Replied", value: "replied" },
+                { label: "Awaiting response", value: "awaiting" },
+                { label: "Sent", value: "sent" },
+              ],
+              "Filter by owner": ownerOptions,
+              "Filter by organisation type": ORGANISATION_TYPES.map((value) => ({
+                label: formatOrganisationType(value),
+                value,
+              })),
+              "Filter by priority score": PRIORITY_SCORE_FILTERS.map((band) => ({
+                label: band.label,
+                value: band.value,
+              })),
+            }}
+            params={{
+              [DATE_CATEGORY]: "date",
+              "Filter by sector": "sector",
+              "Filter by status": "status",
+              "Filter by owner": "owner",
+              "Filter by organisation type": "type",
+              "Filter by priority score": "score",
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Content row: nav + surface share whatever height remains. */}
+      <div className="flex flex-1 min-h-0 gap-2">
+      {/* Left Gmail Navigation */}
+      <GmailSidebar
+        activeFolder={activeFolder}
+        onSelectFolder={(folder) => {
+          setSelectedLabels(new Set());
+          setSearchSectorLabels(new Set());
+          setActiveFolder(folder);
+          setActiveThreadId(null);
+          // A folder switch is a new list, not a new page of the old one: the
+          // inbox's page-2 offset must not follow into Starred (or vice versa),
+          // and a checkbox selection must not follow either — bulk actions act
+          // on selectedIds wherever they were picked.
+          setPageIndex(0);
+          setSelectedIds(new Set());
+          listRef.current?.scrollTo({ top: 0 });
+        }}
+        selectedLabels={selectedLabels}
+        onToggleLabel={handleToggleLabel}
+        onClearLabels={handleClearAllLabels}
+        unreadCount={unreadCount}
+        starredCount={starredCount}
+        scheduledCount={scheduledCount}
+        sentCount={sentCount}
+        draftsCount={draftsCount}
+        trashCount={trashCount}
+        labelCounts={labelCounts}
+        customLabels={customLabels}
+        onCreateLabel={handleCreateLabel}
+        engineHealth={engineHealth}
+      />
+
+      {/* Right Column: the mail surface fills the content row. */}
+      <div className="relative flex-1 flex flex-col min-w-0 min-h-0">
+      {/* Main Mail Surface (borderless, shadowless) */}
+      <div
+        className={`relative flex-1 flex flex-col min-w-0 min-h-0 bg-white rounded-t-panel overflow-hidden transition-[border-radius] duration-200 ${
+          activeThread || isAtBottom ? "rounded-b-panel" : "rounded-b-none"
+        }`}
+      >
+        {/* Full conversation reading view */}
+        {activeThread ? (
+          <GmailReadingPane
+            thread={activeThread}
+            onBack={() => setActiveThreadId(null)}
+            canSetStatus={canSetStatusForThread(activeThread)}
+            onToggleStar={handleToggleStar}
+            onDelete={handleDeleteThread}
+            onMarkUnread={(id) => {
+              handleToggleRead(id);
+              setActiveThreadId(null);
+            }}
+            onCancelScheduled={(messageId) => handleCancelScheduled(activeThread, messageId)}
+            onRescheduleScheduled={(messageId, when) => handleRescheduleScheduled(activeThread, messageId, when)}
+            onScheduledEdited={() => router.refresh()}
+            onSend={handleSendRequest}
+            viewerId={viewerId}
+            viewerRole={viewerRole}
+            onOwnershipChanged={() => router.refresh()}
+          />
+        ) : (
+          <div className="flex-1 flex flex-col min-w-0 min-h-0">
+            {/* A refused star / read / trash. The store has already reverted
+                the flag by now, so this says why the row changed back rather
+                than leaving the CAM to notice it silently. Dismissable, and
+                cleared by the next successful write. */}
+            {flagError && (
+              <div
+                className="mx-3 mt-3 flex items-start justify-between gap-3 rounded-panel border border-stop/25 bg-stop-wash px-3 py-2"
+                role="alert"
+              >
+                <p className="text-xs font-semibold text-stop">{flagError}</p>
+                <button
+                  aria-label="Dismiss"
+                  className="shrink-0 text-stop/70 transition-colors hover:text-stop"
+                  onClick={() => setFlagError(null)}
+                  type="button"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* Top Toolbar */}
+            <div className="p-3">
+              <GmailActionBar
+                selectionState={selectionState}
+                selectedCount={selectedIds.size}
+                totalCount={filteredThreads.length}
+                onSelectAll={handleSelectAll}
+                onDeselectAll={handleDeselectAll}
+                onSelectRead={handleSelectRead}
+                onSelectUnread={handleSelectUnread}
+                onSelectStarred={handleSelectStarred}
+                onRefresh={handleRefresh}
+                isRefreshing={isRefreshing}
+                onMarkAsRead={handleMarkAsRead}
+                onMarkAsUnread={handleMarkAsUnread}
+                onToggleStarSelected={handleToggleStarSelected}
+                onDeleteSelected={handleDeleteSelected}
+                isViewer={isViewer}
+                pageIndex={pageIndex}
+                pageSize={PAGE_SIZE}
+                onPrevPage={() => {
+                  setPageIndex(Math.max(0, pageIndex - 1));
+                  listRef.current?.scrollTo({ top: 0 });
+                }}
+                onNextPage={() => {
+                  setPageIndex(pageIndex + 1);
+                  listRef.current?.scrollTo({ top: 0 });
+                }}
+                activeLabels={activeLabels}
+                onRemoveLabel={handleRemoveLabel}
+                onClearAllLabels={handleClearAllLabels}
+              />
+            </div>
+
+            {/* Gmail Category Tabs (Only on Inbox folder when no label filters are active) */}
+            {activeFolder === "inbox" && appliedLabels.size === 0 && (
+              <div className="flex items-center justify-between border-b border-rule-soft px-1 text-xs select-none">
+                <div
+                  role="tablist"
+                  aria-label="Inbox categories"
+                  className="flex items-center gap-1"
+                >
+                  {CATEGORY_TABS.map((tab) => {
+                    const TabIcon = tab.icon;
+                    const isSelected = activeCategoryTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={isSelected}
+                        onClick={() => {
+                          if (activeCategoryTab !== tab.id) {
+                            setActiveCategoryTab(tab.id);
+                            setPageIndex(0);
+                          }
+                          listRef.current?.scrollTo({ top: 0 });
+                        }}
+                        className={`relative flex items-center gap-2.5 px-6 py-3 font-semibold font-body text-sm transition-colors cursor-pointer ${
+                          isSelected
+                            ? tab.activeTextClass
+                            : "text-dim hover:bg-paper hover:text-ink"
+                        }`}
+                      >
+                        <TabIcon className={`h-4 w-4 ${tab.iconClass ?? ""}`} />
+                        <span>{tab.label}</span>
+                        {tab.renderBadge?.(categoryBadgeCounts)}
+                        {isSelected && (
+                          <motion.span
+                            layoutId="activeCategoryTabIndicator"
+                            aria-hidden="true"
+                            className={`absolute inset-x-0 bottom-0 h-[3px] rounded-t-full ${tab.indicatorBg}`}
+                            transition={
+                              reduceMotion
+                                ? { duration: 0 }
+                                : { type: "spring", stiffness: 450, damping: 32 }
+                            }
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="pr-3 flex items-center">
+                  <InfoTooltip
+                    side="bottom"
+                    align="end"
+                    sideOffset={8}
+                    label="About inbox triage categories"
+                    title="Inbox Triage Guide"
+                    triggerClassName="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                    contentClassName="w-80 max-w-[22rem] p-3 text-[12px] space-y-2.5"
+                    content={
+                      <div className="space-y-2 pt-1 text-[11.5px] leading-snug">
+                        <div>
+                          <span className="font-semibold text-emerald-400">Inbound Replies:</span>{" "}
+                          <span className="text-white/85">
+                            The client sent the newest message. Action is needed from our team to respond.
+                          </span>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-amber-400">Awaiting Response:</span>{" "}
+                          <span className="text-white/85">
+                            We sent the latest reply in an active thread. We are waiting for the client to reply back.
+                          </span>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-rose-400">Follow-up Due:</span>{" "}
+                          <span className="text-white/85">
+                            We sent the last email, but the client has remained silent past the follow-up threshold (time to nudge).
+                          </span>
+                        </div>
+                      </div>
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Thread List Table */}
+            <div
+              ref={listRef}
+              onScroll={handleListScroll}
+              className="flex-1 min-h-0 overflow-y-auto"
+            >
+              {/* No exit animation and no mode="wait" on purpose: the old list must
+                  unmount the same tick the folder/tab key changes. With an exit
+                  fade the previous folder's threads lingered ~160ms inside the
+                  new folder — an empty Starred briefly showing the inbox list —
+                  which reads as wrong data rather than motion polish. The new
+                  list still fades in; row-level delete animations below are
+                  untouched. */}
+              <AnimatePresence initial={false}>
+                <motion.div
+                  key={
+                    activeFolder === "inbox" && appliedLabels.size === 0
+                      ? activeCategoryTab
+                      : `${activeFolder}-${Array.from(appliedLabels).join(",")}`
+                  }
+                  initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.16, ease: "easeOut" }}
+                  className="min-h-full"
+                >
+                  {isRefreshing ? (
+                    <div className="divide-y divide-rule-soft animate-pulse" aria-label="Loading threads…">
+                      {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+                        <div
+                          key={i}
+                          className="flex items-center gap-3 border-b border-rule-soft px-3 py-3"
+                        >
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <div className="h-4 w-4 rounded bg-paper-sunk" />
+                            <div className="h-4 w-4 rounded-full bg-paper-sunk" />
+                          </div>
+                          <div className="w-48 shrink-0 flex items-center gap-2">
+                            <div className="h-3.5 w-32 rounded bg-paper-sunk" />
+                          </div>
+                          <div className="flex-1 min-w-0 flex items-center">
+                            <div className="h-3.5 w-4/5 rounded bg-paper-sunk" />
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <div className="h-4 w-18 rounded-full bg-paper-sunk" />
+                          </div>
+                          <div className="w-28 shrink-0 text-right">
+                            <div className="h-3 w-12 ml-auto rounded bg-paper-sunk" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : paginatedThreads.length === 0 ? (
+                    (() => {
+                      const trimmedQuery = appliedQuery.trim();
+                      const empty = trimmedQuery
+                        ? {
+                            icon: Inbox,
+                            title: `No results for “${trimmedQuery}”`,
+                            hint: "Try a different organisation, subject, or contact — or clear the search and press Enter.",
+                          }
+                        : appliedLabels.size > 0
+                          ? {
+                              icon: Tag,
+                              title:
+                                appliedLabels.size === 1
+                                  ? `Nothing under ${Array.from(appliedLabels)[0]}`
+                                  : "Nothing matching selected labels",
+                              hint: "Try another sector label or folder.",
+                            }
+                          : FOLDER_EMPTY_STATES[activeFolder];
+                      const EmptyIcon = empty.icon;
+                      const emptyHint =
+                        !trimmedQuery &&
+                        appliedLabels.size === 0 &&
+                        dateRanges.length > 0
+                          ? "No threads arrived in the selected dates — try widening the range."
+                          : empty.hint;
+                      return (
+                        <div className="flex flex-col items-center justify-center py-20 text-center text-dim">
+                          <EmptyIcon className="h-12 w-12 text-faint stroke-[1.5] mb-3" />
+                          <p className="text-sm font-semibold text-ink">{empty.title}</p>
+                          <p className="text-xs text-dim mt-1 max-w-sm">{emptyHint}</p>
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <AnimatePresence initial={false}>
+                      {paginatedThreads.map((thread) => (
+                        <motion.div
+                          key={thread.id}
+                          initial={false}
+                          exit={
+                            reduceMotion ? undefined : { opacity: 0, height: 0 }
+                          }
+                          transition={{ duration: 0.32, ease: "easeInOut" }}
+                          style={{ overflow: "hidden" }}
+                        >
+                          <GmailThreadRow
+                            thread={thread}
+                            isSelected={selectedIds.has(thread.id)}
+                            hasSelection={selectedIds.size > 0}
+                            isActive={activeThreadId === thread.id}
+                            isSentView={activeFolder === "sent"}
+                            isScheduledView={activeFolder === "scheduled"}
+                            href={threadHref(thread.id)}
+                            onSelect={() => handleSelectThread(thread.id)}
+                            onOpen={handleOpenThread}
+                            onToggleStar={() => handleToggleStar(thread.id)}
+                            onDelete={() => handleDeleteThread(thread.id)}
+                            onToggleRead={() => handleToggleRead(thread.id)}
+                            onToggleSector={handleToggleLabel}
+                            isSectorActive={selectedLabels.has(thread.sector)}
+                            sectorBg={labelColorMap.get(thread.sector)}
+                            isViewer={isViewer}
+                          />
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          </div>
+        )}
+        </div>
+
+        {/* Inline toast — anchored at the bottom-left of the mail surface,
+            not the viewport, so it sits below the category tabs / thread list. */}
+        <AnimatePresence>
+          {toast && (
+            <motion.div
+              key="shell-toast"
+              role="status"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="absolute bottom-5 left-5 z-[80] flex items-center gap-2 rounded-xl bg-ink px-4 py-2.5 text-sm font-medium text-white shadow-[0_18px_40px_-16px_rgba(15,23,42,0.6)]"
+            >
+              <Check className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+              {toast.message}
+              {toast.actionLabel && toast.onAction && (
+                <button
+                  type="button"
+                  onClick={toast.onAction}
+                  className="ml-1 cursor-pointer rounded-full px-2 py-0.5 text-[13px] font-semibold text-amber-300 transition-colors hover:bg-white/10 hover:text-amber-200"
+                >
+                  {toast.actionLabel}
+                </button>
+              )}
+              <button
+                type="button"
+                aria-label="Dismiss"
+                onClick={() => setToast(null)}
+                className="ml-1 rounded-full p-0.5 text-white/60 transition-colors hover:text-white"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+      </div>
+      {composers.map((composer, index) => (
+        <GmailComposeModal
+          key={composer.key}
+          isOpen
+          draftId={composer.draftId}
+          initialRecipient={composer.recipient}
+          initialSubject={composer.subject}
+          initialBody={composer.body}
+          initialNewsSource={composer.newsSource}
+          initialNewsHook={composer.newsHook}
+          initialNewsUrl={composer.newsUrl}
+          rightOffsetPx={composerOffsets[index]}
+          isMinimised={composer.minimised}
+          onMinimisedChange={(minimised) => setComposerMinimised(composer.key, minimised)}
+          onClose={() => closeComposer(composer.key)}
+          directory={composeDirectory}
+          tags={tags}
+          assignedTagsByClientId={tagsByClientId}
+          onSend={handleSendRequest}
+          onDraftSaved={() => showToast("Draft saved")}
+          onDiscardRequest={handleDiscardRequest}
+        />
+      ))}
+    </div>
+  );
+}
+
+export { GmailInboxShell as GmailInboxShellBefore };

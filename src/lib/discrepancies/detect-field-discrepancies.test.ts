@@ -5,10 +5,12 @@ import {
   createDiscrepancyDetectionStore,
   detectAndFlagDiscrepancies,
   findFieldDiscrepancies,
+  previewFieldDiscrepancies,
   type DiscrepancyDetectionStore,
   type DiscrepancyField,
 } from "./detect-field-discrepancies.ts";
 import type { StandardOrganisation } from "../standardize/types.ts";
+import { REDACTED_EMAIL } from "../ingestion/personal-data.ts";
 
 function org(overrides: Partial<Pick<StandardOrganisation, DiscrepancyField>> = {}) {
   return {
@@ -44,6 +46,25 @@ describe("findFieldDiscrepancies", () => {
       org({ website: "" }),
     );
     assert.deepEqual(result, []);
+  });
+
+  it("does not flag a field either side had redacted — a removal is not a conflict", () => {
+    // Both directions: the stored column can hold the placeholder (imported
+    // before this record had a role address) and so can the incoming record.
+    assert.deepEqual(
+      findFieldDiscrepancies(
+        org({ contact_email: "info@test-charity.org" }),
+        org({ contact_email: REDACTED_EMAIL }),
+      ),
+      [],
+    );
+    assert.deepEqual(
+      findFieldDiscrepancies(
+        org({ contact_email: REDACTED_EMAIL }),
+        org({ contact_email: "info@test-charity.org" }),
+      ),
+      [],
+    );
   });
 
   it("flags every differing field independently", () => {
@@ -206,6 +227,76 @@ describe("detectAndFlagDiscrepancies", () => {
     });
     const result = await detectAndFlagDiscrepancies("candidate-1", store);
     assert.equal(result.flagged, 0);
+  });
+
+  it("leaves an overridden field pending even when source priority would settle it", async () => {
+    // Companies House would normally win this one outright — but the admin
+    // already picked a winner in the merge dialog, so it must stay pending
+    // for the caller to resolve with that pick.
+    const store = fakeStore({
+      async loadOrganisationForComparison() {
+        return { organisation: org({ address_line_1: "99 Old Road" }), source: "charity_commission" };
+      },
+    });
+
+    const result = await detectAndFlagDiscrepancies("candidate-1", store, {
+      address_line_1: "existing",
+    });
+
+    assert.equal(store.recorded.length, 1);
+    assert.equal(store.recorded[0].autoResolvedChoice, null);
+    assert.equal(result.flagged, 1);
+    assert.equal(result.autoResolved, 0);
+  });
+
+  it("only holds the overridden fields pending and still auto-settles the rest", async () => {
+    const store = fakeStore({
+      async loadOrganisationForComparison() {
+        return {
+          organisation: org({ address_line_1: "99 Old Road", city: "Manchester" }),
+          source: "charity_commission",
+        };
+      },
+    });
+
+    const result = await detectAndFlagDiscrepancies("candidate-1", store, { city: "incoming" });
+
+    assert.equal(store.recorded.length, 2);
+    assert.deepEqual(
+      Object.fromEntries(store.recorded.map((row) => [row.fieldName, row.autoResolvedChoice])),
+      { address_line_1: "incoming", city: null },
+    );
+    assert.equal(result.flagged, 1);
+    assert.equal(result.autoResolved, 1);
+  });
+});
+
+describe("previewFieldDiscrepancies", () => {
+  it("reads out each disagreeing field with both values and the priority suggestion, without writing", async () => {
+    const store = fakeStore({
+      async loadOrganisationForComparison() {
+        return { organisation: org({ address_line_1: "99 Old Road" }), source: "charity_commission" };
+      },
+    });
+
+    const rows = await previewFieldDiscrepancies("candidate-1", store);
+
+    assert.deepEqual(rows, [
+      {
+        fieldName: "address_line_1",
+        existingValue: "99 Old Road",
+        existingSource: "charity_commission",
+        incomingValue: "1 Test Street",
+        incomingSource: "companies_house",
+        suggested: "incoming",
+      },
+    ]);
+    assert.equal(store.recorded.length, 0);
+  });
+
+  it("returns no rows when the two copies agree", async () => {
+    const rows = await previewFieldDiscrepancies("candidate-1", fakeStore());
+    assert.deepEqual(rows, []);
   });
 });
 

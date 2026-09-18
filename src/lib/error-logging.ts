@@ -26,6 +26,51 @@
 /** The placeholder written in place of any value we refuse to log. */
 export const REDACTED = "[redacted]";
 
+/**
+ * Detects whether an error or rejection is an internal Next.js navigation signal
+ * (`redirect()`, `notFound()`, Server Action redirect, CSR bailout) rather
+ * than an application failure.
+ *
+ * Next.js throws these errors to interrupt execution and trigger route transitions
+ * or fallback boundaries. They must not be treated as bugs, logged to the console,
+ * or forwarded to error-tracking sinks like Sentry.
+ */
+export function isNextRouterError(error: unknown): boolean {
+  if (typeof error === "string" && (error === "NEXT_REDIRECT" || error === "NEXT_NOT_FOUND")) {
+    return true;
+  }
+
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const record = error as { message?: unknown; digest?: unknown; cause?: unknown };
+
+  if (typeof record.message === "string") {
+    if (record.message === "NEXT_REDIRECT" || record.message === "NEXT_NOT_FOUND") {
+      return true;
+    }
+  }
+
+  if (typeof record.digest === "string") {
+    const digest = record.digest;
+    if (
+      digest.startsWith("NEXT_REDIRECT") ||
+      digest.startsWith("NEXT_NOT_FOUND") ||
+      digest.startsWith("NEXT_HTTP_ERROR_FALLBACK") ||
+      digest.startsWith("BAILOUT_TO_CLIENT_SIDE_RENDERING")
+    ) {
+      return true;
+    }
+  }
+
+  if (record.cause && isNextRouterError(record.cause)) {
+    return true;
+  }
+
+  return false;
+}
+
 /** How deep into nested objects `scrub` will walk before truncating. */
 const MAX_DEPTH = 6;
 
@@ -367,6 +412,12 @@ export async function reportError(
   error: unknown,
   context: ErrorContext = {},
 ): Promise<void> {
+  // Next.js throws navigation errors (e.g. NEXT_REDIRECT, NEXT_NOT_FOUND) for
+  // internal control flow. These are not failures and must never be reported.
+  if (isNextRouterError(error)) {
+    return;
+  }
+
   let report: ErrorReport;
   try {
     report = buildReport(error, context, resolveConfig());

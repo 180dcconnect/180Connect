@@ -6,8 +6,6 @@
 
 # 02 Data Dictionary
 
-## 02 Data Dictionary: every field across all tabs (auto-compiled 12 Jul 2026; descriptions blank where the source tab has none)
-
 | Tab | Table | Field | Type | Foreign key to | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 03 Raw Data | INGESTION_RUNS | id | uuid |  |  |
@@ -68,11 +66,6 @@
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | id | uuid |  |  |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | submitted_by_user_id | uuid | USERS |  |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | legal_name | text |  |  |
-| 03 Raw Data | MANUAL_ENTRY_RECORDS | mission_statement | text |  |  |
-| 03 Raw Data | MANUAL_ENTRY_RECORDS | organisation_type | enum |  |  |
-| 03 Raw Data | MANUAL_ENTRY_RECORDS | address_line_1 | text |  |  |
-| 03 Raw Data | MANUAL_ENTRY_RECORDS | city | text |  |  |
-| 03 Raw Data | MANUAL_ENTRY_RECORDS | postcode | text |  |  |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | country_code | text |  |  |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | website | text |  |  |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | contact_email | text |  |  |
@@ -86,6 +79,19 @@
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | review_notes | text |  |  |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | created_at | timestamp |  |  |
 | 03 Raw Data | MANUAL_ENTRY_RECORDS | updated_at | timestamp |  |  |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | source_url | text |  | Source URL for the manual entry |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | imported_field_paths | jsonb |  | Paths of imported fields |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | import_notes | jsonb |  | Notes about the import |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | import_raw_record_id | uuid | RAW_SOURCE_RECORDS | Raw record ID for the import |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | sector | text |  | Sector the organisation works in |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | geographic_reach | enum |  | How far the organisation operates |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | latest_income | numeric |  | Latest annual income in GBP |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | accounts_year_end | date |  | Year end the size figures are from |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | staff_count | integer |  | Number of staff |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | volunteer_count | integer |  | Number of volunteers |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | email_role | text |  | Role or job function of the contact email recipient |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | email_role_confirmed | boolean |  | Whether the email recipient role has been confirmed by CAM |
+| 03 Raw Data | MANUAL_ENTRY_RECORDS | email_role_confirmed_at | timestamp |  | Timestamp when the email recipient role was confirmed |
 | 04 Entities | ORGANISATIONS | id | uuid |  |  |
 | 04 Entities | ORGANISATIONS | legal_name | text |  |  |
 | 04 Entities | ORGANISATIONS | trading_name | text |  |  |
@@ -139,6 +145,12 @@
 | 04 Entities | FINANCIAL_PERIODS | income_band | enum |  |  |
 | 04 Entities | FINANCIAL_PERIODS | filing_date | date |  |  |
 | 04 Entities | FINANCIAL_PERIODS | financial_source | enum |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_employees | integer |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_volunteers | integer |  |  |
+| 04 Entities | FINANCIAL_PERIODS | receives_govt_grants | boolean |  |  |
+| 04 Entities | FINANCIAL_PERIODS | receives_govt_contracts | boolean |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_govt_grants | integer |  |  |
+| 04 Entities | FINANCIAL_PERIODS | count_govt_contracts | integer |  |  |
 | 04 Entities | FINANCIAL_PERIODS | created_at | timestamp |  |  |
 | 04 Entities | GRANTS | id | uuid |  |  |
 | 04 Entities | GRANTS | organisation_id | uuid | ORGANISATIONS |  |
@@ -174,11 +186,14 @@
 | 04 Entities | USERS | created_at | timestamp |  |  |
 | 04 Entities | USERS | updated_at | timestamp |  |  |
 | 04 Entities | USERS | is_seed | boolean |  |  |
-| 04 Entities | USERS | deactivated_at | timestamp |  |  |
+| 04 Entities | USERS | deleted_at | timestamp |  | When the account was deleted and its personal details redacted |
 | 04 Entities | USERS | invited_at | timestamp |  |  |
 | 04 Entities | USERS | invite_accepted_at | timestamp |  |  |
 | 04 Entities | USERS | onboarding_completed_at | timestamp |  | When the user finished the onboarding flow |
 | 04 Entities | USERS | onboarding_dismissed_at | timestamp |  | When the user dismissed the onboarding flow |
+| 04 Entities | USERS | notification_frequency | enum |  | Notification cadence: immediate, daily or weekly digest |
+| 04 Entities | USERS | email_notification_types | text[] |  | Notification types also sent by email |
+| 04 Entities | USERS | accessibility_settings | jsonb |  | Accessibility preferences stored on the account; null = never saved |
 | 04 Entities | USER_ONBOARDING_STEPS | user_id | uuid | USERS | User completing the step |
 | 04 Entities | USER_ONBOARDING_STEPS | step_key | text |  | Key of the onboarding step |
 | 04 Entities | USER_ONBOARDING_STEPS | completed_at | timestamp |  | When the step was completed |
@@ -214,8 +229,14 @@
 | 04 Entities | OUTREACH_PREFERENCES | id | uuid |  | Primary key |
 | 04 Entities | OUTREACH_PREFERENCES | user_id | uuid | USERS | CAM these preferences belong to |
 | 04 Entities | OUTREACH_PREFERENCES | preferred_geographic_reach | enum[] |  | Subset of geographic_reach values the CAM wants prioritised |
+| 04 Entities | OUTREACH_PREFERENCES | preferred_cities | text[] |  | City/location values to prioritise, matched against ORGANISATIONS.city |
 | 04 Entities | OUTREACH_PREFERENCES | preferred_sectors | text[] |  | Sector values to prioritise, matched against ORGANISATIONS.sector |
 | 04 Entities | OUTREACH_PREFERENCES | preferred_income_bands | enum[] |  | Subset of income_band values to prioritise |
+| 04 Entities | OUTREACH_PREFERENCES | preferred_income_min | bigint |  | Bottom of the preferred annual income range in pounds; null = from £0 |
+| 04 Entities | OUTREACH_PREFERENCES | preferred_income_max | bigint |  | Top of the preferred annual income range in pounds; null = no upper limit |
+| 04 Entities | OUTREACH_PREFERENCES | prioritise_grant_recipients | boolean |  | Prioritise organisations with previous grant/funding history (360Giving) |
+| 04 Entities | OUTREACH_PREFERENCES | first_follow_up_days | integer |  | Days of silence before the first follow-up reminder; default 7 |
+| 04 Entities | OUTREACH_PREFERENCES | second_follow_up_days | integer |  | Days of silence before the second reminder and the move to No response; default 14 |
 | 04 Entities | OUTREACH_PREFERENCES | created_at | timestamp |  | Row creation timestamp |
 | 04 Entities | OUTREACH_PREFERENCES | updated_at | timestamp |  | Last edit timestamp |
 | 04 Entities | SUPPRESSIONS | id | uuid |  | Primary key |
@@ -230,53 +251,64 @@
 | 04 Entities | SAVED_VIEWS | id | uuid |  | Primary key |
 | 04 Entities | SAVED_VIEWS | user_id | uuid | USERS | CAM the saved view belongs to |
 | 04 Entities | SAVED_VIEWS | name | text |  | Name the CAM gave the view; unique per user |
-| 04 Entities | SAVED_VIEWS | filters | jsonb |  | Filter combination the view re-applies (q, city, status, source, owner) |
+| 04 Entities | SAVED_VIEWS | filters | jsonb |  | Filter combination the view re-applies (q, city, country, status, type, owner — arrays for the multi-selects) |
 | 04 Entities | SAVED_VIEWS | created_at | timestamp |  | Row creation timestamp |
 | 04 Entities | SAVED_VIEWS | updated_at | timestamp |  | Last edit timestamp |
+| 04 Entities | OWNERSHIP_REQUESTS | id | uuid |  | Primary key |
+| 04 Entities | OWNERSHIP_REQUESTS | organisation_id | uuid | ORGANISATIONS | Client being asked for |
+| 04 Entities | OWNERSHIP_REQUESTS | requested_by | uuid | USERS | CAM making the ask |
+| 04 Entities | OWNERSHIP_REQUESTS | current_owner_id | uuid | USERS | Owner at request time, snapshotted |
+| 06 - Predictions | LATEST_SCORES | score_factors | jsonb |  | Per-factor inputs behind priority_score: {"factors": {sector, geography, size, partnershipHistory, previousContact}, "weights": {the SCOUT weights applied}}. Written by persistLatestScore with the score itself, so the breakdown always reproduces the stored number. Null for rows scored before F095; populated by backfill:scores. |
+| 04 Entities | OWNERSHIP_REQUESTS | status | enum |  | pending, approved, rejected |
+| 04 Entities | OWNERSHIP_REQUESTS | reason | text |  | Why this CAM should take it on |
+| 04 Entities | OWNERSHIP_REQUESTS | decided_by | uuid | USERS | Admin who approved/rejected |
+| 04 Entities | OWNERSHIP_REQUESTS | decided_at | timestamp |  | When decided |
+| 04 Entities | OWNERSHIP_REQUESTS | decision_note | text |  | Optional admin note |
+| 04 Entities | OWNERSHIP_REQUESTS | created_at | timestamp |  | Row creation timestamp |
 | 05 - Features | SCORING_WEIGHTS | id | model_name |  | feature_name |
-| 05 - Features | SCORING_WEIGHTS | 1 | SCOUT |  | south_yorkshire_flag |
-| 05 - Features | SCORING_WEIGHTS | 2 | SCOUT |  | mission_alignment_score |
-| 05 - Features | SCORING_WEIGHTS | 3 | SCOUT |  | service_fit_score |
-| 05 - Features | SCORING_WEIGHTS | 4 | SCOUT |  | never_contacted_flag |
-| 05 - Features | SCORING_WEIGHTS | 5 | SCOUT |  | income_band |
-| 05 - Features | SCORING_WEIGHTS | 6 | SCOUT |  | income_trend |
-| 05 - Features | SCORING_WEIGHTS | 7 | SCOUT |  | days_since_last_contact |
-| 05 - Features | SCORING_WEIGHTS | 8 | SCOUT |  | financial_stability_score |
-| 05 - Features | SCORING_WEIGHTS | 9 | SCOUT |  | has_recent_grant_flag |
-| 05 - Features | SCORING_WEIGHTS | 10 | SCOUT |  | digital_maturity_score |
-| 05 - Features | SCORING_WEIGHTS | 11 | SCOUT |  | data_completeness_score |
-| 05 - Features | SCORING_WEIGHTS | 12 | SCOUT |  | grant_count |
-| 05 - Features | SCORING_WEIGHTS | 13 | SCOUT |  | has_partnership_history_flag |
-| 05 - Features | SCORING_WEIGHTS | 14 | COMPASS |  | semester_fit_score |
-| 05 - Features | SCORING_WEIGHTS | 15 | COMPASS |  | project_complexity_score |
-| 05 - Features | SCORING_WEIGHTS | 16 | COMPASS |  | repeat_engagement_score |
-| 05 - Features | SCORING_WEIGHTS | 17 | COMPASS |  | case_study_potential_score |
-| 05 - Features | SCORING_WEIGHTS | 18 | COMPASS |  | portfolio_sector_score |
+| 05 - Features | SCORING_WEIGHTS | 1.0 | SCOUT |  | south_yorkshire_flag |
+| 05 - Features | SCORING_WEIGHTS | 2.0 | SCOUT |  | mission_alignment_score |
+| 05 - Features | SCORING_WEIGHTS | 3.0 | SCOUT |  | service_fit_score |
+| 05 - Features | SCORING_WEIGHTS | 4.0 | SCOUT |  | never_contacted_flag |
+| 05 - Features | SCORING_WEIGHTS | 5.0 | SCOUT |  | income_band |
+| 05 - Features | SCORING_WEIGHTS | 6.0 | SCOUT |  | income_trend |
+| 05 - Features | SCORING_WEIGHTS | 7.0 | SCOUT |  | days_since_last_contact |
+| 05 - Features | SCORING_WEIGHTS | 8.0 | SCOUT |  | financial_stability_score |
+| 05 - Features | SCORING_WEIGHTS | 9.0 | SCOUT |  | has_recent_grant_flag |
+| 05 - Features | SCORING_WEIGHTS | 10.0 | SCOUT |  | digital_maturity_score |
+| 05 - Features | SCORING_WEIGHTS | 11.0 | SCOUT |  | data_completeness_score |
+| 05 - Features | SCORING_WEIGHTS | 12.0 | SCOUT |  | grant_count |
+| 05 - Features | SCORING_WEIGHTS | 13.0 | SCOUT |  | has_partnership_history_flag |
+| 05 - Features | SCORING_WEIGHTS | 14.0 | COMPASS |  | semester_fit_score |
+| 05 - Features | SCORING_WEIGHTS | 15.0 | COMPASS |  | project_complexity_score |
+| 05 - Features | SCORING_WEIGHTS | 16.0 | COMPASS |  | repeat_engagement_score |
+| 05 - Features | SCORING_WEIGHTS | 17.0 | COMPASS |  | case_study_potential_score |
+| 05 - Features | SCORING_WEIGHTS | 18.0 | COMPASS |  | portfolio_sector_score |
 | 05 - Features | FEATURE_DEFINITIONS | id | feature_name |  | description |
-| 05 - Features | FEATURE_DEFINITIONS | 1 | south_yorkshire_flag |  | Whether the organisation is based in South Yorkshire |
-| 05 - Features | FEATURE_DEFINITIONS | 2 | mission_alignment_score |  | How well the organisation’s mission matches 180DC services |
-| 05 - Features | FEATURE_DEFINITIONS | 3 | service_fit_score |  | Highest score across all 180DC service-fit categories |
-| 05 - Features | FEATURE_DEFINITIONS | 4 | income_band |  | Bucketed organisation income level |
-| 05 - Features | FEATURE_DEFINITIONS | 5 | income_trend |  | Year-over-year income direction |
-| 05 - Features | FEATURE_DEFINITIONS | 6 | never_contacted_flag |  | Whether the organisation has never been sent an outreach email |
-| 05 - Features | FEATURE_DEFINITIONS | 7 | days_since_last_contact |  | Number of days since the most recent outreach |
-| 05 - Features | FEATURE_DEFINITIONS | 8 | financial_stability_score |  | Composite measure of overall financial health |
-| 05 - Features | FEATURE_DEFINITIONS | 9 | has_recent_grant_flag |  | Whether the organisation received a grant during the previous 24 months |
-| 05 - Features | FEATURE_DEFINITIONS | 10 | digital_maturity_score |  | How digitally developed the organisation is |
-| 05 - Features | FEATURE_DEFINITIONS | 11 | data_completeness_score |  | Percentage of required organisation fields that are populated |
-| 05 - Features | FEATURE_DEFINITIONS | 12 | grant_count |  | Total number of grants received |
-| 05 - Features | FEATURE_DEFINITIONS | 13 | has_partnership_history_flag |  | Whether the organisation previously converted to a 180DC client |
-| 05 - Features | FEATURE_DEFINITIONS | 14 | semester_fit_score |  | How well project timing aligns with the student semester |
-| 05 - Features | FEATURE_DEFINITIONS | 15 | project_complexity_score |  | Whether the project has suitable complexity for a student team |
-| 05 - Features | FEATURE_DEFINITIONS | 16 | repeat_engagement_score |  | Strength of the organisation’s prior relationship with 180DC |
-| 05 - Features | FEATURE_DEFINITIONS | 17 | case_study_potential_score |  | Potential for the engagement to produce a publishable case study |
-| 05 - Features | FEATURE_DEFINITIONS | 18 | portfolio_sector_score |  | How underrepresented the organisation’s sector is in the current portfolio |
-| 05 - Features | FEATURE_DEFINITIONS | 19 | performance_score |  | How well an email performed based on its confirmed outcome |
-| 05 - Features | FEATURE_DEFINITIONS | 20 | used_as_example_count |  | Number of times the email has been supplied to Gemini as a few-shot example |
+| 05 - Features | FEATURE_DEFINITIONS | 1.0 | south_yorkshire_flag |  | Whether the organisation is based in South Yorkshire |
+| 05 - Features | FEATURE_DEFINITIONS | 2.0 | mission_alignment_score |  | How well the organisation’s mission matches 180DC services |
+| 05 - Features | FEATURE_DEFINITIONS | 3.0 | service_fit_score |  | Highest score across all 180DC service-fit categories |
+| 05 - Features | FEATURE_DEFINITIONS | 4.0 | income_band |  | Bucketed organisation income level |
+| 05 - Features | FEATURE_DEFINITIONS | 5.0 | income_trend |  | Year-over-year income direction |
+| 05 - Features | FEATURE_DEFINITIONS | 6.0 | never_contacted_flag |  | Whether the organisation has never been sent an outreach email |
+| 05 - Features | FEATURE_DEFINITIONS | 7.0 | days_since_last_contact |  | Number of days since the most recent outreach |
+| 05 - Features | FEATURE_DEFINITIONS | 8.0 | financial_stability_score |  | Composite measure of overall financial health |
+| 05 - Features | FEATURE_DEFINITIONS | 9.0 | has_recent_grant_flag |  | Whether the organisation received a grant during the previous 24 months |
+| 05 - Features | FEATURE_DEFINITIONS | 10.0 | digital_maturity_score |  | How digitally developed the organisation is |
+| 05 - Features | FEATURE_DEFINITIONS | 11.0 | data_completeness_score |  | Percentage of required organisation fields that are populated |
+| 05 - Features | FEATURE_DEFINITIONS | 12.0 | grant_count |  | Total number of grants received |
+| 05 - Features | FEATURE_DEFINITIONS | 13.0 | has_partnership_history_flag |  | Whether the organisation previously converted to a 180DC client |
+| 05 - Features | FEATURE_DEFINITIONS | 14.0 | semester_fit_score |  | How well project timing aligns with the student semester |
+| 05 - Features | FEATURE_DEFINITIONS | 15.0 | project_complexity_score |  | Whether the project has suitable complexity for a student team |
+| 05 - Features | FEATURE_DEFINITIONS | 16.0 | repeat_engagement_score |  | Strength of the organisation’s prior relationship with 180DC |
+| 05 - Features | FEATURE_DEFINITIONS | 17.0 | case_study_potential_score |  | Potential for the engagement to produce a publishable case study |
+| 05 - Features | FEATURE_DEFINITIONS | 18.0 | portfolio_sector_score |  | How underrepresented the organisation’s sector is in the current portfolio |
+| 05 - Features | FEATURE_DEFINITIONS | 19.0 | performance_score |  | How well an email performed based on its confirmed outcome |
+| 05 - Features | FEATURE_DEFINITIONS | 20.0 | used_as_example_count |  | Number of times the email has been supplied to Gemini as a few-shot example |
 | 05 - Features | AGENT_PROMPTS | id | agent_name |  | prompt_template |
-| 05 - Features | AGENT_PROMPTS | 1 | SCOUT |  |  |
-| 05 - Features | AGENT_PROMPTS | 2 | COMPASS |  |  |
-| 05 - Features | AGENT_PROMPTS | 3 | VOICE |  | You are writing a cold outreach email for 180 Degrees Consulting Sheffield, a student consultancy at the University of Sheffield working with social enterprises and non-profits. Organisation profile: {org_profile}. Service to pitch: {service}. Tone: {tone}. Here are {n} emails that successfully converted or received replies from similar organisations: {examples}. Write a new email following similar patterns. Return JSON: { subject, body, tone_used, hook_type } |
+| 05 - Features | AGENT_PROMPTS | 1.0 | SCOUT |  |  |
+| 05 - Features | AGENT_PROMPTS | 2.0 | COMPASS |  |  |
+| 05 - Features | AGENT_PROMPTS | 3.0 | VOICE |  | You are writing a cold outreach email for 180 Degrees Consulting Sheffield, a student consultancy at the University of Sheffield working with social enterprises and non-profits. Organisation profile: {org_profile}. Service to pitch: {service}. Tone: {tone}. Here are {n} emails that successfully converted or received replies from similar organisations: {examples}. Write a new email following similar patterns. Return JSON: { subject, body, tone_used, hook_type } |
 | 05 - Features | EMAIL_PERFORMANCE_LIBRARY | id | outreach_message_id |  | organisation_id |
 | 05 - Features | EMAIL_PERFORMANCE_LIBRARY | — | links to OUTREACH_MESSAGES |  | which org |
 | 06 - Predictions | AGENT_RUNS | id | uuid |  | Primary key |
@@ -317,6 +349,37 @@
 | 06 - Predictions | MODEL_VERSIONS | created_by_user_id | uuid |  | User who created or activated this model version |
 | 06 - Predictions | MODEL_VERSIONS | created_at | timestamp |  | Row creation timestamp |
 | 06 - Predictions | MODEL_VERSIONS | deprecated_at | timestamp |  | Date and time the version was replaced or retired; null while active |
+| 06 - Predictions | SCORE_SNAPSHOTS | id | uuid |  | Primary key. Point-in-time scoring features captured at send time; the feature half of the ML training set. Labels live in OUTCOMES joined by outreach_message_id. Admin read, service-role write via send RPCs. |
+| 06 - Predictions | SCORE_SNAPSHOTS | organisation_id | uuid | ORGANISATIONS |  |
+| 06 - Predictions | SCORE_SNAPSHOTS | outreach_message_id | uuid | OUTREACH_MESSAGES | unique |
+| 06 - Predictions | SCORE_SNAPSHOTS | model_version_id | uuid | MODEL_VERSIONS | nullable |
+| 06 - Predictions | SCORE_SNAPSHOTS | sector | numeric |  | 0–1 |
+| 06 - Predictions | SCORE_SNAPSHOTS | geography | numeric |  | 0–1 |
+| 06 - Predictions | SCORE_SNAPSHOTS | size | numeric |  | 0–1 |
+| 06 - Predictions | SCORE_SNAPSHOTS | partnership_history | numeric |  | 0–1 |
+| 06 - Predictions | SCORE_SNAPSHOTS | previous_contact | numeric |  | 0–1 |
+| 06 - Predictions | SCORE_SNAPSHOTS | priority_score | numeric |  | 0–1 |
+| 06 - Predictions | SCORE_SNAPSHOTS | priority_band | enum |  | high/medium/low |
+| 06 - Predictions | SCORE_SNAPSHOTS | scored_at | timestamp |  |  |
+| 06 - Predictions | SCORE_SNAPSHOTS | created_at | timestamp |  |  |
+| 06 - Predictions | TRAINING_EXAMPLES | outreach_message_id | uuid | OUTREACH_MESSAGES | The scored outreach attempt this training row describes |
+| 06 - Predictions | TRAINING_EXAMPLES | organisation_id | uuid | ORGANISATIONS | Client the attempt was made on |
+| 06 - Predictions | TRAINING_EXAMPLES | sector | numeric |  | Sector-fit factor 0–1 at send time |
+| 06 - Predictions | TRAINING_EXAMPLES | geography | numeric |  | Geography factor 0–1 at send time |
+| 06 - Predictions | TRAINING_EXAMPLES | size | numeric |  | Organisation-size factor 0–1 at send time |
+| 06 - Predictions | TRAINING_EXAMPLES | partnership_history | numeric |  | Partnership-history factor 0–1 at send time |
+| 06 - Predictions | TRAINING_EXAMPLES | previous_contact | numeric |  | Previous-contact factor 0–1 at send time |
+| 06 - Predictions | TRAINING_EXAMPLES | priority_score | numeric |  | Priority score produced from those factors under the active weights |
+| 06 - Predictions | TRAINING_EXAMPLES | priority_band | enum |  | high / medium / low |
+| 06 - Predictions | TRAINING_EXAMPLES | model_version_id | uuid | MODEL_VERSIONS | Weights generation that produced the score; nullable when config could not be resolved at send time |
+| 06 - Predictions | TRAINING_EXAMPLES | snapshot_scored_at | timestamp |  | When the inputs were read (send moment) |
+| 06 - Predictions | TRAINING_EXAMPLES | sent_at | timestamp |  | When the email actually went out |
+| 06 - Predictions | TRAINING_EXAMPLES | organisation_sector | text |  | Client's sector — CURRENT state, not point-in-time; use with care in training |
+| 06 - Predictions | TRAINING_EXAMPLES | cam_edited | boolean |  | Whether the CAM edited the latest AI-generated draft before sending |
+| 06 - Predictions | TRAINING_EXAMPLES | edit_distance | integer |  | Characters changed between generated draft and final email |
+| 06 - Predictions | TRAINING_EXAMPLES | generation_model | text |  | AI model id that generated the latest draft |
+| 06 - Predictions | TRAINING_EXAMPLES | outcome_label | enum |  | reply / converted / no_response / soft_no / hard_no — the message's latest outcome; null until an outcome exists |
+| 06 - Predictions | TRAINING_EXAMPLES | outcome_recorded_at | timestamp |  | When that outcome was written |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | id | uuid |  | Primary key |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | organisation_id | uuid |  | Organisation that received the outreach message |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | contact_id | uuid |  | Specific contact the message was sent to |
@@ -326,6 +389,8 @@
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | send_status | enum |  | draft / scheduled / sent / failed |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | scheduled_at | timestamp |  | Date and time the message was scheduled for sending; null if not scheduled |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | sent_at | timestamp |  | Date and time Gmail successfully sent the message; null until sent |
+| 07 Outreach & Outcomes | OUTREACH_MESSAGES | sent_to_email | text |  | The email address this message is for, exactly as reviewed and approved by the CAM; never re-derived from the contact record. Written when a draft is saved or sent; null if no recipient was ever reviewed, or for messages predating recipient review. |
+| 07 Outreach & Outcomes | OUTREACH_MESSAGES | send_claimed_at | timestamp |  | Set while a reviewed send is in flight and cleared when the attempt ends without delivery; older than five minutes means stale and may be reclaimed |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | agent_run_id | uuid |  | Links to the VOICE AGENT_RUNS record that generated the draft |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | created_at | timestamp |  | Row creation timestamp |
 | 07 Outreach & Outcomes | OUTREACH_MESSAGES | updated_at | timestamp |  | Date and time the record was last updated |
@@ -334,13 +399,20 @@
 | 07 Outreach & Outcomes | AI_GENERATIONS | generated_subject | text |  | Original subject line generated by Gemini before CAM edits |
 | 07 Outreach & Outcomes | AI_GENERATIONS | generated_body | text |  | Original email body generated by Gemini before CAM edits |
 | 07 Outreach & Outcomes | AI_GENERATIONS | cam_edited | boolean |  | Whether the CAM changed the generated subject or body |
+| 07 Outreach & Outcomes | AI_GENERATIONS | model | text |  | Exact AI model id used for this generation, snapshotted at generation time |
+| 07 Outreach & Outcomes | AI_GENERATIONS | input_tokens | int |  | Input tokens reported by the model provider; null if usage was unavailable |
+| 07 Outreach & Outcomes | AI_GENERATIONS | output_tokens | int |  | Output tokens reported by the model provider; null if usage was unavailable |
+| 07 Outreach & Outcomes | AI_GENERATIONS | total_tokens | int |  | Total tokens reported by the model provider; null if usage was unavailable |
+| 07 Outreach & Outcomes | AI_GENERATIONS | cost_usd | numeric |  | Estimated cost in USD using the MODEL_PRICING rate in effect; null if no pricing row exists |
+| 07 Outreach & Outcomes | AI_GENERATIONS | prompt_system | text |  | Exact system instruction sent to the model for this generation, stored verbatim per row |
+| 07 Outreach & Outcomes | AI_GENERATIONS | prompt_user | text |  | Exact user-turn prompt sent to the model for this generation, built from client context |
 | 07 Outreach & Outcomes | AI_GENERATIONS | edit_distance | integer |  | Number of characters changed between the generated draft and the final message; used as a proxy for how much editing was required |
 | 07 Outreach & Outcomes | AI_GENERATIONS | created_at | timestamp |  | Row creation timestamp |
 | 07 Outreach & Outcomes | SEND_EVENTS | id | uuid |  | Primary key |
 | 07 Outreach & Outcomes | SEND_EVENTS | outreach_message_id | uuid |  | Links to the OUTREACH_MESSAGES record associated with the email |
-| 07 Outreach & Outcomes | SEND_EVENTS | event_type | enum |  | sent / delivered / bounced / opened |
-| 07 Outreach & Outcomes | SEND_EVENTS | occurred_at | timestamp |  | Date and time Gmail reported the delivery event |
-| 07 Outreach & Outcomes | SEND_EVENTS | metadata | jsonb |  | Additional event information returned by the Gmail API |
+| 07 Outreach & Outcomes | SEND_EVENTS | event_type | enum |  | sent / bounced / failed |
+| 07 Outreach & Outcomes | SEND_EVENTS | occurred_at | timestamp |  | Date and time the event happened, as observed by the platform |
+| 07 Outreach & Outcomes | SEND_EVENTS | metadata | jsonb |  | Additional event information recorded by the platform — send identifiers, failure reason, or bounce detail |
 | 07 Outreach & Outcomes | SEND_EVENTS | created_at | timestamp |  | Row creation timestamp |
 | 07 Outreach & Outcomes | REPLY_EVENTS | id | uuid |  | Primary key |
 | 07 Outreach & Outcomes | REPLY_EVENTS | outreach_message_id | uuid |  | Links to the OUTREACH_MESSAGES record this message replies to |
@@ -355,7 +427,7 @@
 | 07 Outreach & Outcomes | OUTCOMES | id | uuid |  | Primary key |
 | 07 Outreach & Outcomes | OUTCOMES | organisation_id | uuid |  | Links to the ORGANISATIONS record associated with the outcome |
 | 07 Outreach & Outcomes | OUTCOMES | outreach_message_id | uuid |  | Links to the OUTREACH_MESSAGES record that led to this outcome |
-| 07 Outreach & Outcomes | OUTCOMES | outcome_type | enum |  | converted / no_response / rejected / follow_up / referral |
+| 07 Outreach & Outcomes | OUTCOMES | outcome_type | enum |  | reply / converted / no_response / soft_no / hard_no |
 | 07 Outreach & Outcomes | OUTCOMES | notes | text |  | CAM notes describing what happened and any relevant context |
 | 07 Outreach & Outcomes | OUTCOMES | recorded_by_user_id | uuid |  | Links to the USERS record for the CAM who logged the outcome |
 | 07 Outreach & Outcomes | OUTCOMES | created_at | timestamp |  | Row creation timestamp |
@@ -388,7 +460,7 @@
 | 08 System Analytics | ERROR_LOG | created_at | timestamp |  | Row creation timestamp |
 | 08 System Analytics | AUDIT_LOG | id | uuid |  | Primary key |
 | 08 System Analytics | AUDIT_LOG | action_user_id | uuid | USERS | id of user who acted |
-| 08 System Analytics | AUDIT_LOG | action | text |  | Machine token: role_changed, user_deactivated |
+| 08 System Analytics | AUDIT_LOG | action | text |  | Machine token: role_changed, user_suspended, user_deleted |
 | 08 System Analytics | AUDIT_LOG | target_table | text |  | Table the action targeted |
 | 08 System Analytics | AUDIT_LOG | target_id | uuid |  | Row targeted |
 | 08 System Analytics | AUDIT_LOG | detail | jsonb |  | Action Context: before/after, reason |
@@ -400,6 +472,10 @@
 | 08 System Analytics | LOGIN_ATTEMPT | blocked_until | timestamp |  | When this address may next attempt a login; null or past means allowed |
 | 08 System Analytics | LOGIN_ATTEMPT | created_at | timestamp |  | Row creation timestamp |
 | 08 System Analytics | LOGIN_ATTEMPT | updated_at | timestamp |  | Last time a failure was counted |
+| 08 System Analytics | OUTREACH_DAILY_SEND_LIMIT | id | boolean |  | Singleton primary key; always true |
+| 08 System Analytics | OUTREACH_DAILY_SEND_LIMIT | daily_limit | integer |  | Maximum outreach emails allowed per UTC calendar day; defaults to 250 |
+| 08 System Analytics | OUTREACH_DAILY_SEND_LIMIT | updated_by | uuid | USERS | Admin who last changed the limit; null for the seeded default |
+| 08 System Analytics | OUTREACH_DAILY_SEND_LIMIT | updated_at | timestamp |  | When the limit was last changed |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | id | uuid |  | Primary key |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | user_id | uuid |  | Links to USERS; the CAM the week covers |
 | 09 CAM Analytics | CAM_ACTIVITY_SUMMARY | week_start | date |  | Monday of the week the rollup covers |
@@ -452,13 +528,111 @@
 | 03 Raw Data | DATA_HANDLING_RULES | id | uuid |  | Primary key |
 | 03 Raw Data | DATA_HANDLING_RULES | rule_version | integer |  | The global rule version at the time this rule was created or last toggled |
 | 03 Raw Data | DATA_HANDLING_RULES | source | enum |  | Which source the rule applies to; null applies to every source |
-| 03 Raw Data | DATA_HANDLING_RULES | field_path | text |  | Dot-separated path into the raw_payload JSON that this rule governs |
-| 03 Raw Data | DATA_HANDLING_RULES | action | enum |  | Whether the field is stripped (deny) or explicitly permitted (allow) |
-| 03 Raw Data | DATA_HANDLING_RULES | reason | text |  | Why this rule exists, for the compliance record |
-| 03 Raw Data | DATA_HANDLING_RULES | created_by | uuid | USERS | The admin who created the rule; null when seeded by a migration |
-| 03 Raw Data | DATA_HANDLING_RULES | is_active | boolean |  | Whether the rule is currently enforced |
-| 03 Raw Data | DATA_HANDLING_RULES | created_at | timestamp |  | Row creation timestamp |
-| 03 Raw Data | DATA_HANDLING_RULES | updated_at | timestamp |  | Last updated timestamp |
-| 03 Raw Data | DATA_HANDLING_RULE_VERSIONS | id | boolean |  | Primary key, constrained to a single row |
-| 03 Raw Data | DATA_HANDLING_RULE_VERSIONS | current_version | integer |  | The version number of the rule set as it stands now |
-| 03 Raw Data | DATA_HANDLING_RULE_VERSIONS | updated_at | timestamp |  | When the version was last bumped |
+| 04 Entities | NOTIFICATIONS | id | uuid |  | Primary key |
+| 04 Entities | NOTIFICATIONS | recipient_user_id | uuid | USERS | User the notification is for |
+| 04 Entities | NOTIFICATIONS | actor_user_id | uuid | USERS | User whose action triggered the notification |
+| 04 Entities | NOTIFICATIONS | notification_type | enum |  | What kind of notification |
+| 04 Entities | NOTIFICATIONS | title | text |  | Short headline shown in the bell panel |
+| 04 Entities | NOTIFICATIONS | body | text |  | Optional longer description |
+| 04 Entities | NOTIFICATIONS | link_path | text |  | In-app route to navigate to on click |
+| 04 Entities | NOTIFICATIONS | target_table | text |  | Table of the linked record |
+| 04 Entities | NOTIFICATIONS | target_id | uuid |  | ID of the linked record |
+| 04 Entities | NOTIFICATIONS | read_at | timestamp |  | When the recipient marked it read |
+| 04 Entities | NOTIFICATIONS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | BOOKLET_GENERATIONS | id | uuid |  | Primary key |
+| 04 Entities | BOOKLET_GENERATIONS | organisation_id | uuid | ORGANISATIONS | Organisation this booklet belongs to |
+| 04 Entities | BOOKLET_GENERATIONS | generated_by | uuid | USERS | User who generated the booklet |
+| 04 Entities | BOOKLET_GENERATIONS | prompt_system | text |  | System prompt used |
+| 04 Entities | BOOKLET_GENERATIONS | prompt_user | text |  | User prompt used |
+| 04 Entities | BOOKLET_GENERATIONS | output | text |  | Generated output |
+| 04 Entities | BOOKLET_GENERATIONS | model | text |  | Model used for generation |
+| 04 Entities | BOOKLET_GENERATIONS | created_at | timestamptz |  | Row creation timestamp |
+| 04 Entities | EDIT_SUGGESTIONS | id | uuid |  | Primary key |
+| 04 Entities | EDIT_SUGGESTIONS | organisation_id | uuid | ORGANISATIONS | Client the correction is about |
+| 04 Entities | EDIT_SUGGESTIONS | field_name | text |  | One of the six sensitive fields |
+| 04 Entities | EDIT_SUGGESTIONS | current_value | text |  | Value at proposal time, captured server-side |
+| 04 Entities | EDIT_SUGGESTIONS | proposed_value | text |  | The CAM's corrected value |
+| 04 Entities | EDIT_SUGGESTIONS | status | enum |  | pending, approved, rejected, superseded |
+| 04 Entities | EDIT_SUGGESTIONS | requested_by | uuid | USERS | CAM making the proposal |
+| 04 Entities | EDIT_SUGGESTIONS | superseded_by | uuid | EDIT_SUGGESTIONS | Newer suggestion that replaced this one |
+| 04 Entities | EDIT_SUGGESTIONS | decided_by | uuid | USERS | Admin who approved/rejected |
+| 04 Entities | EDIT_SUGGESTIONS | decided_at | timestamp |  | When decided |
+| 04 Entities | EDIT_SUGGESTIONS | rejection_reason | text |  | Optional admin note for the CAM |
+| 04 Entities | EDIT_SUGGESTIONS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | EDIT_SUGGESTIONS | updated_at | timestamp |  | Last edit timestamp |
+| 04 Entities | ATTACHMENTS | id | uuid |  | Primary key |
+| 04 Entities | ATTACHMENTS | organisation_id | uuid | ORGANISATIONS | Client the file is attached to |
+| 04 Entities | ATTACHMENTS | filename | text |  | Original file name shown in the list |
+| 04 Entities | ATTACHMENTS | storage_path | text |  | Path inside the private client-attachments Storage bucket |
+| 04 Entities | ATTACHMENTS | content_type | text |  | MIME type of the file |
+| 04 Entities | ATTACHMENTS | size_bytes | bigint |  | File size in bytes |
+| 04 Entities | ATTACHMENTS | uploaded_by | uuid | USERS | Team member who attached the file |
+| 04 Entities | ATTACHMENTS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | id | uuid |  | Primary key |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | field_name | text |  | An ORGANISATIONS column CAMs may not write directly |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | active | boolean |  | False = retired: not enforced, not suggestible, row kept |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | reason | text |  | Why the field is restricted |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | added_by | uuid | USERS | Admin who added/re-added the restriction |
+| 04 Entities | RESTRICTED_EDIT_FIELDS | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | BOOKLET_GENERATIONS | activity | text |  | Activity identifier for observability |
+| 04 Entities | BOOKLET_GENERATIONS | input_tokens | integer |  | Prompt tokens the AI provider reported for this call |
+| 04 Entities | BOOKLET_GENERATIONS | output_tokens | integer |  | Response tokens the provider reported |
+| 04 Entities | BOOKLET_GENERATIONS | total_tokens | integer |  | Total tokens as the provider reported them |
+| 04 Entities | BOOKLET_GENERATIONS | cost_usd | decimal(12,6) |  | Cost in US dollars, priced at generation time |
+| 04 Entities | AI_GENERATIONS | activity | text |  | Activity identifier for observability |
+| 04 Entities | FINANCIAL_PERIODS | income_donations_legacies | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_charitable_activities | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_other_trading | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_investment | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_endowments | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_other | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_govt_grants | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | income_govt_contracts | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_charitable_activities | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_raising_funds | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_governance | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_grants_institutions | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_investment_management | numeric |  |  |
+| 04 Entities | FINANCIAL_PERIODS | expenditure_other | numeric |  |  |
+| 04 Entities | ORGANISATIONS | registered_on | date |  |  |
+| 04 Entities | ORGANISATIONS | charity_reporting_status | text |  |  |
+| 04 Entities | INBOX_THREAD_STATE | id | uuid |  | Primary key |
+| 04 Entities | INBOX_THREAD_STATE | user_id | uuid | USERS | Whose view of the mailbox this is |
+| 04 Entities | INBOX_THREAD_STATE | organisation_id | uuid | ORGANISATIONS | The thread this state belongs to |
+| 04 Entities | INBOX_THREAD_STATE | is_starred | boolean |  | Whether this viewer starred the thread |
+| 04 Entities | INBOX_THREAD_STATE | read_state | enum |  | Override of the server-derived read flag |
+| 04 Entities | INBOX_THREAD_STATE | is_trashed | boolean |  | Whether this viewer moved the thread to trash |
+| 04 Entities | INBOX_THREAD_STATE | trashed_at | timestamptz |  | When it was trashed |
+| 04 Entities | INBOX_THREAD_STATE | created_at | timestamptz |  | Row creation timestamp |
+| 04 Entities | INBOX_THREAD_STATE | updated_at | timestamptz |  | Last updated timestamp |
+| 04 Entities | MODEL_PRICING | id | uuid |  | Primary key |
+| 04 Entities | MODEL_PRICING | model | text |  | AI model name this price applies to; one row per model (unique) |
+| 04 Entities | MODEL_PRICING | input_usd_per_1k_tokens | numeric |  | US dollars per 1,000 prompt tokens, at the provider's list price |
+| 04 Entities | MODEL_PRICING | output_usd_per_1k_tokens | numeric |  | US dollars per 1,000 response tokens, at the provider's list price |
+| 04 Entities | MODEL_PRICING | confirmed_on | date |  | Date a human last verified this rate against the provider's pricing page |
+| 04 Entities | MODEL_PRICING | source_url | text |  | Where the rate was read from |
+| 04 Entities | MODEL_PRICING | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | MODEL_PRICING | updated_at | timestamp |  | Last time the rate changed |
+| 04 Entities | AI_GENERATION_RATE_LIMIT | id | uuid |  | Primary key |
+| 04 Entities | AI_GENERATION_RATE_LIMIT | user_id | uuid | USERS | The user whose allowance this counts; unique with bucket |
+| 04 Entities | AI_GENERATION_RATE_LIMIT | bucket | text |  | Which AI feature the counter is for: generation or search |
+| 04 Entities | AI_GENERATION_RATE_LIMIT | request_count | int |  | Requests consumed in the current fixed window |
+| 04 Entities | AI_GENERATION_RATE_LIMIT | window_started_at | timestamp |  | When the current fixed window opened |
+| 04 Entities | AI_GENERATION_RATE_LIMIT | created_at | timestamp |  | Row creation timestamp |
+| 04 Entities | AI_GENERATION_RATE_LIMIT | updated_at | timestamp |  | Last time the counter changed |
+| 04 Entities | ORGANISATIONS | website_absent_at | timestamptz |  | When someone confirmed this client has no website |
+| 04 Entities | ORGANISATIONS | website_absent_by | uuid | USERS | Who confirmed the client has no website |
+| 04 Entities | EDIT_SUGGESTIONS | proposed_absent | boolean |  | Proposal that the field should hold nothing at all, rather than a replacement value |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | id | uuid |  | Primary key |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | coverage_kind | text |  | Coverage card represented by this row; one of annual_return, profile, reach or company_number |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | charities | integer |  | Charity clients included in the last completed calculation |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | covered | integer |  | Charity clients needing nothing from this coverage job |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | pending | integer |  | Charity clients the register can still add information to |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | pending_items | integer |  | Filed years or profile fields still missing, where the card counts them |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | register_built_on | date |  | Register-file build date used for this calculation |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | calculated_at | timestamptz |  | When this row was last calculated successfully |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | stale_at | timestamptz |  | When a relevant record change made this figure out of date |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | refresh_started_at | timestamptz |  | When a worker claimed this row for refresh |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | refresh_failed_at | timestamptz |  | When the latest refresh attempt failed |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | created_at | timestamptz |  | Row creation timestamp |
+| 04 Entities | CHARITY_REGISTER_COVERAGE | updated_at | timestamptz |  | Last updated timestamp |

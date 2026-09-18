@@ -370,3 +370,91 @@ describe("carryCookiesToRedirect", () => {
     assert.match(redirect.headers.get("set-cookie") ?? "", /last_activity=;/);
   });
 });
+
+/**
+ * The proxy runs on every page, every RSC navigation and every server-action
+ * POST, so how the user is resolved is the hottest auth path in the app.
+ * `getClaims` verifies the token locally; `getUser` is a network round trip to
+ * the Auth server. These cover the switch and, more importantly, the fallback —
+ * a JWKS hiccup must not sign everybody out.
+ */
+describe("resolving the user (getClaims, with getUser as fallback)", () => {
+  beforeEach(() => {
+    mock.method(console, "error", () => {});
+  });
+
+  function claimsClient({
+    claims,
+    error = null,
+    user = USER as { id: string } | null,
+  }: {
+    claims?: { sub?: string } | null;
+    error?: unknown;
+    user?: { id: string } | null;
+  }) {
+    const getUser = mock.fn(async () => ({ data: { user } }));
+    const getClaims = mock.fn(async () => ({
+      data: claims === null || claims === undefined ? null : { claims },
+      error,
+    }));
+    const client = {
+      auth: { getUser, getClaims, signOut: async () => ({ error: null }) },
+    } as unknown as GuardClient;
+    return { client, getUser, getClaims };
+  }
+
+  it("uses the claims subject and never calls the Auth server", async () => {
+    const { client, getUser, getClaims } = claimsClient({ claims: { sub: USER.id } });
+
+    const now = Date.now();
+    const outcome = await decideSessionAction(
+      makeRequest({ activity: await activityAgedBy(0, now) }),
+      client,
+      now,
+    );
+
+    assert.equal(getClaims.mock.callCount(), 1);
+    assert.equal(getUser.mock.callCount(), 0, "getUser is the round trip we are avoiding");
+    assert.equal(outcome.action, "refresh");
+  });
+
+  it("treats a verified absence of claims as signed out, without asking the server", async () => {
+    const { client, getUser } = claimsClient({ claims: null, error: null });
+
+    const outcome = await decideSessionAction(makeRequest(), client, Date.now());
+
+    assert.equal(getUser.mock.callCount(), 0);
+    assert.deepEqual(outcome, { action: "pass", reason: "signed-out" });
+  });
+
+  it("falls back to getUser when verification errors, rather than signing the user out", async () => {
+    const { client, getUser } = claimsClient({
+      claims: null,
+      error: { message: "jwks fetch failed" },
+    });
+
+    const now = Date.now();
+    const outcome = await decideSessionAction(
+      makeRequest({ activity: await activityAgedBy(0, now) }),
+      client,
+      now,
+    );
+
+    assert.equal(getUser.mock.callCount(), 1, "a JWKS hiccup must not log everyone out");
+    assert.equal(outcome.action, "refresh");
+  });
+
+  it("still works against a client with no getClaims at all", async () => {
+    const { client, signOut } = makeClient();
+    void signOut;
+
+    const now = Date.now();
+    const outcome = await decideSessionAction(
+      makeRequest({ activity: await activityAgedBy(0, now) }),
+      client,
+      now,
+    );
+
+    assert.equal(outcome.action, "refresh");
+  });
+});

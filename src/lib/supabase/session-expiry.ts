@@ -31,10 +31,16 @@ import { signValue, timingSafeEqual } from "../hmac.ts";
 /**
  * How long a session may sit idle before it is ended.
  *
- * 30 minutes: long enough to survive a meeting, short enough that an unlocked
- * laptop is not an open door. Change it here — nothing else hardcodes a timeout.
+ * 30 days: this is a low-frequency internal tool used by 180DC volunteers
+ * (CAMs, admins, viewers) between lectures and client work, not a banking app.
+ * A short timeout just trains people to stay logged in on shared machines or
+ * lose draft outreach mid-flow. Thirty days keeps the F007 guarantee — an
+ * unattended or stolen session is still bounded, and explicit sign-out,
+ * suspension, and secret rotation still end sessions immediately — while
+ * effectively meaning "stay signed in unless you sign out". Change it here —
+ * nothing else hardcodes a timeout.
  */
-export const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
+export const INACTIVITY_TIMEOUT_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Cookie holding the signed "last seen" timestamp. */
 export const ACTIVITY_COOKIE_NAME = "last_activity";

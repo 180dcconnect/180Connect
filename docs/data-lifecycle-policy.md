@@ -118,8 +118,8 @@ The central design decision of this policy. Removal is not one operation.
 
 | Level | Name | What happens | Analytics | When |
 | :--- | :--- | :--- | :--- | :--- |
-| **1** | **Deactivate** | Access revoked; row and identifiers intact; disappears from the working product | Fully preserved | A member leaves. Reversible. Not an erasure and does not satisfy Art. 17 |
-| **2** | **Redact** | Personal identifiers irreversibly removed or replaced with non-identifying placeholders; row, keys, timestamps and history retained | Preserved | **The default erasure workflow.** Art. 17 requests, and the end of a retention period |
+| **1** | **Suspend** | Access revoked; row and identifiers intact; disappears from the working product (`suspend_user`) | Fully preserved | A member leaves or pauses. Reversible. Not an erasure and does not satisfy Art. 17 |
+| **2** | **Redact** | Personal identifiers irreversibly removed or replaced with non-identifying placeholders; row, keys, timestamps and history retained | Preserved | **The default erasure workflow.** Art. 17 requests, and the end of a retention period. For `USERS`, `delete_user` does this when the account has history — and deletes an account with none outright |
 | **3** | **Purge** | Every row that can be deleted is physically deleted | Lost | Exceptional only — see below |
 
 **Purge exists because redaction is sometimes not enough.** If data should never have
@@ -224,7 +224,7 @@ Periods run from the trigger event, not from row creation.
 
 | Data | Trigger | Retention | Then | Class |
 | :--- | :--- | :--- | :--- | :--- |
-| `USERS` account | Deactivation | 7 years | Redact | Personal |
+| `USERS` account | Suspension | 7 years | Redact | Personal |
 | `AUDIT_LOG` | Row creation | 7 years | Purge (service-role batch) | Internal |
 | `LOGIN_ATTEMPT` / login history | Row creation | 24 months | Purge | Personal |
 | `ERROR_LOG` | Row creation | 12 months | Purge | Internal |
@@ -335,7 +335,8 @@ purge are service-role operations, never reachable from the application.
 
 Implementation debt this policy describes but the codebase does not yet have:
 
-- [ ] `redact_user` / `redact_contact` procedures (Annex A is the manual stopgap)
+- [x] `redact_user` for `USERS` — built as `delete_user` (20261002094000), which redacts both schemas per A.1
+- [ ] `redact_contact` procedure (Annex A is the manual stopgap)
 - [ ] `purge_record` (Level 3) with mandatory audit
 - [ ] Suppression list table and the pre-send check (§7)
 - [ ] Structured `reason_code` replacing free-text reasons (§5.5)
@@ -369,9 +370,9 @@ nulled. Overwrite with a non-routable tombstone.
 | Column | Action |
 | :--- | :--- |
 | `email` | → `redacted+<user_id>@invalid` (`.invalid` is reserved by RFC 2606 and can never be delivered) |
-| `full_name` | `null` |
+| `full_name` | → `Former member` (a non-identifying placeholder, so every screen that names an author still reads) |
 | `is_active` | `false` |
-| `deactivated_at` | Preserved |
+| `deleted_at` | → `now()`; never cleared, and a deleted account cannot be reactivated |
 | `id`, `role`, `created_at`, `last_seen_at`, FKs | Preserved — these carry the analytics and audit linkage |
 
 **Both schemas must be done.** `auth.users` holds its own copy of the email; redacting

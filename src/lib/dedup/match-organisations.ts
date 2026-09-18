@@ -8,10 +8,12 @@
 // Matching rules (F042 AC1 + Dependency Notes "Deduplication keys: email, registration
 // number, name"):
 //   1. An overlapping registration number wins outright — it is the strongest signal.
-//      registrationNumbers is optional on both sides because nothing in this codebase
-//      writes organisation_identifiers yet (F041 built the table, not the write path),
-//      so this branch has nothing to match against until that gap is closed elsewhere —
-//      it is here so matching is correct the day it is.
+//      registrationNumbers is optional on both sides (a source may not supply a
+//      number, and an organisation may have none on record). The existing side is
+//      populated from organisation_identifiers (see write-organisations.ts's
+//      loadExistingOrganisationsForMatching), the candidate side from the raw
+//      source record — the write path closed F041's "built the table, not the write
+//      path" gap, so this branch now has real data to match against.
 //   2. Otherwise, a normalised name + postcode match. "Normalised" tolerates the AC's
 //      named cases: "Ltd" vs "Limited", and stray whitespace/punctuation. If either side
 //      is missing a postcode, name alone decides — postcode presence can't be required
@@ -41,8 +43,16 @@ export type DuplicateMatch = {
   matchedOn: "registration_number" | "name_and_postcode";
 };
 
-/** Lowercases, strips punctuation and the "Ltd"/"Limited" suffix, collapses whitespace. */
-function normaliseName(name: string): string {
+/**
+ * Lowercases, strips punctuation and the "Ltd"/"Limited" suffix, collapses whitespace.
+ *
+ * Exported for F042's review screen, which marks the rows where the two records
+ * disagree. A difference there should mean "the importer would not treat these as
+ * the same", so the screen asks this function rather than inventing a second
+ * opinion about what makes two names equal — "Test Trust Ltd" against "Test
+ * Trust Limited" is not a difference anybody should be asked to weigh.
+ */
+export function normaliseName(name: string): string {
   return name
     .toLowerCase()
     .replace(/[.,()]/g, "")
@@ -51,7 +61,8 @@ function normaliseName(name: string): string {
     .trim();
 }
 
-function normalisePostcode(postcode: string): string {
+/** Space- and case-insensitive, for the same reason as normaliseName above. */
+export function normalisePostcode(postcode: string): string {
   return postcode.toUpperCase().replace(/\s+/g, "");
 }
 

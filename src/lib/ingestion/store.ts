@@ -5,8 +5,10 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildAdminClient } from "../supabase/admin-client-factory.ts";
+import type { RedactionKind } from "./personal-data.ts";
 import type {
   DataSourceName,
+  FetchProgress,
   IngestionStore,
   JobStatus,
   RawRecordRow,
@@ -86,11 +88,29 @@ export function createSupabaseIngestionStore(
       }
     },
 
+    async updateRunProgress(runId: string, progress: FetchProgress) {
+      // A heartbeat, not a ledger: finishRun overwrites run_stats with the
+      // source's final stats, so each write simply replaces the last one.
+      // Flat numbers only, per the SourceFetchResult.stats convention.
+      const { error } = await supabase
+        .from("ingestion_runs")
+        .update({
+          run_stats: {
+            walked_organisations: progress.walked,
+            total_organisations: progress.total,
+          },
+        })
+        .eq("id", runId);
+
+      if (error) throw error;
+    },
+
     async finishRun(
       runId: string,
       status: JobStatus,
       counts: RunCounts,
       errorMessage?: string,
+      stats?: Record<string, number>,
     ) {
       const { error } = await supabase
         .from("ingestion_runs")
@@ -102,20 +122,34 @@ export function createSupabaseIngestionStore(
           records_skipped: counts.skipped,
           records_failed: counts.failed,
           error_message: errorMessage ?? null,
+          // Undefined stays null rather than writing `{}`: "this source reports
+          // no funnel" and "the funnel was all zeroes" are different facts, and
+          // the admin page renders them differently.
+          run_stats: stats ?? null,
         })
         .eq("id", runId);
 
       if (error) throw error;
     },
 
-    async loadDataHandlingRules() {
-      // Load active rules — service_role bypasses RLS.
+    async loadDataHandlingPolicy() {
+      // Load active rules — service_role bypasses RLS. One query for both kinds:
+      // rule_kind is what separates them, and splitting this into two round trips
+      // would open a window where a rule change lands between them and the run
+      // filters under one version while redacting under another.
       const { data: rulesData, error: rulesError } = await supabase
         .from("data_handling_rules")
-        .select("source, field_path, action")
+        .select("source, field_path, action, rule_kind")
         .eq("is_active", true);
 
       if (rulesError) throw rulesError;
+
+      const { data: roleData, error: roleError } = await supabase
+        .from("personal_email_role_parts")
+        .select("local_part")
+        .eq("is_active", true);
+
+      if (roleError) throw roleError;
 
       // Load current version from the singleton.
       const { data: versionData, error: versionError } = await supabase
@@ -126,12 +160,26 @@ export function createSupabaseIngestionStore(
 
       if (versionError) throw versionError;
 
+      const rows = rulesData ?? [];
+
       return {
-        rules: (rulesData ?? []).map((r) => ({
-          source: (r.source as string) ?? null,
-          field_path: r.field_path as string,
-          action: r.action as "allow" | "deny",
-        })),
+        fieldRules: rows
+          .filter((r) => (r.rule_kind as string) === "field_path")
+          .map((r) => ({
+            source: (r.source as string) ?? null,
+            field_path: r.field_path as string,
+            action: r.action as "allow" | "deny",
+          })),
+        redactionRules: rows
+          .filter((r) => (r.rule_kind as string) !== "field_path")
+          .map((r) => ({
+            source: (r.source as string) ?? null,
+            field_path: r.field_path as string,
+            kind: r.rule_kind as RedactionKind,
+          })),
+        roleLocalParts: new Set(
+          (roleData ?? []).map((r) => r.local_part as string),
+        ),
         version: (versionData?.current_version as number) ?? 0,
       };
     },

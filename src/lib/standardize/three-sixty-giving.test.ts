@@ -12,6 +12,7 @@ import type { PendingRecord } from "./write-organisations.ts";
 function fakeStore(overrides: Partial<GrantWriteStore> = {}) {
   const upserts: { organisationId: string; grant: StandardGrant }[] = [];
   const statusUpdates: { rawRecordId: string; status: string; matchedOrganisationId?: string }[] = [];
+  const rescored: string[] = [];
 
   const store: GrantWriteStore = {
     async loadPendingRecords() {
@@ -30,10 +31,13 @@ function fakeStore(overrides: Partial<GrantWriteStore> = {}) {
     async markRecordStatus(rawRecordId, status, matchedOrganisationId) {
       statusUpdates.push({ rawRecordId, status, matchedOrganisationId });
     },
+    async rescoreRecipient(organisationId) {
+      rescored.push(organisationId);
+    },
     ...overrides,
   };
 
-  return { store, upserts, statusUpdates };
+  return { store, upserts, statusUpdates, rescored };
 }
 
 function pendingGrant(id: string, overrides: Record<string, unknown> = {}): PendingRecord {
@@ -113,6 +117,39 @@ describe("promotePendingThreeSixtyGivingRecords", () => {
     assert.equal(upserts.length, 1);
     assert.equal(upserts[0].organisationId, "org-1");
     assert.deepEqual(statusUpdates, [{ rawRecordId: "r1", status: "matched", matchedOrganisationId: "org-1" }]);
+  });
+
+  it("rescores the recipient after a grant lands, so partnership history counts it", async () => {
+    const { store, rescored } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingGrant("r1")];
+      },
+      async findOrganisationByCharityNumber() {
+        return { id: "org-1" };
+      },
+    });
+
+    await promotePendingThreeSixtyGivingRecords(store);
+
+    assert.deepEqual(rescored, ["org-1"]);
+  });
+
+  it("does not rescore a recipient whose grant failed to write", async () => {
+    const { store, rescored } = fakeStore({
+      async loadPendingRecords() {
+        return [pendingGrant("r1")];
+      },
+      async findOrganisationByCharityNumber() {
+        return { id: "org-1" };
+      },
+      async upsertGrant() {
+        return { error: "grants upsert failed" };
+      },
+    });
+
+    await promotePendingThreeSixtyGivingRecords(store);
+
+    assert.deepEqual(rescored, []);
   });
 
   it("falls back to company number when charity number does not match", async () => {

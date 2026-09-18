@@ -13,7 +13,7 @@ import { GROUND } from "@/components/brand/tokens";
  */
 export default function PreviewSearchPage() {
   return (
-    <MotionConfig reducedMotion="user">
+    <MotionConfig>
       <main
         className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden p-6"
         style={{ backgroundColor: GROUND }}
@@ -24,21 +24,21 @@ export default function PreviewSearchPage() {
             alt=""
             width={280}
             height={280}
+            sizes="280px"
             className="absolute top-[26%] left-[12%]"
-            unoptimized
           />
           <Image
             src="/crops/leaf-bark.png"
             alt=""
             width={200}
             height={200}
+            sizes="200px"
             className="absolute top-[52%] right-[16%]"
-            unoptimized
           />
         </div>
 
         <div className="relative z-10 flex w-full justify-center">
-          <BrandSearchBar />
+          <BrandSearchBar tone="dark" />
         </div>
       </main>
     </MotionConfig>

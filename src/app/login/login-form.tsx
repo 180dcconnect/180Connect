@@ -189,6 +189,7 @@ export function LoginForm({
         action="log in"
         gerund="logging in"
         resetKey={state}
+        pending={pending}
         tone={tone}
       />
 

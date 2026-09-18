@@ -3,37 +3,32 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type ComponentType } from "react";
-import { motion, useReducedMotion, type Variants } from "motion/react";
+import { useEffect, useRef, useState, type ComponentType, type MouseEvent, type Ref } from "react";
+import { motion, useReducedMotionConfig, type Variants } from "motion/react";
 import {
-  Ban,
-  Building2,
+  ChartLine,
   ClipboardCheck,
-  Copy,
-  Gift,
-  HeartHandshake,
-  ListChecks,
   ShieldCheck,
+  SquareKanban,
   UserPlus,
   X,
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/animate-ui/components/radix/dialog";
+import { BookmarkPlusIcon, type BookmarkPlusIconHandle } from "@/components/ui/bookmark-plus";
+import { InboxIcon, type InboxIconHandle } from "@animateicons/react/lucide/inbox-icon";
+import { ListChecksIcon, type ListChecksIconHandle } from "@animateicons/react/lucide/list-checks-icon";
 import { Cctv } from "@/components/animate-ui/icons/cctv";
 import { CloudDownload } from "@/components/animate-ui/icons/cloud-download";
 import { Compass } from "@/components/animate-ui/icons/compass";
+import { LoaderPinwheel } from "@/components/animate-ui/icons/loader-pinwheel";
 import { AnimateIcon } from "@/components/animate-ui/icons/icon";
 import { PanelLeftClose } from "@/components/animate-ui/icons/panel-left-close";
 import { PanelLeftOpen } from "@/components/animate-ui/icons/panel-left-open";
+import { Settings } from "@/components/animate-ui/icons/settings";
 import { Users } from "@/components/animate-ui/icons/users";
 import { ThumbsUp } from "@/components/animate-ui/icons/thumbs-up";
 import UsersGroupIcon from "@/components/ui/users-group-icon";
 import { SidebarAccountMenu } from "@/components/sidebar-account-menu";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 import { SidebarChecklist, type SidebarChecklistStep } from "@/components/sidebar-checklist";
 import {
   Tooltip,
@@ -57,20 +52,27 @@ export type SidebarIconName =
   | "import"
   | "clients"
   | "feedback"
-  | "actions"
+  | "inbox"
   | "review"
-  | "duplicates"
-  | "suppressions"
-  | "companies-house"
-  | "charity-commission"
-  | "three-sixty-giving";
+  | "pipeline"
+  | "database"
+  | "settings"
+  | "actions"
+  | "analytics"
+  | "ai"
+  | "bookmark";
 
 export type SidebarNavItem = {
   href: string;
   label: string;
   icon: SidebarIconName;
-  // See docs/unfinished-work/README.md — set when `href` has no route yet.
-  plannedFeatureId?: string;
+  /** Other routes that select this row — a grouped entry's sibling tabs. */
+  matches?: readonly string[];
+  /**
+   * Outstanding-work count shown as a pill beside the label (dot on the icon
+   * when collapsed). Omitted — never zero — when there is nothing to show.
+   */
+  count?: number;
 };
 
 export type SidebarSection = {
@@ -78,18 +80,97 @@ export type SidebarSection = {
   items: SidebarNavItem[];
 };
 
-type RailIcon = ComponentType<{
+type RailIconProps = {
   className?: string;
   strokeWidth?: number;
   "aria-hidden"?: boolean;
-}>;
+};
+
+type RailIcon = ComponentType<RailIconProps>;
+
+type AnimateIconHandle = { startAnimation: () => void; stopAnimation: () => void };
+
+type AnimateIconComponent<H extends AnimateIconHandle> = ComponentType<
+  {
+    className?: string;
+    size?: number;
+    "aria-hidden"?: boolean;
+    onMouseEnter?: (event: MouseEvent<HTMLDivElement>) => void;
+    onMouseLeave?: (event: MouseEvent<HTMLDivElement>) => void;
+    ref?: Ref<H>;
+  }
+>;
+
+/**
+ * @animateicons/react icons don't take strokeWidth, and their built-in
+ * hover trigger only fires when no ref is ever attached — but attaching a
+ * ref is unavoidable (their own useImperativeHandle sets that internally on
+ * mount), so hover has to be driven explicitly via the ref's
+ * startAnimation/stopAnimation instead of relying on the icon's own hover
+ * handling.
+ *
+ * Two deliberate choices on top of that:
+ *
+ * - Row hover, not glyph hover, drives the animation. The rail's convention
+ *   is that hovering anywhere on the row animates its icon (every other icon
+ *   gets this through the AnimateIcon context the row provides); a 20px glyph
+ *   is a much smaller target than its row, so the adapter forwards an
+ *   `animationRef` the row's hover handlers can drive.
+ * - `size` is pinned to 20 here rather than read off the className: the svg
+ *   reads the `size` prop while the className only sizes the wrapper div, so
+ *   the default 24 leaked 2px past the 20px box every other glyph keeps.
+ */
+function withHoverAnimation<H extends AnimateIconHandle>(
+  Icon: AnimateIconComponent<H>,
+): ComponentType<RailIconProps & { animationRef?: Ref<H> }> {
+  return function AnimateIconAdapter({
+    strokeWidth: _strokeWidth,
+    onMouseEnter,
+    onMouseLeave,
+    animationRef,
+    ...props
+  }: {
+    className?: string;
+    strokeWidth?: number;
+    "aria-hidden"?: boolean;
+    onMouseEnter?: (event: MouseEvent<HTMLDivElement>) => void;
+    onMouseLeave?: (event: MouseEvent<HTMLDivElement>) => void;
+    /** Row-level driver: the row calls start/stop on its own hover. */
+    animationRef?: Ref<H>;
+  }) {
+    const innerRef = useRef<H>(null);
+    return (
+      <Icon
+        {...props}
+        size={20}
+        ref={(handle) => {
+          innerRef.current = handle;
+          if (typeof animationRef === "function") animationRef(handle);
+          else if (animationRef) animationRef.current = handle;
+        }}
+        onMouseEnter={(event) => {
+          onMouseEnter?.(event);
+          innerRef.current?.startAnimation();
+        }}
+        onMouseLeave={(event) => {
+          onMouseLeave?.(event);
+          innerRef.current?.stopAnimation();
+        }}
+      />
+    );
+  };
+}
+
+const Inbox = withHoverAnimation<InboxIconHandle>(InboxIcon);
+const ListChecks = withHoverAnimation<ListChecksIconHandle>(ListChecksIcon);
 
 /**
  * Nav items name an icon rather than importing one, so the shell stays a plain
  * list of routes and every icon in the rail is drawn on the same grid.
  *
- * Dashboard, clients, team management, audit log, and import status use animated glyphs,
- * which draw their own motion on the row rather than the shared spring below.
+ * Dashboard, clients, team management, audit log, import status, and artificial
+ * intelligence use animated glyphs, which draw their own motion on the row
+ * rather than the shared spring below.
  */
 const ICONS: Record<SidebarIconName, RailIcon> = {
   dashboard: Compass,
@@ -100,13 +181,20 @@ const ICONS: Record<SidebarIconName, RailIcon> = {
   audit: Cctv,
   import: CloudDownload,
   feedback: ThumbsUp,
-  actions: ListChecks,
+  inbox: Inbox,
   review: ClipboardCheck,
-  duplicates: Copy,
-  suppressions: Ban,
-  "companies-house": Building2,
-  "charity-commission": HeartHandshake,
-  "three-sixty-giving": Gift,
+  pipeline: SquareKanban,
+  database: CloudDownload,
+  settings: Settings,
+  actions: ListChecks,
+  analytics: ChartLine,
+  // The Generate draft pinwheel — the same glyph as the compose modal's AI
+  // drafting button. It inherits the row's AnimateIcon hover context, so it
+  // spins on row hover like the import icon does. No ICON_MOTION entry: the
+  // glyph animates its own interior, so a wrapper transform on top would read
+  // as two gestures.
+  ai: LoaderPinwheel,
+  bookmark: BookmarkPlusIcon,
 };
 
 const MotionLink = motion.create(Link);
@@ -126,9 +214,9 @@ const ICON_SPRING = { type: "spring", stiffness: 420, damping: 17, mass: 0.6 } a
 const ICON_MOTION: Partial<Record<SidebarIconName, Variants>> = {
   admin: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: -6 } },
   feedback: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.1, rotate: 6 } },
-  // `dashboard`, `clients`, `users`, `audit`, and `import` are deliberately absent:
-  // those glyphs animate their own interiors, so a wrapper transform on top would
-  // read as two gestures.
+  // `dashboard`, `clients`, `users`, `audit`, `import`, `database`, `ai`,
+  // and `bookmark` are deliberately absent: those glyphs animate their own
+  // interiors, so a wrapper transform on top would read as two gestures.
 };
 
 /**
@@ -155,15 +243,13 @@ export function Sidebar({
   onLogout: () => Promise<void>;
   initialCollapsed?: boolean;
   // Below `md` the rail is a drawer, not a rail — `AppShellFrame` owns the
-  // open/close state (the burger that opens it lives in its mobile bar, not
-  // in here) and passes it down.
+  // open/close state and passes it down.
   mobileOpen?: boolean;
   onMobileClose?: () => void;
   onboarding?: SidebarOnboarding;
 }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
-  const [plannedItem, setPlannedItem] = useState<SidebarNavItem | null>(null);
 
   useEffect(() => {
     try {
@@ -188,9 +274,32 @@ export function Sidebar({
   };
 
   // Someone who asked the OS for less motion gets the colour change only.
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotionConfig();
   const iconVariants = (variants: Variants | undefined) =>
     reduceMotion ? undefined : variants;
+
+  // Row-hover drivers for the @animateicons/react glyphs (inbox, actions) and
+  // the bookmark icon: unlike every local icon they cannot read the AnimateIcon
+  // hover context, so the row starts/stops them imperatively through the refs
+  // the adapter forwards. Gated on the same reduceMotion flag as animateOnHover.
+  const inboxIconRef = useRef<InboxIconHandle>(null);
+  const actionsIconRef = useRef<ListChecksIconHandle>(null);
+  const bookmarkIconRef = useRef<BookmarkPlusIconHandle>(null);
+  const rowIconRef = (icon: SidebarIconName) =>
+    icon === "inbox"
+      ? inboxIconRef
+      : icon === "actions"
+        ? actionsIconRef
+        : icon === "bookmark"
+          ? bookmarkIconRef
+          : null;
+  const startRowIcon = (icon: SidebarIconName) => {
+    if (reduceMotion) return;
+    rowIconRef(icon)?.current?.startAnimation();
+  };
+  const stopRowIcon = (icon: SidebarIconName) => {
+    rowIconRef(icon)?.current?.stopAnimation();
+  };
 
   return (
     <aside
@@ -233,8 +342,6 @@ export function Sidebar({
           </button>
         </AnimateIcon>
 
-        {/* Hidden by class rather than unmounted: `collapsed` is a desktop-only
-            state (see below `md`), and below `md` this always shows. */}
         <span
           className={`min-w-0 flex-1 truncate text-base font-extrabold text-black tracking-tight transition-opacity duration-150 ${
             collapsed ? "md:hidden" : ""
@@ -256,8 +363,6 @@ export function Sidebar({
           </AnimateIcon>
         )}
 
-        {/* Drawer close — mobile only. Collapse is a desktop idea; a drawer
-            you opened on purpose is dismissed, not shrunk to icons. */}
         <button
           type="button"
           onClick={onMobileClose}
@@ -282,64 +387,68 @@ export function Sidebar({
             )}
             <ul className="space-y-1">
               {section.items.map((item) => {
-                const active = pathname === item.href;
+                const active = pathname === item.href || Boolean(item.matches?.includes(pathname));
                 const Icon = ICONS[item.icon];
-                const planned = Boolean(item.plannedFeatureId);
-                const rowClassName = `flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm transition-all hover:bg-black/10 ${
-                  active
-                    ? "bg-black/12 font-bold text-black"
-                    : planned
-                      ? "font-semibold text-black/50 hover:text-black/70"
-                      : "font-semibold text-black/85 hover:text-black"
-                }`;
-                const rowContent = (
-                  <>
-                    <motion.span
-                      className="flex shrink-0"
-                      variants={iconVariants(ICON_MOTION[item.icon])}
-                      transition={ICON_SPRING}
-                    >
-                      {Icon ? <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden={true} /> : null}
-                    </motion.span>
-                    <span className={`min-w-0 flex-1 truncate ${collapsed ? "md:hidden" : ""}`}>
-                      {item.label}
-                    </span>
-                    {planned && (
-                      <span
-                        className={`shrink-0 rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-black/50 ${
-                          collapsed ? "md:hidden" : ""
-                        }`}
-                      >
-                        Soon
-                      </span>
-                    )}
-                  </>
-                );
+                const showCount = item.count != null && item.count > 0;
                 const link = (
                   <AnimateIcon animateOnHover={!reduceMotion} asChild>
-                    {planned ? (
-                      <motion.button
-                        type="button"
-                        onClick={() => setPlannedItem(item)}
-                        initial="rest"
-                        animate="rest"
-                        whileHover="hover"
-                        className={`w-full ${rowClassName}`}
+                    <MotionLink
+                      href={item.href}
+                      aria-current={active ? "page" : undefined}
+                      initial="rest"
+                      animate="rest"
+                      whileHover="hover"
+                      onHoverStart={() => startRowIcon(item.icon)}
+                      onHoverEnd={() => stopRowIcon(item.icon)}
+                      className={`relative flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm text-black transition-all hover:bg-black/10 ${
+                        active ? "bg-black/12 font-bold text-black" : "font-semibold text-black/85 hover:text-black"
+                      }`}
+                    >
+                      <motion.span
+                        className="flex shrink-0"
+                        variants={iconVariants(ICON_MOTION[item.icon])}
+                        transition={ICON_SPRING}
                       >
-                        {rowContent}
-                      </motion.button>
-                    ) : (
-                      <MotionLink
-                        href={item.href}
-                        aria-current={active ? "page" : undefined}
-                        initial="rest"
-                        animate="rest"
-                        whileHover="hover"
-                        className={rowClassName}
-                      >
-                        {rowContent}
-                      </MotionLink>
-                    )}
+                        {item.icon === "inbox" ? (
+                          <Inbox
+                            className="h-5 w-5"
+                            aria-hidden={true}
+                            animationRef={inboxIconRef}
+                          />
+                        ) : item.icon === "actions" ? (
+                          <ListChecks
+                            className="h-5 w-5"
+                            aria-hidden={true}
+                            animationRef={actionsIconRef}
+                          />
+                        ) : item.icon === "bookmark" ? (
+                          <BookmarkPlusIcon className="h-5 w-5" aria-hidden={true} animationRef={bookmarkIconRef} />
+                        ) : Icon ? (
+                          <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden={true} />
+                        ) : null}
+                      </motion.span>
+                      <span className={`min-w-0 flex-1 truncate ${collapsed ? "md:hidden" : ""}`}>
+                        {item.label}
+                      </span>
+                      {showCount && (
+                        <span
+                          className={`shrink-0 rounded-full bg-lead px-2 py-0.5 text-[12px] font-bold tabular-nums text-paper ${
+                            collapsed ? "md:hidden" : ""
+                          }`}
+                          aria-label={`${item.count} outstanding actions`}
+                        >
+                          {item.count! > 99 ? "99+" : item.count}
+                        </span>
+                      )}
+                      {showCount && collapsed && (
+                        <span
+                          className="absolute top-1 right-1 hidden h-4 min-w-4 items-center justify-center rounded-full bg-lead px-1 text-[10px] font-bold tabular-nums text-paper md:flex"
+                          aria-label={`${item.count} outstanding actions`}
+                        >
+                          {item.count! > 99 ? "99+" : item.count}
+                        </span>
+                      )}
+                    </MotionLink>
                   </AnimateIcon>
                 );
                 return (
@@ -379,7 +488,10 @@ export function Sidebar({
         </div>
       )}
 
-      <div className="border-t border-white/70 p-2">
+      <div className="space-y-1 border-t border-white/70 p-2">
+        {/* F173: notification bell lives above the account block, inside the
+            same footer group — one place every signed-in user already looks. */}
+        <NotificationBell collapsed={collapsed} />
         <SidebarAccountMenu
           name={userName ?? null}
           email={userEmail ?? null}
@@ -388,19 +500,6 @@ export function Sidebar({
           onLogout={onLogout}
         />
       </div>
-
-      <Dialog open={plannedItem !== null} onOpenChange={(open) => !open && setPlannedItem(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{plannedItem?.label} isn&apos;t built yet</DialogTitle>
-            <DialogDescription>
-              This part of the platform is on the roadmap
-              {plannedItem?.plannedFeatureId ? ` (${plannedItem.plannedFeatureId})` : ""} but doesn&apos;t
-              have a page yet. Check back once it ships.
-            </DialogDescription>
-          </DialogHeader>
-        </DialogContent>
-      </Dialog>
     </aside>
   );
 }

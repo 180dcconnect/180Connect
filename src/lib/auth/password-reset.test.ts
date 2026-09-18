@@ -3,8 +3,13 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_RECOVERY_WINDOW_SECONDS,
   emailSchema,
+  fullNameSchema,
+  inviteTokenFromForm,
   isRecoveryAllowedPath,
+  MAX_FULL_NAME_LENGTH,
+  NAME_TOO_LONG_MESSAGE,
   newPasswordSchema,
+  normalizeFullName,
   passwordSchema,
   readRecoveryMarker,
   recoveryWindowSeconds,
@@ -92,6 +97,37 @@ describe("validation", () => {
     assert.equal(result.success, false);
     assert.deepEqual(result.error?.issues[0]?.path, ["confirmPassword"]);
   });
+
+  // The recovery form does not render a name field, so nothing is submitted
+  // for it. Absent must validate — the Server Action is what enforces a name
+  // where one is actually required.
+  it("accepts a submission with no name field at all", () => {
+    const result = newPasswordSchema.safeParse({
+      password: "A-secure-password-123",
+      confirmPassword: "A-secure-password-123",
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.data?.fullName, undefined);
+  });
+
+  it("normalises and strips control/invisible characters from full names", () => {
+    assert.equal(normalizeFullName("  Jane   Doe  "), "Jane Doe");
+    assert.equal(normalizeFullName("Jane\u200BDoe"), "Jane Doe");
+    assert.equal(normalizeFullName("Jane\u0000Doe"), "Jane Doe");
+  });
+
+  it("rejects names exceeding max length", () => {
+    const tooLong = "A".repeat(MAX_FULL_NAME_LENGTH + 1);
+    const result = fullNameSchema.safeParse(tooLong);
+    assert.equal(result.success, false);
+    assert.equal(result.error?.issues[0]?.message, NAME_TOO_LONG_MESSAGE);
+  });
+
+  it("accepts valid names and normalises them in schema", () => {
+    const result = fullNameSchema.safeParse("  Jane Doe  ");
+    assert.equal(result.success, true);
+    assert.equal(result.data, "Jane Doe");
+  });
 });
 
 describe("recovery marker", () => {
@@ -160,10 +196,36 @@ describe("recovery confinement", () => {
     }
   });
 
+  // The form links to both, and previews them in an iframe on hover: confined,
+  // the preview would show the reset page inside itself.
+  it("allows the legal pages the form links to", () => {
+    for (const path of ["/terms", "/privacy"]) {
+      assert.equal(isRecoveryAllowedPath(path), true, path);
+    }
+  });
+
   // The whole point: a reset link must not double as a way into the app.
   it("blocks the rest of the app", () => {
     for (const path of ["/", "/dashboard", "/dashboard/clients", "/api/anything"]) {
       assert.equal(isRecoveryAllowedPath(path), false, path);
     }
+  });
+});
+
+describe("inviteTokenFromForm", () => {
+  it("passes a token through untouched — verifyOtp is the validator", () => {
+    assert.equal(inviteTokenFromForm("abc123"), "abc123");
+  });
+
+  it("trims surrounding whitespace", () => {
+    assert.equal(inviteTokenFromForm("  abc123  "), "abc123");
+  });
+
+  it("returns null for anything that is not a usable token", () => {
+    assert.equal(inviteTokenFromForm(undefined), null);
+    assert.equal(inviteTokenFromForm(null), null);
+    assert.equal(inviteTokenFromForm(42), null);
+    assert.equal(inviteTokenFromForm(""), null);
+    assert.equal(inviteTokenFromForm("   "), null);
   });
 });

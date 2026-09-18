@@ -49,7 +49,7 @@ setting from the recovery side.
 `INVITE_EXPIRY_HOURS` (`src/lib/auth/invite.ts`) only *says* how long the
 link lasts, in the email copy and (via `isInviteExpired` in
 `src/lib/admin/team-realtime.ts`) in the admin's pending-invites list
-(`src/app/admin/users/pending-invites-list.tsx`, which shows "Expired" once an
+(`src/app/(app)/admin/users/pending-invites-list.tsx`, which shows "Expired" once an
 invite passes this window). It does not enforce anything — Supabase does that.
 The two must be kept aligned by hand in every environment:
 
@@ -174,23 +174,27 @@ up; the guard fails closed, and there is a pgTAP test asserting exactly that.
 
 ## What happens after the link is clicked
 
-`/auth/confirm?type=invite` verifies the token, opens a Supabase session for
-the invited user, and lands them on `/reset-password` — the same "choose a
-password" form password recovery uses (see `src/lib/auth/recovery-landing.ts`).
-There is no separate accept-invite page: setting a password *is* accepting the
-invite, and that is meant literally. `users.invite_accepted_at` is stamped by
-`public.mark_invite_accepted()`
+`/auth/confirm?type=invite` does **not** verify the token — it carries the
+hash through to `/reset-password`, which verifies it when the password form is
+submitted (see `src/app/auth/confirm/route.ts` and `setNewPassword` in
+`src/app/reset-password/actions.ts`). Opening the link as many times as it
+takes burns nothing; only completing the form consumes the token, so an
+abandoned attempt leaves the invite pending, the same link working, and the
+admin's pending list truthful. There is no separate accept-invite page:
+setting a password *is* accepting the invite, and that is meant literally.
+`users.invite_accepted_at` is stamped by `public.mark_invite_accepted()`
 (`supabase/migrations/20260804090000_add_user_invite_tracking.sql`), which the
 password form's Server Action calls *after* the password update succeeds — not by
 a trigger on email confirmation.
 
-The distinction matters. Verifying the invite token confirms the email and opens
-a session before any password exists. Had acceptance been stamped there, clicking
-the link in a mail app would be enough to clear the invite from the admin's
+The distinction matters. Had acceptance been stamped at click time, opening the
+link in a mail app would be enough to clear the invite from the admin's
 pending list, and anyone who clicked and then closed the tab would be left holding
 an account they cannot log into, with no admin-visible sign of it. Clicking the
 link proves someone can read the mailbox; only a set password proves there is a
 usable account at the end of it.
 
 So a half-finished invite stays pending, and stays visible to the admin, until
-the password is set.
+the password is set. Recovery links are deliberately different: they verify on
+landing, because resetting an existing account's password is the higher-stakes
+flow and its session confinement assumes a verified session from the start.

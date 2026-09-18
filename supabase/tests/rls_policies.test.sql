@@ -470,7 +470,7 @@ begin
     tests.sqlstate_of(v_cam_a, format(
       'delete from public.users where id = %L', v_admin)),
     '42501',
-    'CAM cannot delete a user (deactivate, never delete)'
+    'CAM cannot delete a user row directly (only delete_user can remove an account)'
   );
 
   -- A CAM updating someone else's row is blocked by USING, which filters rather
@@ -700,412 +700,303 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- Deactivate (offboard) RPC — F014 (#16)
+-- suspend_user — suspension with an optional handover
 -- ---------------------------------------------------------------------------
--- Deactivation is suspension plus offboarding: the account closes and its clients go
--- somewhere. The assertions that matter are the ones a reviewer cannot check by
--- reading the function — that the gate actually refuses while clients are owned, that
--- the transfer and the closure land in the same transaction, and that nothing is
--- deleted (AC3, AC4).
---
--- The target is v_deactivated (fixture id ...004) rather than a CAM the earlier suites
--- rely on. Every suite runs inside the one uncommitted transaction with no reset
--- between them, so deactivating cam_a or cam_b here would change the world underneath
--- whatever runs next. ...004 is already is_active = false with no deactivated_at,
--- which is exactly the suspended-not-deactivated state, and the fixture org below is
--- created locally for the same isolation reason.
-create or replace function tests.suite_deactivate_rpc()
+-- Suspension alone moves nothing; a handover is offered, not required, and when taken
+-- it commits with the suspension. Own identities: the shared fixtures are relied on,
+-- unchanged, by every later suite in this one transaction.
+create or replace function tests.suite_suspend_user_rpc()
 returns setof text language plpgsql as $$
 declare
-  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
-  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
-  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
-  v_target      uuid := '00000000-0000-4000-a000-000000000004';
-  v_org         uuid := '00000000-0000-4000-b000-000000000004';
-  v_deactivated timestamptz;
-  v_active      boolean;
-  v_owner       uuid;
-  v_count       bigint;
+  v_admin  uuid := '00000000-0000-4000-a000-0000000000e1';
+  v_cam    uuid := '00000000-0000-4000-a000-0000000000e2';
+  v_taker  uuid := '00000000-0000-4000-a000-0000000000e3';
+  v_viewer uuid := '00000000-0000-4000-a000-0000000000e4';
+  v_org    uuid := '00000000-0000-4000-b000-0000000000ea';
+  v_owner  uuid;
+  v_active boolean;
+  v_count  bigint;
 begin
-  if to_regprocedure('public.deactivate_user(uuid, text, uuid, boolean)') is null then
-    return next skip(23, 'deactivate_user RPC not yet migrated');
+  if to_regprocedure('public.suspend_user(uuid, text, uuid, boolean)') is null then
+    return next skip(10, 'suspend_user RPC not yet migrated');
     return;
   end if;
 
-  perform tests.seed();
+  insert into auth.users (id, instance_id, aud, role, email) values
+    (v_admin,  '00000000-0000-0000-0000-000000000000','authenticated','authenticated','suspend-admin@180dc.org'),
+    (v_cam,    '00000000-0000-0000-0000-000000000000','authenticated','authenticated','suspend-cam@180dc.org'),
+    (v_taker,  '00000000-0000-0000-0000-000000000000','authenticated','authenticated','suspend-taker@180dc.org'),
+    (v_viewer, '00000000-0000-0000-0000-000000000000','authenticated','authenticated','suspend-viewer@180dc.org')
+  on conflict (id) do nothing;
+
+  insert into public.users (id, email, full_name, role, is_active) values
+    (v_admin,  'suspend-admin@180dc.org',  'Suspend Admin',  'admin',  true),
+    (v_cam,    'suspend-cam@180dc.org',    'Suspend CAM',    'cam',    true),
+    (v_taker,  'suspend-taker@180dc.org',  'Suspend Taker',  'cam',    true),
+    (v_viewer, 'suspend-viewer@180dc.org', 'Suspend Viewer', 'viewer', true)
+  on conflict (id) do update
+    set role = excluded.role, is_active = excluded.is_active, full_name = excluded.full_name;
 
   insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
-  values (v_org, 'Offboarding Org Ltd', 'manual', 'other', v_target)
+  values (v_org, 'Suspension Client Ltd', 'manual', 'other', v_cam)
   on conflict (id) do update set owner_id = excluded.owner_id;
 
-  -- Seeded so the revocation assertion further down has something to revoke. This
-  -- migration replaces set_user_active with `create or replace`, which silently wins
-  -- over the two earlier definitions; if a future edit forgets to carry the
-  -- app.revoke_sessions call forward, this is what fails.
-  insert into auth.sessions (id, user_id, created_at, updated_at)
-  values (gen_random_uuid(), v_target, now(), now());
-
-  -- Authorisation, re-checked inside the SECURITY DEFINER body: EXECUTE is granted to
-  -- `authenticated`, which every signed-in user shares, so the body is the only thing
-  -- standing between a CAM and an offboarding.
   return next is(
-    tests.sqlstate_of(v_cam_a, format(
-      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'leaving', v_cam_a)),
+    tests.sqlstate_of(v_taker, format('select public.suspend_user(%L)', v_cam)),
     '42501',
-    'CAM calling deactivate_user is refused inside the SECURITY DEFINER body'
+    'a CAM cannot suspend anyone'
   );
 
   return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, null, false)', v_admin, 'leaving')),
-    '42501',
-    'an admin cannot deactivate their own account'
-  );
-
-  -- PRD §4.2: the reason is required, and whitespace is not a reason.
-  return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, %L, false)', v_target, '   ', v_cam_a)),
+    tests.sqlstate_of(v_admin, format('select public.suspend_user(%L, null, %L)', v_cam, v_taker)),
     '22023',
-    'a blank reason is refused'
+    'handing work on requires a reason'
   );
 
-  -- AC2, the gate. This is the assertion the story turns on: while the user owns
-  -- clients and no destination is given, the account does not close.
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, null, false)', v_target, 'leaving')),
+      'select public.suspend_user(%L, %L, %L)', v_cam, 'on leave', v_viewer)),
     '22023',
-    'deactivation is refused while the user still owns clients'
-  );
-  select deactivated_at into v_deactivated from public.users where id = v_target;
-  return next is(v_deactivated, null::timestamptz,
-    'the refused deactivation left the account untouched');
-
-  return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'leaving', v_viewer)),
-    '22023',
-    'clients cannot be reassigned to a viewer'
+    'work cannot be handed to a viewer'
   );
 
-  return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, %L, true)', v_target, 'leaving', v_cam_a)),
-    '22023',
-    'naming an owner and releasing to the pool at the same time is refused'
-  );
+  select is_active into v_active from public.users where id = v_cam;
+  return next is(v_active, true, 'a refused suspension left the account active');
 
-  -- The whole thing, for real.
   return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'left the society', v_cam_a)),
+    tests.sqlstate_of(v_admin, format('select public.suspend_user(%L)', v_cam)),
     null,
-    'admin can deactivate a user and hand their clients on'
+    'admin can suspend without handing anything on'
   );
-
-  select is_active, deactivated_at into v_active, v_deactivated
-    from public.users where id = v_target;
-  return next ok(v_active = false and v_deactivated is not null,
-    'the account is inactive and marked as deactivated, not merely suspended');
 
   select owner_id into v_owner from public.organisations where id = v_org;
-  return next is(v_owner, v_cam_a,
-    'the owned client moved to the named CAM in the same transaction');
+  return next is(v_owner, v_cam, 'a plain suspension leaves their clients with them');
 
-  select count(*) into v_count from auth.sessions where user_id = v_target;
-  return next is(v_count, 0::bigint,
-    'deactivation revoked the offboarded user''s sessions');
-
-  -- AC3/AC4: deactivation is not deletion. The row survives, and so does the trail.
-  select count(*) into v_count from public.users where id = v_target;
-  return next is(v_count, 1::bigint, 'the user row is not deleted');
-
-  if tests.tables_exist('audit_log') then
-    select count(*) into v_count
-      from public.audit_log
-     where action = 'user_deactivated' and target_id = v_target;
-    return next is(v_count, 1::bigint,
-      'exactly one user_deactivated audit row, and only for the successful attempt');
-
-    select count(*) into v_count
-      from public.audit_log
-     where action = 'ownership_reassigned'
-       and target_table = 'organisations'
-       and target_id = v_org
-       and detail->>'reason' = 'left the society';
-    return next is(v_count, 1::bigint,
-      'the client handover is audited against the organisation, carrying the reason');
-  else
-    return next skip(2, 'audit_log not yet migrated');
-  end if;
-
-  -- Pressing the button twice does not produce a second audit row or a second sweep.
+  -- Handing a suspended member's work on afterwards is a real need, not an edge case.
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, null, false)', v_target, 'again')),
+      'select public.suspend_user(%L, %L, %L)', v_cam, 'on long leave', v_taker)),
     null,
-    'deactivating an already-deactivated user is a no-op, not an error'
+    'an already-suspended member''s clients can be handed on later'
   );
 
-  -- Reactivation has to clear the marker or the constraint rejects it outright. This
-  -- is the assertion that would have caught shipping F014 without amending F013.
-  return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.set_user_active(%L, true)', v_target)),
-    null,
-    'a deactivated user can be reactivated'
-  );
-  select deactivated_at into v_deactivated from public.users where id = v_target;
-  return next is(v_deactivated, null::timestamptz,
-    'reactivation clears the deactivation marker');
-
-  -- The illegal combination is forbidden by the database, not by the RPCs. Asserted as
-  -- the table owner, which is the only role that could ever write the column directly.
-  return next throws_ok(
-    format('update public.users set deactivated_at = now() where id = %L', v_cam_a),
-    '23514',
-    null,
-    'an active user cannot carry a deactivation timestamp'
-  );
-
-  -- The other destination PRD §6.12 allows: back to the unowned pool.
-  update public.organisations set owner_id = v_target where id = v_org;
-  return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, null, true)', v_target, 'released')),
-    null,
-    'clients can be released to the unowned pool instead of being reassigned'
-  );
   select owner_id into v_owner from public.organisations where id = v_org;
-  return next is(v_owner, null::uuid,
-    'the released client is unowned and claimable by any CAM'
-  );
-
-  -- Matrix §6 gap 7 regression check: deactivate_user is the third writer of
-  -- is_active, so it takes the same guard. Deactivating an admin who is not the last
-  -- one must still succeed. As in suite_role_rpc and suite_active_rpc, this cannot
-  -- exercise the guard actually firing — reaching it requires the caller to be a
-  -- distinct active admin from the target, which structurally means the caller always
-  -- survives a solo call. Proof it fires under real concurrency lives in
-  -- scripts/verify-last-admin-guard.mts.
-  update public.users
-     set role = 'admin', is_active = true, deactivated_at = null
-   where id = v_target;
-  return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, null, true)', v_target, 'second admin')),
-    null,
-    'admin deactivating a second admin still succeeds while another admin remains'
-  );
-  select is_active into v_active from public.users where id = v_target;
-  return next is(v_active, false, 'the deactivation actually landed');
+  return next is(v_owner, v_taker, 'the client moved to the named CAM');
 
   select count(*) into v_count
-    from public.users where role = 'admin' and is_active;
+    from public.audit_log where action = 'user_suspended' and target_id = v_cam;
   return next is(v_count, 1::bigint,
-    'exactly one active admin remains after the deactivation (never zero)');
+    'suspending an already-suspended member writes no second user_suspended row');
 
-  -- Leave the fixture as it was found: later suites share this transaction. Restored
-  -- with plain SQL rather than the RPCs — those self-check app.is_admin(), which reads
-  -- auth.uid(), and here there is no signed-in user to be an admin.
-  update public.users
-     set role = 'cam', is_active = false, deactivated_at = null
-   where id = v_target;
-  delete from public.organisations where id = v_org;
+  return next is(
+    tests.sqlstate_of(v_admin, format('select public.set_user_active(%L, true)', v_cam)),
+    null,
+    'a suspension is reversible'
+  );
 end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- Deactivate (offboard) RPC — F014 (#16)
+-- delete_user — hard delete without history, redaction with it
 -- ---------------------------------------------------------------------------
--- Deactivation is suspension plus offboarding: the account closes and its clients go
--- somewhere. The assertions that matter are the ones a reviewer cannot check by
--- reading the function — that the gate actually refuses while clients are owned, that
--- the transfer and the closure land in the same transaction, and that nothing is
--- deleted (AC3, AC4).
---
--- The target is v_deactivated (fixture id ...004) rather than a CAM the earlier suites
--- rely on. Every suite runs inside the one uncommitted transaction with no reset
--- between them, so deactivating cam_a or cam_b here would change the world underneath
--- whatever runs next. ...004 is already is_active = false with no deactivated_at,
--- which is exactly the suspended-not-deactivated state, and the fixture org below is
--- created locally for the same isolation reason.
-create or replace function tests.suite_deactivate_rpc()
+-- The assertions a reviewer cannot get from reading the function: that the handover
+-- gate refuses, that "history" is detected from real rows, that redaction reaches both
+-- schemas and leaves authorship intact, that the email is genuinely freed, and that a
+-- deleted account cannot be brought back. Own identities, for the same reason as above.
+create or replace function tests.suite_delete_user_rpc()
 returns setof text language plpgsql as $$
 declare
-  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
-  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
-  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
-  v_target      uuid := '00000000-0000-4000-a000-000000000004';
-  v_org         uuid := '00000000-0000-4000-b000-000000000004';
-  v_deactivated timestamptz;
-  v_active      boolean;
-  v_owner       uuid;
-  v_count       bigint;
+  v_admin   uuid := '00000000-0000-4000-a000-0000000000c1';
+  v_admin2  uuid := '00000000-0000-4000-a000-0000000000c2';
+  v_leaver  uuid := '00000000-0000-4000-a000-0000000000c3';
+  v_clean   uuid := '00000000-0000-4000-a000-0000000000c4';
+  v_taker   uuid := '00000000-0000-4000-a000-0000000000c5';
+  v_viewer  uuid := '00000000-0000-4000-a000-0000000000c6';
+  v_org     uuid := '00000000-0000-4000-b000-0000000000c1';
+  v_note    uuid := '00000000-0000-4000-c000-0000000000c1';
+  v_user    public.users%rowtype;
+  v_owner   uuid;
+  v_count   bigint;
 begin
-  if to_regprocedure('public.deactivate_user(uuid, text, uuid, boolean)') is null then
-    return next skip(20, 'deactivate_user RPC not yet migrated');
+  if to_regprocedure('public.delete_user(uuid, text, uuid, boolean)') is null then
+    return next skip(27, 'delete_user RPC not yet migrated');
     return;
   end if;
 
-  perform tests.seed();
+  insert into auth.users (id, instance_id, aud, role, email) values
+    (v_admin,  '00000000-0000-0000-0000-000000000000','authenticated','authenticated','delete-admin@180dc.org'),
+    (v_admin2, '00000000-0000-0000-0000-000000000000','authenticated','authenticated','delete-admin2@180dc.org'),
+    (v_leaver, '00000000-0000-0000-0000-000000000000','authenticated','authenticated','delete-leaver@180dc.org'),
+    (v_clean,  '00000000-0000-0000-0000-000000000000','authenticated','authenticated','delete-clean@180dc.org'),
+    (v_taker,  '00000000-0000-0000-0000-000000000000','authenticated','authenticated','delete-taker@180dc.org'),
+    (v_viewer, '00000000-0000-0000-0000-000000000000','authenticated','authenticated','delete-viewer@180dc.org')
+  on conflict (id) do nothing;
+
+  insert into public.users (id, email, full_name, role, is_active) values
+    (v_admin,  'delete-admin@180dc.org',  'Delete Admin',  'admin',  true),
+    (v_admin2, 'delete-admin2@180dc.org', 'Delete Admin 2','admin',  true),
+    (v_leaver, 'delete-leaver@180dc.org', 'Delete Leaver', 'cam',    true),
+    (v_clean,  'delete-clean@180dc.org',  'Delete Clean',  'cam',    true),
+    (v_taker,  'delete-taker@180dc.org',  'Delete Taker',  'cam',    true),
+    (v_viewer, 'delete-viewer@180dc.org', 'Delete Viewer', 'viewer', true)
+  on conflict (id) do update
+    set role = excluded.role, is_active = excluded.is_active, full_name = excluded.full_name;
 
   insert into public.organisations (id, legal_name, entry_method, organisation_type, owner_id)
-  values (v_org, 'Offboarding Org Ltd', 'manual', 'other', v_target)
+  values (v_org, 'Deletion Client Ltd', 'manual', 'other', v_leaver)
   on conflict (id) do update set owner_id = excluded.owner_id;
 
-  -- Seeded so the revocation assertion further down has something to revoke. This
-  -- migration replaces set_user_active with `create or replace`, which silently wins
-  -- over the two earlier definitions; if a future edit forgets to carry the
-  -- app.revoke_sessions call forward, this is what fails.
+  -- History: something the leaver wrote. The clean account has none.
+  insert into public.notes (id, organisation_id, author_id, content)
+  values (v_note, v_org, v_leaver, 'Trustees want a proposal in October.')
+  on conflict (id) do nothing;
+
+  -- Something for redaction to revoke and remove in the auth schema.
   insert into auth.sessions (id, user_id, created_at, updated_at)
-  values (gen_random_uuid(), v_target, now(), now());
+  values (gen_random_uuid(), v_leaver, now(), now());
+  insert into auth.identities (provider_id, user_id, identity_data, provider)
+  values (v_leaver::text, v_leaver,
+          jsonb_build_object('sub', v_leaver::text, 'email', 'delete-leaver@180dc.org'),
+          'email');
 
-  -- Authorisation, re-checked inside the SECURITY DEFINER body: EXECUTE is granted to
-  -- `authenticated`, which every signed-in user shares, so the body is the only thing
-  -- standing between a CAM and an offboarding.
+  -- 1–3: authorisation and input, re-checked inside the SECURITY DEFINER body.
   return next is(
-    tests.sqlstate_of(v_cam_a, format(
-      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'leaving', v_cam_a)),
+    tests.sqlstate_of(v_taker, format('select public.delete_user(%L, %L)', v_clean, 'x')),
     '42501',
-    'CAM calling deactivate_user is refused inside the SECURITY DEFINER body'
+    'a CAM cannot delete anyone'
   );
-
   return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, null, false)', v_admin, 'leaving')),
+    tests.sqlstate_of(v_admin, format('select public.delete_user(%L, %L)', v_admin, 'x')),
     '42501',
-    'an admin cannot deactivate their own account'
+    'an admin cannot delete their own account'
   );
-
-  -- PRD §4.2: the reason is required, and whitespace is not a reason.
   return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, %L, false)', v_target, '   ', v_cam_a)),
+    tests.sqlstate_of(v_admin, format('select public.delete_user(%L, %L, %L)', v_leaver, '  ', v_taker)),
     '22023',
     'a blank reason is refused'
   );
 
-  -- AC2, the gate. This is the assertion the story turns on: while the user owns
-  -- clients and no destination is given, the account does not close.
+  -- 4–7: the handover gate.
   return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, null, false)', v_target, 'leaving')),
+    tests.sqlstate_of(v_admin, format('select public.delete_user(%L, %L)', v_leaver, 'left')),
     '22023',
-    'deactivation is refused while the user still owns clients'
+    'deletion is refused while the user still owns clients'
   );
-  select deactivated_at into v_deactivated from public.users where id = v_target;
-  return next is(v_deactivated, null::timestamptz,
-    'the refused deactivation left the account untouched');
-
+  select * into v_user from public.users where id = v_leaver;
+  return next ok(v_user.deleted_at is null and v_user.is_active,
+    'the refused deletion left the account untouched');
   return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'leaving', v_viewer)),
+    tests.sqlstate_of(v_admin, format('select public.delete_user(%L, %L, %L)', v_leaver, 'left', v_viewer)),
     '22023',
-    'clients cannot be reassigned to a viewer'
+    'clients cannot be handed to a viewer'
   );
-
   return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, %L, true)', v_target, 'leaving', v_cam_a)),
+    tests.sqlstate_of(v_admin, format('select public.delete_user(%L, %L, %L, true)', v_leaver, 'left', v_taker)),
     '22023',
     'naming an owner and releasing to the pool at the same time is refused'
   );
 
-  -- The whole thing, for real.
+  -- 8–15: a user with history is redacted, not removed.
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, %L, false)', v_target, 'left the society', v_cam_a)),
+      'select public.delete_user(%L, %L, %L)', v_leaver, 'left the society', v_taker)),
     null,
-    'admin can deactivate a user and hand their clients on'
+    'admin can delete a user with history, handing their clients on'
   );
 
-  select is_active, deactivated_at into v_active, v_deactivated
-    from public.users where id = v_target;
-  return next ok(v_active = false and v_deactivated is not null,
-    'the account is inactive and marked as deactivated, not merely suspended');
+  select * into v_user from public.users where id = v_leaver;
+  return next ok(
+    v_user.id is not null
+      and v_user.full_name = 'Former member'
+      and v_user.email = 'redacted+' || v_leaver::text || '@invalid'
+      and v_user.deleted_at is not null
+      and not v_user.is_active,
+    'the account with history is redacted in public.users and its row kept'
+  );
+
+  select count(*) into v_count
+    from auth.users
+   where id = v_leaver
+     and email = 'redacted+' || v_leaver::text || '@invalid'
+     and raw_user_meta_data = '{}'::jsonb
+     and banned_until = 'infinity';
+  return next is(v_count, 1::bigint, 'the auth schema copy is redacted too (Annex A.1)');
+
+  select count(*) into v_count from auth.sessions where user_id = v_leaver;
+  return next is(v_count, 0::bigint, 'deletion revoked their sessions');
+
+  select count(*) into v_count from auth.identities where user_id = v_leaver;
+  return next is(v_count, 0::bigint, 'their auth identities, which carry the email, are gone');
 
   select owner_id into v_owner from public.organisations where id = v_org;
-  return next is(v_owner, v_cam_a,
-    'the owned client moved to the named CAM in the same transaction');
+  return next is(v_owner, v_taker, 'the client moved to the named CAM in the same transaction');
 
-  select count(*) into v_count from auth.sessions where user_id = v_target;
-  return next is(v_count, 0::bigint,
-    'deactivation revoked the offboarded user''s sessions');
+  select author_id into v_owner from public.notes where id = v_note;
+  return next is(v_owner, v_leaver, 'the note keeps its author: history is not rewritten');
 
-  -- AC3/AC4: deactivation is not deletion. The row survives, and so does the trail.
-  select count(*) into v_count from public.users where id = v_target;
-  return next is(v_count, 1::bigint, 'the user row is not deleted');
+  select count(*) into v_count
+    from public.audit_log
+   where action = 'user_deleted' and target_id = v_leaver and detail->>'mode' = 'redacted';
+  return next is(v_count, 1::bigint, 'one user_deleted audit row, recording the redaction');
 
-  if tests.tables_exist('audit_log') then
-    select count(*) into v_count
-      from public.audit_log
-     where action = 'user_deactivated' and target_id = v_target;
-    return next is(v_count, 1::bigint,
-      'exactly one user_deactivated audit row, and only for the successful attempt');
-
-    select count(*) into v_count
-      from public.audit_log
-     where action = 'ownership_reassigned'
-       and target_table = 'organisations'
-       and target_id = v_org
-       and detail->>'reason' = 'left the society';
-    return next is(v_count, 1::bigint,
-      'the client handover is audited against the organisation, carrying the reason');
-  else
-    return next skip(2, 'audit_log not yet migrated');
-  end if;
-
-  -- Pressing the button twice does not produce a second audit row or a second sweep.
+  -- 16–20: irreversible.
   return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, null, false)', v_target, 'again')),
+    tests.sqlstate_of(v_admin, format('select public.delete_user(%L, %L)', v_leaver, 'again')),
     null,
-    'deactivating an already-deactivated user is a no-op, not an error'
+    'deleting an already-deleted user is a no-op, not an error'
   );
-
-  -- Reactivation has to clear the marker or the constraint rejects it outright. This
-  -- is the assertion that would have caught shipping F014 without amending F013.
+  select count(*) into v_count
+    from public.audit_log where action = 'user_deleted' and target_id = v_leaver;
+  return next is(v_count, 1::bigint, 'the repeat wrote no second audit row');
   return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.set_user_active(%L, true)', v_target)),
-    null,
-    'a deactivated user can be reactivated'
+    tests.sqlstate_of(v_admin, format('select public.set_user_active(%L, true)', v_leaver)),
+    '22023',
+    'a deleted account cannot be reactivated'
   );
-  select deactivated_at into v_deactivated from public.users where id = v_target;
-  return next is(v_deactivated, null::timestamptz,
-    'reactivation clears the deactivation marker');
-
-  -- The illegal combination is forbidden by the database, not by the RPCs. Asserted as
-  -- the table owner, which is the only role that could ever write the column directly.
+  return next is(
+    tests.sqlstate_of(v_admin, format('select public.set_user_role(%L, ''admin'')', v_leaver)),
+    '22023',
+    'a deleted account''s role cannot be changed'
+  );
   return next throws_ok(
-    format('update public.users set deactivated_at = now() where id = %L', v_cam_a),
+    format('update public.users set deleted_at = now() where id = %L', v_taker),
     '23514',
     null,
-    'an active user cannot carry a deactivation timestamp'
+    'an active account cannot carry a deletion timestamp'
   );
 
-  -- The other destination PRD §6.12 allows: back to the unowned pool.
-  update public.organisations set owner_id = v_target where id = v_org;
+  -- 21–24: a user with no history is removed outright.
   return next is(
-    tests.sqlstate_of(v_admin, format(
-      'select public.deactivate_user(%L, %L, null, true)', v_target, 'released')),
+    tests.sqlstate_of(v_admin, format('select public.delete_user(%L, %L)', v_clean, 'never used it')),
     null,
-    'clients can be released to the unowned pool instead of being reassigned'
+    'admin can delete a user with no history'
   );
-  select owner_id into v_owner from public.organisations where id = v_org;
-  return next is(v_owner, null::uuid,
-    'the released client is unowned and claimable by any CAM'
+  select count(*) into v_count from public.users where id = v_clean;
+  return next is(v_count, 0::bigint, 'the account without history is physically deleted');
+  select count(*) into v_count from auth.users where id = v_clean;
+  return next is(v_count, 0::bigint, 'and so is its auth user');
+  select count(*) into v_count
+    from public.audit_log
+   where action = 'user_deleted' and target_id = v_clean and detail->>'mode' = 'deleted';
+  return next is(v_count, 1::bigint, 'the audit row outlives the account it describes');
+
+  -- 25: the redacted user's address is free, so the same person can be invited again.
+  return next lives_ok(
+    $sql$insert into auth.users (id, instance_id, aud, role, email)
+         values (gen_random_uuid(), '00000000-0000-0000-0000-000000000000',
+                 'authenticated', 'authenticated', 'delete-leaver@180dc.org')$sql$,
+    'a deleted member''s email address can hold a new account'
   );
 
-  -- Leave the fixture as it was found: later suites share this transaction. Restored
-  -- with plain SQL rather than the RPCs — those self-check app.is_admin(), which reads
-  -- auth.uid(), and here there is no signed-in user to be an admin.
-  update public.users
-     set is_active = false, deactivated_at = null
-   where id = v_target;
-  delete from public.organisations where id = v_org;
+  -- 26–27: matrix §6 gap 7. delete_user writes is_active, so it takes the guard.
+  return next is(
+    tests.sqlstate_of(v_admin, format('select public.delete_user(%L, %L)', v_admin2, 'second admin')),
+    null,
+    'admin deleting a second admin still succeeds while another admin remains'
+  );
+  select count(*) into v_count
+    from public.users where id in (v_admin, v_admin2) and role = 'admin' and is_active;
+  return next is(v_count, 1::bigint, 'exactly one of the two admins remains active (never zero)');
 end;
 $$;
 
@@ -1159,7 +1050,7 @@ begin
   return next ok(not v_is_viewer, 'app.is_viewer() is false for a CAM');
 
   if not tests.tables_exist('organisations') then
-    return next skip(6, 'step 3 create_organisations not yet migrated');
+    return next skip(7, 'step 3 create_organisations not yet migrated');
     return;
   end if;
 
@@ -1205,6 +1096,23 @@ begin
   select count(*) into v_count from public.organisations where id = v_org;
   return next is(v_count, 1::bigint, 'viewer cannot delete an organisation');
 
+  -- F065 (bulk add comment) authorises nothing of its own: the route inserts as
+  -- the signed-in user, so `notes_insert_author`'s can_write() is what keeps a
+  -- viewer out. Asserted here rather than trusted to the UI hiding the control,
+  -- because the route is reachable without it. Guarded separately from the block
+  -- above since notes arrives a migration step after organisations.
+  if tests.tables_exist('notes') then
+    return next is(
+      tests.sqlstate_of(v_viewer, format(
+        'insert into public.notes (organisation_id, author_id, content)
+         values (%L, %L, ''viewer comment'')', v_org, v_viewer)),
+      '42501',
+      'viewer cannot add a note to a client (F065 bulk comment is closed to viewers)'
+    );
+  else
+    return next skip(1, 'step 4 create_org_children not yet migrated');
+  end if;
+
   -- Regression guard on the same policy: narrowing it to admin-or-CAM must not have
   -- taken the CAM's claim path with it. Since F162 (20260806140000) that path is
   -- claim_organisation(), not a direct UPDATE — suite_claim_ownership covers it in
@@ -1246,7 +1154,7 @@ begin
   end if;
 
   if not tests.tables_exist('ingestion_runs', 'raw_source_records') then
-    return next skip(8, 'step 6 create_ingestion not yet migrated');
+    return next skip(10, 'step 6 create_ingestion not yet migrated');
     return;
   end if;
 
@@ -1264,7 +1172,8 @@ begin
     (v_record, v_run, 'companies_house', '00000001', '{"company_number":"00000001"}'::jsonb, 'deadbeef')
   on conflict (id) do nothing;
 
-  -- SELECT: admin yes, everyone else no.
+  -- SELECT on runs: admin and CAM (the Data imports group is theirs too), viewer no.
+  -- SELECT on raw payloads: admin only (SOP §4.3).
   perform tests.login_as(v_admin);
   select count(*) into v_count from public.ingestion_runs where id = v_run;
   execute 'reset role';
@@ -1279,16 +1188,33 @@ begin
     'admin reads raw source records the CAM cannot');
 
   perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.ingestion_runs where id = v_run;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'CAM reads ingestion runs');
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.raw_source_records;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM sees zero raw source records');
+
+  -- Leadership (viewer) reads what an admin reads — 20261004180000, Q-06 revised.
+  -- Compared against the unfiltered count so the assertion cannot pass on an
+  -- empty table.
+  perform tests.login_as(v_viewer);
   select count(*) into v_count from public.ingestion_runs;
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
-  return next is(v_count, 0::bigint, 'CAM sees zero ingestion runs');
+  return next is(v_count, (select count(*) from public.ingestion_runs),
+    'viewer (leadership) reads every ingestion run, as an admin does');
 
   perform tests.login_as(v_viewer);
   select count(*) into v_count from public.raw_source_records;
   execute 'reset role';
   perform set_config('request.jwt.claims', null, true);
-  return next is(v_count, 0::bigint, 'viewer sees zero raw source records');
+  return next is(v_count, (select count(*) from public.raw_source_records),
+    'viewer (leadership) reads every raw source record, as an admin does');
 
   -- INSERT on ingestion_runs is admin-only, so a CAM triggering a run is refused.
   v_state := tests.sqlstate_of(v_cam_a,
@@ -1561,8 +1487,14 @@ declare
   v_action_a    uuid := '00000000-0000-4000-c000-000000000001';
   v_act_mine    uuid := '00000000-0000-4000-c000-000000000021';
   v_act_theirs  uuid := '00000000-0000-4000-c000-000000000022';
+  v_team_task   uuid := '00000000-0000-4000-c000-000000000023';
   v_assignee    uuid;
   v_status      public.action_status;
+  v_completed_at timestamptz;
+  v_completed_by uuid;
+  v_priority    smallint;
+  v_title       text;
+  v_updated_at  timestamptz;
   v_count       bigint;
 begin
   if not tests.tables_exist('actions', 'organisations', 'users') then
@@ -1617,14 +1549,43 @@ begin
     'admin can assign an action to a CAM on any client'
   );
 
-  -- F171: the assignee closes their own item. status and completed_at move together
-  -- or the check constraint rejects the write.
-  perform tests.sqlstate_of(v_cam_a, format(
-    'update public.actions set status = ''completed'', completed_at = now() where id = %L',
-    v_action_a));
+  -- F171 (20260914090000): completion goes through the audited complete_action RPC,
+  -- never a direct UPDATE — status/completed_at carry no authenticated UPDATE grant
+  -- anymore, so the direct write is refused and the row stays open.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.actions set status = ''completed'', completed_at = now() where id = %L',
+      v_action_a)),
+    '42501',
+    'status/completed_at are RPC-only — direct UPDATE is closed (F171)'
+  );
   select status into v_status from public.actions where id = v_action_a;
+  return next is(v_status, 'open'::public.action_status,
+    'action still open after the refused direct write');
+
+  -- The assignee closes their own item through complete_action: status and
+  -- completed_at move together and the completer is recorded.
+  perform tests.login_as(v_cam_a);
+  perform public.complete_action(v_action_a);
+  select status, completed_at, completed_by_user_id
+    into v_status, v_completed_at, v_completed_by
+    from public.actions where id = v_action_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
   return next is(v_status, 'completed'::public.action_status,
-    'assignee can mark their own action complete (F171)');
+    'assignee can mark their own action complete (F171) via complete_action');
+  return next ok(v_completed_at is not null,
+    'complete_action sets completed_at');
+  return next is(v_completed_by, v_cam_a,
+    'complete_action records who completed it (F171 AC3)');
+  return next ok(
+    exists (
+      select 1 from public.audit_log
+       where target_table = 'actions' and target_id = v_action_a
+         and action = 'action_completed'
+    ),
+    'complete_action writes an action_completed audit_log row (F171 AC2)'
+  );
 
   -- The two that hold the F257 design up. A missing column privilege raises 42501
   -- regardless of the row policies, so this holds for admins too.
@@ -1675,6 +1636,132 @@ begin
   select count(*) into v_count from public.actions where id = v_act_theirs;
   return next is(v_count, 1::bigint,
     'CAM cannot delete an action they raised once it belongs to someone else');
+
+  -- Team tasks tracker: priority is stored compactly but edited only through
+  -- the audited admin RPC. Viewer and CAM controls are hidden in the app; these
+  -- refusals are the load-bearing backstop if either reaches the write anyway.
+  if to_regprocedure(
+       'public.update_team_task(uuid,text,text,date,smallint,uuid,timestamp with time zone)'
+     ) is null
+     or to_regprocedure(
+       'public.set_team_task_status(uuid,public.action_status,timestamp with time zone)'
+     ) is null then
+    return next skip(13, 'Team tasks tracker RPCs not yet migrated');
+    return;
+  end if;
+
+  insert into public.actions
+    (id, organisation_id, assignee_user_id, created_by_user_id, title)
+  values
+    (v_team_task, v_org_cam_a, v_cam_a, v_admin, 'Prepare the renewal pack');
+
+  select priority, updated_at
+    into v_priority, v_updated_at
+    from public.actions where id = v_team_task;
+  return next is(v_priority, 2::smallint,
+    'existing writers get Normal priority by default');
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'update public.actions set priority = 1 where id = %L', v_team_task)),
+    '42501',
+    'admin cannot change task priority by direct write — the audited RPC is required'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.update_team_task(%L, %L, null, null, 1::smallint, %L, %L)',
+      v_team_task, 'CAM edit', v_cam_b, v_updated_at)),
+    '42501',
+    'CAM cannot use the Team tasks edit RPC'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.update_team_task(%L, %L, null, null, 1::smallint, %L, %L)',
+      v_team_task, 'Viewer edit', v_cam_b, v_updated_at)),
+    '42501',
+    'viewer cannot use the Team tasks edit RPC'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.update_team_task(%L, %L, %L, %L, 1::smallint, %L, %L)',
+      v_team_task, 'Prepare and send the renewal pack', 'Include the revised figures',
+      '2026-10-01', v_cam_b, v_updated_at)),
+    null,
+    'admin can edit and reassign a team task through the RPC'
+  );
+
+  select title, priority, assignee_user_id, updated_at
+    into v_title, v_priority, v_assignee, v_updated_at
+    from public.actions where id = v_team_task;
+  return next ok(
+    v_title = 'Prepare and send the renewal pack'
+      and v_priority = 1
+      and v_assignee = v_cam_b,
+    'the Team tasks edit RPC changes the requested fields together'
+  );
+  return next ok(
+    exists (
+      select 1 from public.audit_log
+       where target_table = 'actions' and target_id = v_team_task
+         and action = 'action_updated'
+    ) and exists (
+      select 1 from public.audit_log
+       where target_table = 'actions' and target_id = v_team_task
+         and action = 'action_reassigned'
+    ),
+    'editing and reassigning a team task records both audit events'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.update_team_task(%L, %L, null, null, 2::smallint, %L, %L)',
+      v_team_task, 'Stale edit', v_cam_a, v_updated_at - interval '1 second')),
+    '40001',
+    'a stale team task edit is refused instead of overwriting newer work'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.set_team_task_status(%L, ''cancelled'', %L)',
+      v_team_task, v_updated_at)),
+    '42501',
+    'viewer cannot change a team task status'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_team_task_status(%L, ''cancelled'', %L)',
+      v_team_task, v_updated_at)),
+    null,
+    'admin can cancel a team task through the audited RPC'
+  );
+  select status, updated_at into v_status, v_updated_at
+    from public.actions where id = v_team_task;
+  return next is(v_status, 'cancelled'::public.action_status,
+    'the cancelled task remains on record');
+
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.set_team_task_status(%L, ''open'', %L)',
+      v_team_task, v_updated_at)),
+    null,
+    'admin can restore a cancelled task to Open from the same screen'
+  );
+  return next ok(
+    exists (
+      select 1 from public.audit_log
+       where target_table = 'actions' and target_id = v_team_task
+         and action = 'action_cancelled'
+    ) and exists (
+      select 1 from public.audit_log
+       where target_table = 'actions' and target_id = v_team_task
+         and action = 'action_reopened'
+    ),
+    'cancel and restore each leave an audit event'
+  );
 end;
 $$;
 
@@ -2081,7 +2168,7 @@ declare
 begin
   if not tests.tables_exist('organisations', 'users', 'audit_log')
      or to_regprocedure('public.set_outreach_status(uuid, public.outreach_status)') is null then
-    return next skip(15, 'set_outreach_status RPC not yet migrated');
+    return next skip(17, 'set_outreach_status RPC not yet migrated');
     return;
   end if;
 
@@ -2184,6 +2271,25 @@ begin
     'authenticated holds no direct UPDATE privilege on organisations.outreach_status'
   );
 
+  -- F147 testing notes ("invalid transition"): with no transition-rule table
+  -- (deliberate — a CAM who mislabels a client must be able to take it back,
+  -- and the audit_log trail is the safety measure), "invalid" means a value
+  -- outside the enum, and an attempted end-run around the RPC.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.set_outreach_status(%L, ''definitely_not_a_status'')', v_org_cam_a)),
+    '22P02',
+    'a status value outside the outreach_status enum is rejected outright'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set outreach_status = ''responded'' where id = %L',
+      v_org_cam_a)),
+    '42501',
+    'the owning CAM still cannot bypass the RPC with a direct column write'
+  );
+
   return next ok(
     not has_function_privilege(
       'anon', 'public.set_outreach_status(uuid, public.outreach_status)', 'EXECUTE'),
@@ -2193,12 +2299,14 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- deactivate_user and reassign_ownership are one path (F014 + F257)
+-- Offboarding handovers move clients and open work together (F014 + F257)
 -- ---------------------------------------------------------------------------
--- Regression suite for 20260804170000. Before that migration deactivate_user moved
--- organisations.owner_id itself and never touched public.actions, so offboarding
--- stranded every open action on a closed account. Uses its own identities: the shared
--- fixture users are deactivated by other suites in this same transaction.
+-- Regression suite for 20260804170000, now exercised through suspend_user (which
+-- replaced deactivate_user in 20261002094000 and shares its handover). Before
+-- 20260804170000 the offboarding path moved organisations.owner_id itself and never
+-- touched public.actions, stranding every open action on a closed account. Uses its
+-- own identities: the shared fixture users are changed by other suites in this same
+-- transaction.
 
 create or replace function tests.suite_offboard_unified()
 returns setof text language plpgsql as $$
@@ -2217,8 +2325,8 @@ declare
   v_count    bigint;
 begin
   if not tests.tables_exist('actions', 'organisations', 'users', 'audit_log')
-     or to_regprocedure('public.deactivate_user(uuid, text, uuid, boolean)') is null then
-    return next skip(12, 'deactivate_user or actions not yet migrated');
+     or to_regprocedure('public.suspend_user(uuid, text, uuid, boolean)') is null then
+    return next skip(12, 'suspend_user or actions not yet migrated');
     return;
   end if;
 
@@ -2272,27 +2380,27 @@ begin
   end if;
 
   perform tests.sqlstate_of(v_admin, format(
-    'select public.deactivate_user(%L, ''left the society'', %L, false)',
+    'select public.suspend_user(%L, ''left the society'', %L, false)',
     v_leaver, v_taker));
 
   select owner_id into v_owner from public.organisations where id = v_org_own;
-  return next is(v_owner, v_taker, 'deactivation moves the leaver''s client to the successor');
+  return next is(v_owner, v_taker, 'the handover moves the leaver''s client to the successor');
 
   -- The regression. This assertion fails against the pre-20260804170000 function.
   select assignee_user_id into v_assignee from public.actions where id = v_act_own;
   return next is(v_assignee, v_taker,
-    'deactivation moves the open action on that client, not just the client');
+    'the handover moves the open action on that client, not just the client');
 
   select assignee_user_id into v_assignee from public.actions where id = v_act_stray;
   return next is(v_assignee, v_taker,
-    'deactivation also moves admin-assigned work on someone else''s client');
+    'the handover also moves admin-assigned work on someone else''s client');
 
   select owner_id into v_owner from public.organisations where id = v_org_else;
   return next is(v_owner, v_other,
     'the other CAM''s client is not seized while moving work off it');
 
   select is_active into v_active from public.users where id = v_leaver;
-  return next is(v_active, false, 'the leaver is deactivated in the same transaction');
+  return next is(v_active, false, 'the leaver is suspended in the same transaction');
 
   select count(*) into v_count
     from public.audit_log
@@ -2375,13 +2483,15 @@ declare
   v_status      public.suppression_status;
   v_decided_by  uuid;
   v_requested_by uuid;
+  v_reason      text;
   v_count       bigint;
   v_can_contact boolean;
 begin
   if not tests.tables_exist('organisations', 'users', 'audit_log', 'suppressions')
      or to_regprocedure('public.request_suppression(uuid, text)') is null
-     or to_regprocedure('public.decide_suppression_request(uuid, boolean, text)') is null then
-    return next skip(23, 'suppressions table or RPCs not yet migrated');
+     or to_regprocedure('public.decide_suppression_request(uuid, boolean, text)') is null
+     or to_regprocedure('public.lift_suppression(uuid, text)') is null then
+    return next skip(32, 'suppressions table or RPCs not yet migrated');
     return;
   end if;
 
@@ -2544,6 +2654,58 @@ begin
     'an admin''s own request lands active immediately, skipping pending');
   return next is(v_requested_by, v_admin, 'requested_by is the admin');
   return next is(v_decided_by, v_admin, 'decided_by is the same admin — self-approved');
+
+  -- F185 Remove Suppression (#181)
+  -- Non-admin cannot call lift_suppression
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.lift_suppression(%L, ''cam trying to unsuppress'')', v_req_id)),
+    '42501',
+    'CAM cannot call lift_suppression'
+  );
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.lift_suppression(%L, ''viewer trying to unsuppress'')', v_req_id)),
+    '42501',
+    'viewer cannot call lift_suppression'
+  );
+
+  -- Blank reason is rejected
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.lift_suppression(%L, ''   '')', v_req_id)),
+    '23514',
+    'blank reason for lifting suppression is rejected'
+  );
+
+  -- Admin lifts the active suppression with a valid reason
+  perform tests.login_as(v_admin);
+  perform public.lift_suppression(v_req_id, 'Mistakenly flagged by CAM, re-contact approved');
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status, decided_by, decision_note into v_status, v_decided_by, v_reason
+    from public.suppressions where id = v_req_id;
+  return next is(v_status, 'lifted'::public.suppression_status,
+    'lifting suppression moves status to lifted');
+  return next is(v_decided_by, v_admin, 'decided_by is updated to the lifting admin');
+  return next is(v_reason, 'Mistakenly flagged by CAM, re-contact approved',
+    'decision_note records the mandatory lift reason');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'suppression_lifted' and target_id = v_org_unowned;
+  return next is(v_count, 1::bigint, 'lifting writes one suppression_lifted audit row');
+
+  select app.organisation_is_suppressed(v_org_unowned) into v_can_contact;
+  return next is(v_can_contact, false,
+    'organisation is no longer considered suppressed after lifting');
+
+  perform tests.login_as(v_admin);
+  select app.can_contact_organisation(v_org_unowned) into v_can_contact;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_can_contact, true,
+    'lifting suppression re-enables outreach via app.can_contact_organisation()');
 end;
 $$;
 
@@ -2719,6 +2881,134 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- saved filter views (F066) — own rows only, matrix §3.17
+-- ---------------------------------------------------------------------------
+-- The property this table hangs on: a saved view is private to its author. It holds
+-- no client data, so the interesting failures are not "who can read a charity" but
+-- "can one CAM see, plant, or delete another CAM's shortcuts" — and, because the
+-- filter set lives in jsonb, "can a row hold something that is not a filter set".
+
+create or replace function tests.suite_saved_views()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_count       bigint;
+begin
+  if not tests.tables_exist('saved_views') then
+    return next skip(11, 'F066 saved views not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name, filters) values (%L, %L, %L::jsonb)',
+      v_cam_a, 'Leeds prospects', '{"city":["Leeds"]}')),
+    null,
+    'a CAM saves their own filter view'
+  );
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'a CAM sees their own saved views');
+
+  -- Unforgeable ownership: the insert policy's with-check is what stops a view being
+  -- planted in someone else's list.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name, filters) values (%L, %L, %L::jsonb)',
+      v_cam_b, 'Not mine', '{}')),
+    '42501',
+    'a CAM cannot save a view onto another CAM'
+  );
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a CAM cannot read another CAM''s saved views');
+
+  -- Admins are deliberately not granted a read. F187 (admin views a CAM's settings)
+  -- can add one with a stated reason; until then this asserts the absence is
+  -- intentional rather than forgotten — same call as §3.12 and §3.13.
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'an admin has no read on saved views until F187 asks for one');
+
+  -- A blocked DELETE removes zero rows and raises nothing (§4), so the assertion is
+  -- that the row survives someone else trying.
+  perform tests.login_as(v_cam_b);
+  delete from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.saved_views where user_id = v_cam_a;
+  return next is(v_count, 1::bigint, 'a CAM cannot delete another CAM''s saved view');
+
+  -- An admin has no delete either: a purely destructive power over another user's
+  -- workspace, with no story asking for it.
+  perform tests.login_as(v_admin);
+  delete from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.saved_views where user_id = v_cam_a;
+  return next is(v_count, 1::bigint, 'an admin cannot delete a CAM''s saved view');
+
+  -- Deactivation bites immediately: every policy ANDs in app.is_active_user(), so a
+  -- suspended account's own views stop being readable without any row being touched.
+  perform tests.login_as(v_deactivated);
+  select count(*) into v_count from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a deactivated user reads no saved views');
+
+  -- Column constraints, which are what stop a nameless or unusable row existing at
+  -- all. The server action turns each of these into a form message rather than a
+  -- 500, but the table refuses them whatever calls it.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name) values (%L, %L)',
+      v_cam_a, 'Leeds prospects')),
+    '23505',
+    'two views by one name cannot exist for the same CAM'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name) values (%L, %L)',
+      v_cam_a, '   ')),
+    '23514',
+    'a blank name is refused by the table, not just by the form'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.saved_views (user_id, name, filters) values (%L, %L, %L::jsonb)',
+      v_cam_a, 'Array filters', '["city"]')),
+    '23514',
+    'filters must be an object, not any old json'
+  );
+
+  -- AC3: the author can remove one they no longer need. Last, so the rows above are
+  -- still standing for the assertions that need them.
+  perform tests.login_as(v_cam_a);
+  delete from public.saved_views;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.saved_views where user_id = v_cam_a;
+  return next is(v_count, 0::bigint, 'a CAM deletes their own saved view');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- client criteria review persistence (F047)
 -- ---------------------------------------------------------------------------
 
@@ -2843,10 +3133,12 @@ declare
   v_admin_org uuid;
   v_created_org uuid;
   v_linked_org uuid;
+  v_size_entry uuid;
+  v_size_org uuid;
   v_count bigint;
 begin
   if not tests.tables_exist('manual_entry_records', 'users', 'audit_log') then
-    return next skip(21, 'F036 manual entry migration not yet applied');
+    return next skip(25, 'F036 manual entry migration not yet applied');
     return;
   end if;
   perform tests.seed();
@@ -2930,14 +3222,14 @@ begin
 
   return next is(
     tests.sqlstate_of(v_cam_a, format(
-      'select public.approve_manual_entry(%L, false, ''create_new'', null, null)',
+      'select public.approve_manual_entry(%L, ''create_new'', false, null, null)',
       v_approval_entry
     )),
     '42501', 'CAM cannot call the manual approval RPC');
 
   perform tests.login_as(v_admin);
   select public.approve_manual_entry(
-    v_approval_entry, false, 'create_new', null, 'Meets the target criteria'
+    v_approval_entry, 'create_new', false, null, 'Meets the target criteria'
   ) into v_created_org;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
   return next ok(v_created_org is not null, 'admin can approve a distinct manual entry');
@@ -2967,25 +3259,67 @@ begin
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
   return next is(v_count, 1::bigint, 'manual source identifies the creating CAM to active users');
 
+  -- 20261002095000: sector, reach and size. A size figure needs the accounts
+  -- year end it belongs to, and approval carries all three onto the client.
+  return next is(
+    tests.sqlstate_of(v_cam_a, $query$
+      select public.save_manual_entry(
+        null, 'Size Without Year', null, null, null, null, null, 'GB',
+        null, null, null, null, null, false,
+        null, null, 50000, null, null, null
+      )
+    $query$),
+    '22023', 'a size figure without its accounts year end is refused');
+
+  perform tests.login_as(v_cam_a);
+  select public.save_manual_entry(
+    null, 'Sized F036 Charity', 'Runs youth clubs across Sheffield.', 'charity',
+    '5 Size Street', 'Sheffield', 'S1 5ZZ', 'GB', 'https://sized.example.org',
+    'hello@sized.example.org', 'Charity Commission', 'F036-SIZE',
+    'Not in the register files we hold', true,
+    'Youth & Children', 'local', 250000, date '2026-03-31', 12, 40
+  ) into v_size_entry;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next ok(v_size_entry is not null, 'a submission can carry sector, reach and size');
+
+  perform tests.login_as(v_admin);
+  select public.approve_manual_entry(
+    v_size_entry, 'create_new', false, null, null
+  ) into v_size_org;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  select count(*) into v_count
+    from public.organisations
+   where id = v_size_org and sector = 'Youth & Children' and geographic_reach = 'local';
+  return next is(v_count, 1::bigint, 'approval carries sector and reach onto the client');
+
+  select count(*) into v_count
+    from public.financial_periods
+   where organisation_id = v_size_org and financial_source = 'manual'
+     and period_start = date '2025-04-01' and period_end = date '2026-03-31'
+     and total_income = 250000 and income_band = '100k_1m'
+     and count_employees = 12 and count_volunteers = 40;
+  return next is(v_count, 1::bigint, 'approval files the size as one manual financial period');
+
   perform tests.login_as(v_cam_b);
   select public.save_manual_entry(
     null, 'Unique F036 Charity Limited', 'Provides related community services.', 'charity',
     '20 Example Road', 'Sheffield', 'S2 3CD', 'GB', 'https://duplicate.example.org',
-    'duplicate@example.org', 'Charity Commission', 'F036-002',
+    'info@duplicate.example.org', 'Charity Commission', 'F036-002',
     'Submitted independently for duplicate review', true
   ) into v_duplicate_entry;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
 
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.approve_manual_entry(%L, false, ''create_new'', %L, null)',
+      'select public.approve_manual_entry(%L, ''create_new'', false, %L, null)',
       v_duplicate_entry, v_created_org
     )),
     '22023', 'a likely duplicate cannot become a second client without a human explanation');
 
   perform tests.login_as(v_admin);
   select public.approve_manual_entry(
-    v_duplicate_entry, false, 'link_existing', v_created_org,
+    v_duplicate_entry, 'link_existing', false, v_created_org,
     'Same organisation despite the formatting difference'
   ) into v_linked_org;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
@@ -2995,28 +3329,28 @@ begin
   select public.save_manual_entry(
     null, 'Unconfirmed Social Company', 'Develops socially focused services.', 'company',
     '30 Example Lane', 'Sheffield', 'S3 4EF', 'GB', 'https://social.example.org',
-    'social@example.org', 'Companies House', 'F036-COMPANY',
+    'info@social.example.org', 'Companies House', 'F036-COMPANY',
     'May be a socially focused organisation', true
   ) into v_company_entry;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
 
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.approve_manual_entry(%L, true, null, null, null)',
+      'select public.approve_manual_entry(%L, null, true, null, null)',
       v_company_entry
     )),
     '22023', 'a null duplicate decision cannot bypass the approval decision');
 
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.approve_manual_entry(%L, null, ''create_new'', null, null)',
+      'select public.approve_manual_entry(%L, ''create_new'', null, null, null)',
       v_company_entry
     )),
     '22023', 'a null eligibility confirmation cannot bypass F047');
 
   return next is(
     tests.sqlstate_of(v_admin, format(
-      'select public.approve_manual_entry(%L, false, ''create_new'', null, null)',
+      'select public.approve_manual_entry(%L, ''create_new'', false, null, null)',
       v_company_entry
     )),
     '22023', 'ambiguous company cannot bypass the F047 human eligibility decision');
@@ -3029,7 +3363,7 @@ begin
     'Added directly by an administrator', true
   ) into v_admin_entry;
   select public.approve_manual_entry(
-    v_admin_entry, false, 'create_new', null, 'Submitted and self-approved by admin'
+    v_admin_entry, 'create_new', false, null, 'Submitted and self-approved by admin'
   ) into v_admin_org;
   execute 'reset role'; perform set_config('request.jwt.claims', null, true);
   select count(*) into v_count from public.manual_entry_records
@@ -3201,6 +3535,2255 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------------
+-- F246: data handling rules — RLS, the two write RPCs, and the audit trail
+-- ---------------------------------------------------------------------------
+-- These rules decide what personal data the platform is allowed to store, so the
+-- interesting claims are all about who may change them. The node tests in
+-- src/lib/ingestion cover the filtering itself, but they run through a
+-- service_role client, which bypasses RLS — they cannot prove any of this.
+
+create or replace function tests.suite_data_handling_rules()
+returns setof text language plpgsql as $$
+declare
+  v_admin        uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam          uuid := '00000000-0000-4000-a000-000000000002';
+  v_viewer       uuid := '00000000-0000-4000-a000-000000000005';
+  v_dead_admin   uuid := '00000000-0000-4000-a000-000000000006';
+  v_backdated    timestamptz := timestamptz '2000-01-01';
+  v_rule_id      uuid;
+  v_count        bigint;
+  v_version_before integer;
+  v_version_after  integer;
+  v_audit_before bigint;
+begin
+  if not tests.tables_exist('data_handling_rules', 'data_handling_rule_versions', 'audit_log') then
+    return next skip(1, 'step 22.7 create_data_handling_rules not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- A deactivated *admin*, which the shared fixture does not have. Without one,
+  -- the is_active_user() branch of both RPCs is never exercised: the deactivated
+  -- CAM fails the is_admin() check first and the test would pass for the wrong
+  -- reason.
+  insert into auth.users (id, instance_id, aud, role, email)
+  values (v_dead_admin, '00000000-0000-0000-0000-000000000000',
+          'authenticated', 'authenticated', 'ex-admin@180dc.org')
+  on conflict (id) do nothing;
+  insert into public.users (id, email, full_name, role, is_active, created_at, updated_at)
+  values (v_dead_admin, 'ex-admin@180dc.org', 'Deactivated Admin', 'admin', false, v_backdated, v_backdated)
+  on conflict (id) do update
+    set role = excluded.role, is_active = excluded.is_active;
+
+  -- -- Reads -----------------------------------------------------------------
+  -- The rules name the fields the platform refuses to hold. That list is an
+  -- admin concern; a CAM has no reason to see it and no way to act on it.
+
+  perform tests.login_as(v_cam);
+  select count(*) into v_count from public.data_handling_rules;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM cannot read the data handling rules');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.data_handling_rules;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, (select count(*) from public.data_handling_rules),
+    'viewer (leadership) reads the data handling rules, as an admin does');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.data_handling_rules;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next ok(v_count > 0, 'admin can read the data handling rules');
+
+  perform tests.login_as(v_cam);
+  select count(*) into v_count from public.data_handling_rule_versions;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM cannot read the rule version singleton');
+
+  -- -- Direct writes are closed off entirely -----------------------------------
+  -- There is no INSERT/UPDATE/DELETE policy for authenticated on either table, so
+  -- even an admin has to go through the RPCs. That is what keeps the audit write
+  -- and the version bump from being optional.
+
+  return next ok(
+    not has_table_privilege('authenticated', 'public.data_handling_rules', 'INSERT'),
+    'authenticated holds no INSERT privilege on data_handling_rules'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.data_handling_rules', 'DELETE'),
+    'authenticated holds no DELETE privilege on data_handling_rules'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.data_handling_rule_versions', 'UPDATE'),
+    'authenticated cannot bump the rule version directly'
+  );
+
+  return next isnt(
+    tests.sqlstate_of(v_admin,
+      'insert into public.data_handling_rules (rule_version, field_path, action, reason) ' ||
+      'values (99, ''smuggled'', ''deny'', ''bypassing the RPC'')'),
+    null,
+    'even an admin cannot insert a rule directly, bypassing the audit trail'
+  );
+
+  -- -- create_data_handling_rule ----------------------------------------------
+
+  return next is(
+    tests.sqlstate_of(v_cam,
+      'select public.create_data_handling_rule(''companies_house'', ''sneaky[*].path'', ''deny'', ''CAM attempt'')'),
+    'P0001',
+    'CAM cannot create a data handling rule'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_dead_admin,
+      'select public.create_data_handling_rule(''companies_house'', ''sneaky[*].path'', ''deny'', ''deactivated attempt'')'),
+    'P0001',
+    'a deactivated admin cannot create a data handling rule'
+  );
+
+  -- State, not just SQLSTATE: a raise that happened after the insert would still
+  -- report P0001 while leaving the row behind.
+  select count(*) into v_count
+    from public.data_handling_rules where field_path = 'sneaky[*].path';
+  return next is(v_count, 0::bigint,
+    'no rule survives the blocked create attempts');
+
+  -- A reason is mandatory — the rules are a compliance record, and one without a
+  -- stated justification is not reviewable by anyone later.
+  return next is(
+    tests.sqlstate_of(v_admin,
+      'select public.create_data_handling_rule(''companies_house'', ''some[*].path'', ''deny'', '''')'),
+    'P0001',
+    'a rule cannot be created without a reason'
+  );
+
+  select current_version into v_version_before from public.data_handling_rule_versions where id = true;
+  select count(*) into v_audit_before from public.audit_log where action = 'data_handling_rule_created';
+
+  perform tests.login_as(v_admin);
+  select public.create_data_handling_rule(
+    'companies_house', 'pgtap[*].secret', 'deny', 'pgTAP fixture rule'
+  ) into v_rule_id;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next ok(v_rule_id is not null, 'admin can create a data handling rule');
+
+  select current_version into v_version_after from public.data_handling_rule_versions where id = true;
+  return next is(v_version_after, v_version_before + 1,
+    'creating a rule bumps the global rule version');
+
+  -- The version stamped on the rule is the one ingestion will report against the
+  -- records it filters, so it has to be the post-bump number.
+  return next is(
+    (select rule_version from public.data_handling_rules where id = v_rule_id),
+    v_version_after,
+    'the new rule carries the version it was created at');
+
+  return next is(
+    (select created_by from public.data_handling_rules where id = v_rule_id),
+    v_admin,
+    'the rule records the admin who created it');
+
+  return next is(
+    (select count(*) from public.audit_log
+      where action = 'data_handling_rule_created' and target_id = v_rule_id),
+    1::bigint,
+    'creating a rule writes exactly one audit_log entry');
+
+  return next is(
+    (select actor_user_id from public.audit_log
+      where action = 'data_handling_rule_created' and target_id = v_rule_id),
+    v_admin,
+    'the audit entry names the acting admin');
+
+  -- The detail payload is what a reviewer actually reads months later.
+  return next is(
+    (select detail->>'field_path' from public.audit_log
+      where action = 'data_handling_rule_created' and target_id = v_rule_id),
+    'pgtap[*].secret',
+    'the audit entry records which field the rule governs');
+  return next is(
+    (select detail->>'reason' from public.audit_log
+      where action = 'data_handling_rule_created' and target_id = v_rule_id),
+    'pgTAP fixture rule',
+    'the audit entry records the stated reason');
+
+  -- One active rule per (source, field_path). Without this an admin could stack
+  -- a deny and an allow on the same field and the outcome would depend on row order.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.create_data_handling_rule(''companies_house'', ''pgtap[*].secret'', ''allow'', ''duplicate'')')),
+    '23505',
+    'a second active rule for the same source and field_path is rejected'
+  );
+
+  -- -- set_data_handling_rule_active -------------------------------------------
+
+  return next is(
+    tests.sqlstate_of(v_cam, format(
+      'select public.set_data_handling_rule_active(%L, false, ''CAM attempt'')', v_rule_id)),
+    'P0001',
+    'CAM cannot deactivate a data handling rule'
+  );
+
+  return next is(
+    (select is_active from public.data_handling_rules where id = v_rule_id),
+    true,
+    'the rule is genuinely still active after the blocked attempt');
+
+  select current_version into v_version_before from public.data_handling_rule_versions where id = true;
+
+  perform tests.login_as(v_admin);
+  perform public.set_data_handling_rule_active(v_rule_id, false, 'no longer required');
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    (select is_active from public.data_handling_rules where id = v_rule_id),
+    false,
+    'admin can deactivate a rule');
+
+  select current_version into v_version_after from public.data_handling_rule_versions where id = true;
+  return next is(v_version_after, v_version_before + 1,
+    'deactivating a rule bumps the global rule version');
+
+  return next is(
+    (select count(*) from public.audit_log
+      where action = 'data_handling_rule_deactivated' and target_id = v_rule_id),
+    1::bigint,
+    'deactivating a rule writes an audit_log entry');
+
+  return next is(
+    (select detail->>'reason' from public.audit_log
+      where action = 'data_handling_rule_deactivated' and target_id = v_rule_id),
+    'no longer required',
+    'the deactivation audit entry records the reason given');
+
+  -- A no-op must stay a no-op. Bumping the version on an unchanged toggle would
+  -- invalidate every record stamped with the old one and trigger a pointless
+  -- re-ingestion of the entire table.
+  select current_version into v_version_before from public.data_handling_rule_versions where id = true;
+
+  perform tests.login_as(v_admin);
+  perform public.set_data_handling_rule_active(v_rule_id, false, 'again');
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  select current_version into v_version_after from public.data_handling_rule_versions where id = true;
+  return next is(v_version_after, v_version_before,
+    'toggling a rule to the state it already holds does not bump the version');
+
+  return next is(
+    (select count(*) from public.audit_log
+      where action = 'data_handling_rule_deactivated' and target_id = v_rule_id),
+    1::bigint,
+    'a no-op toggle writes no second audit entry');
+
+  -- Deactivating frees the (source, field_path) slot, so the policy can be
+  -- restated with a different action without deleting the history of the old one.
+  perform tests.login_as(v_admin);
+  select public.create_data_handling_rule(
+    'companies_house', 'pgtap[*].secret', 'allow', 'restated after review'
+  ) into v_rule_id;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next ok(v_rule_id is not null,
+    'the same field_path can be ruled on again once the old rule is inactive');
+
+  -- -- Read RPCs ---------------------------------------------------------------
+  -- These aggregate over raw_source_records, so they are SECURITY DEFINER and
+  -- carry their own admin check — without it they would be a way for any signed-in
+  -- user to read which fields the platform strips and how often.
+
+  return next is(
+    tests.sqlstate_of(v_cam, 'select * from public.data_handling_filter_summary()'),
+    'P0001',
+    'CAM cannot read the filter summary'
+  );
+  return next is(
+    tests.sqlstate_of(v_viewer, 'select * from public.data_handling_coverage()'),
+    null,
+    'viewer (leadership) reads data handling coverage'
+  );
+  return next is(
+    tests.sqlstate_of(v_dead_admin, 'select * from public.data_handling_coverage()'),
+    'P0001',
+    'a deactivated admin cannot read data handling coverage'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select * from public.data_handling_coverage()'),
+    null,
+    'admin can read data handling coverage'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- F247: personal data exclusion — role email allow-list and app.is_personal_email
+-- ---------------------------------------------------------------------------
+-- rule_kind and the two redact_* kinds live on data_handling_rules itself, so
+-- they're covered by suite_data_handling_rules() above via the same RPC. What's
+-- new here is the second table F247 adds — PERSONAL_EMAIL_ROLE_PARTS — and the
+-- SQL half of the email detector, app.is_personal_email, which the node tests in
+-- personal-data.test.ts cannot reach: they run through a service_role client,
+-- which bypasses RLS.
+
+-- ---------------------------------------------------------------------------
+-- F058/F059 (#482) — MODEL_VERSIONS + LATEST_SCORES (20260831200000).
+--
+-- The permission paths the CI coverage gate cannot see: read-all on
+-- latest_scores (including deactivated users, whose is_active_user() gate must
+-- bite), admin-only reads on model_versions, and — asserted as 42501 rather
+-- than by policy, since neither table carries interactive write grants at all —
+-- that nobody-but-service-role can write scores. A CAM who could upsert their
+-- way to a 1.0 would own the sort and filter these tables feed.
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_latest_scores()
+returns setof text language plpgsql as $$
+declare
+  v_admin      uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a      uuid := '00000000-0000-4000-a000-000000000002';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_org        uuid := '00000000-0000-4000-b000-000000000002'; -- CAM A Org Ltd
+  v_count      bigint;
+begin
+  if not tests.tables_exist('latest_scores', 'model_versions') then
+    return next skip(9, 'F058/F059 scoring tables not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Fixture: one scored client. Inserted as the suite owner (postgres), which is
+  -- exactly how the rescore path's service role writes it.
+  insert into public.latest_scores (organisation_id, priority_score, priority_band)
+  values (v_org, 0.82, 'high');
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.latest_scores;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'LATEST_SCORES is read-all: an active CAM sees scores');
+
+  -- The deactivation gate rides every read policy; here it is what stops a
+  -- suspended account from still reading the queue it was taken off.
+  perform tests.login_as(v_deactivated);
+  select count(*) into v_count from public.latest_scores;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a deactivated user cannot read LATEST_SCORES');
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      format('update public.latest_scores set priority_score = 1.0 where organisation_id = %L', v_org)),
+    '42501',
+    'no CAM can rewrite a persisted score'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      format('insert into public.latest_scores (organisation_id, priority_score, priority_band) values (%L, 1.0, ''high'')', '00000000-0000-4000-b000-000000000003')),
+    '42501',
+    'no CAM can plant a score row'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      format('delete from public.latest_scores where organisation_id = %L', v_org)),
+    '42501',
+    'no CAM can delete a score row'
+  );
+
+  -- Weights are gameable knowledge: admin-only read (§3.6), now with the
+  -- no-interactive-write deviation documented there.
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.model_versions;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_count >= 1::bigint, 'an admin can read MODEL_VERSIONS (SCOUT v1 seeded by migration)');
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.model_versions;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a CAM cannot read the model weights');
+
+  return next is(
+    tests.sqlstate_of(v_admin,
+      'insert into public.model_versions (model_name, version, implementation_type) values (''SCOUT'', ''v2-test'', ''rules'')'),
+    '42501',
+    'not even an admin can insert a model version interactively (service-role only, §3.6 deviation)'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      'update public.model_versions set config = ''{}''::jsonb where version = ''v1'''),
+    '42501',
+    'a CAM cannot tamper with a model version'
+  );
+end;
+$$;
+
+create or replace function tests.suite_personal_data_exclusion()
+returns setof text language plpgsql as $$
+declare
+  v_admin      uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam        uuid := '00000000-0000-4000-a000-000000000002';
+  v_viewer     uuid := '00000000-0000-4000-a000-000000000005';
+  v_dead_admin uuid := '00000000-0000-4000-a000-000000000006';
+  v_backdated  timestamptz := timestamptz '2000-01-01';
+  v_count      bigint;
+begin
+  if not tests.tables_exist('personal_email_role_parts', 'data_handling_rules') then
+    return next skip(1, 'F247 add_personal_data_exclusion not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Same deactivated-admin fixture suite_data_handling_rules() creates. Written
+  -- the same idempotent way so either suite can run alone.
+  insert into auth.users (id, instance_id, aud, role, email)
+  values (v_dead_admin, '00000000-0000-0000-0000-000000000000',
+          'authenticated', 'authenticated', 'ex-admin@180dc.org')
+  on conflict (id) do nothing;
+  insert into public.users (id, email, full_name, role, is_active, created_at, updated_at)
+  values (v_dead_admin, 'ex-admin@180dc.org', 'Deactivated Admin', 'admin', false, v_backdated, v_backdated)
+  on conflict (id) do update
+    set role = excluded.role, is_active = excluded.is_active;
+
+  -- -- Reads -----------------------------------------------------------------
+  -- The role list decides whose address the ingestion runner keeps, so it
+  -- carries the same read shape as data_handling_rules: admin only.
+
+  perform tests.login_as(v_cam);
+  select count(*) into v_count from public.personal_email_role_parts;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'CAM cannot read personal_email_role_parts');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.personal_email_role_parts;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'viewer cannot read personal_email_role_parts');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.personal_email_role_parts;
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+  return next ok(v_count > 0, 'admin can read personal_email_role_parts');
+
+  -- -- Direct writes are closed off -------------------------------------------
+  -- No INSERT/UPDATE policy for authenticated; every write goes through
+  -- set_personal_email_role_part below, so the audit entry is never optional.
+
+  return next ok(
+    not has_table_privilege('authenticated', 'public.personal_email_role_parts', 'INSERT'),
+    'authenticated holds no INSERT privilege on personal_email_role_parts'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.personal_email_role_parts', 'UPDATE'),
+    'authenticated holds no UPDATE privilege on personal_email_role_parts'
+  );
+
+  -- -- Both RPCs refuse a CAM and a deactivated admin ---------------------------
+
+  return next is(
+    tests.sqlstate_of(v_cam,
+      'select public.create_data_handling_rule(null, ''*'', ''deny'', ''CAM attempt'', ''redact_personal_email'')'),
+    'P0001',
+    'CAM cannot create a redaction rule'
+  );
+  return next is(
+    tests.sqlstate_of(v_dead_admin,
+      'select public.create_data_handling_rule(null, ''*'', ''deny'', ''deactivated attempt'', ''redact_personal_email'')'),
+    'P0001',
+    'a deactivated admin cannot create a redaction rule'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam,
+      'select public.set_personal_email_role_part(''pgtap-role'', true, ''CAM attempt'')'),
+    'P0001',
+    'CAM cannot change the role email list'
+  );
+  return next is(
+    tests.sqlstate_of(v_dead_admin,
+      'select public.set_personal_email_role_part(''pgtap-role'', true, ''deactivated attempt'')'),
+    'P0001',
+    'a deactivated admin cannot change the role email list'
+  );
+
+  select count(*) into v_count
+    from public.personal_email_role_parts where local_part = 'pgtap-role';
+  return next is(v_count, 0::bigint,
+    'no role part survives the blocked set attempts');
+
+  -- Admin path: add, audit, no-op safety.
+  perform tests.login_as(v_admin);
+  perform public.set_personal_email_role_part('pgtap-role', true, 'pgTAP fixture role');
+  execute 'reset role'; perform set_config('request.jwt.claims', null, true);
+
+  return next is(
+    (select is_active from public.personal_email_role_parts where local_part = 'pgtap-role'),
+    true,
+    'admin can add a role email local part');
+
+  return next is(
+    (select count(*) from public.audit_log
+      where action = 'personal_email_role_part_added' and detail->>'local_part' = 'pgtap-role'),
+    1::bigint,
+    'adding a role part writes an audit_log entry');
+
+  -- -- app.is_personal_email: role vs personal pairs ---------------------------
+  -- Same word-splitting rule personal-data.test.ts asserts in TypeScript; this
+  -- proves the SQL half agrees, run as admin so the read against
+  -- personal_email_role_parts the function depends on is not itself the thing
+  -- under test.
+
+  perform tests.login_as(v_admin);
+
+  return next ok(
+    not app.is_personal_email('info@example.org'),
+    'a bare role local part is not personal'
+  );
+  return next ok(
+    not app.is_personal_email('fundraising.team@example.org'),
+    'a role local part wearing a suffix is not personal'
+  );
+  return next ok(
+    not app.is_personal_email('no-reply@example.org'),
+    '''no-reply'' splits into ''no'' and ''reply'', and ''reply'' is a role part'
+  );
+  return next ok(
+    app.is_personal_email('joanne.smith@example.org'),
+    'a two-word personal name is personal'
+  );
+  return next ok(
+    app.is_personal_email('jsmith@example.org'),
+    'an unlisted local part is treated as personal, not role — the allow-list direction'
+  );
+  return next ok(
+    not app.is_personal_email('not-an-address'),
+    'a string with no @ is not something this function has an opinion about'
+  );
+  -- 20261003130000: the organisation's own domain label is a role.
+  return next ok(
+    not app.is_personal_email('wakamate@wakamate.ng'),
+    'a local part naming the address''s own domain is not personal'
+  );
+  return next ok(
+    not app.is_personal_email('waka.mate@wakamate.co.uk'),
+    'the domain name split by a separator in the local part is not personal'
+  );
+  return next ok(
+    app.is_personal_email('jane@wakamate.ng'),
+    'a named person at the organisation''s domain is still personal'
+  );
+  return next ok(
+    app.is_personal_email('com@example.com'),
+    'the TLD or a generic label never counts as the organisation''s name'
+  );
+
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  -- -- manual_entry_records trigger: personal email rejected (AC3) -------------
+  if tests.tables_exist('manual_entry_records') then
+    return next is(
+      tests.sqlstate_of(v_cam,
+        'select public.save_manual_entry(null, ''Personal Email Test'', null, null, null, null, null, ''GB'', null, ''joanne.smith@example.org'', null, null, null, false)'),
+      '22023',
+      'saving a manual entry with a personal email is rejected by trigger'
+    );
+
+    return next is(
+      tests.sqlstate_of(v_cam,
+        'select public.save_manual_entry(null, ''Role Email Test'', null, null, null, null, null, ''GB'', null, ''info@example.org'', null, null, null, false)'),
+      null,
+      'saving a manual entry with a role email is accepted'
+    );
+  end if;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- ownership_requests (#408, F165 follow-up)
+-- ---------------------------------------------------------------------------
+-- Matrix §3.17. The point of this suite is the negative: a CAM has no path to a
+-- client another CAM owns except asking, and asking moves nothing on its own.
+
+create or replace function tests.suite_ownership_requests()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_unowned uuid := '00000000-0000-4000-b000-000000000001';
+  v_org_cam_b   uuid := '00000000-0000-4000-b000-000000000003';
+  v_req_id      uuid;
+  v_status      public.ownership_request_status;
+  v_owner       uuid;
+  v_count       bigint;
+begin
+  if not tests.tables_exist('organisations', 'users', 'audit_log', 'ownership_requests')
+     or to_regprocedure('public.request_client_ownership(uuid, text)') is null
+     or to_regprocedure('public.decide_ownership_request(uuid, boolean, text)') is null then
+    return next skip(18, 'ownership_requests table or RPCs not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Every write is RPC-only (recipe step 4), same shape as suppressions.
+  return next ok(
+    not has_table_privilege('authenticated', 'public.ownership_requests', 'INSERT'),
+    'authenticated holds no direct INSERT privilege on ownership_requests'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.ownership_requests', 'UPDATE'),
+    'authenticated holds no direct UPDATE privilege on ownership_requests'
+  );
+
+  -- A viewer has no ownership to request.
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.request_client_ownership(%L, ''viewer wants a client'')', v_org_cam_b)),
+    '42501',
+    'viewer cannot call request_client_ownership'
+  );
+
+  -- An admin reassigns directly rather than requesting from themselves.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.request_client_ownership(%L, ''admin asking'')', v_org_cam_b)),
+    '42501',
+    'an admin is refused: they hold reassign_ownership already'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.request_client_ownership(%L, ''   '')', v_org_cam_b)),
+    '23514',
+    'blank reason is rejected'
+  );
+
+  -- An unowned client is claimed, not requested.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.request_client_ownership(%L, ''nobody owns it'')', v_org_unowned)),
+    '55000',
+    'requesting an unowned client is refused — claim it instead'
+  );
+
+  -- CAM A asks for CAM B's client. This is the whole sanctioned path.
+  perform tests.login_as(v_cam_a);
+  select public.request_client_ownership(v_org_cam_b, 'I already run their sister charity')
+    into v_req_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status into v_status from public.ownership_requests where id = v_req_id;
+  return next is(v_status, 'pending'::public.ownership_request_status,
+    'a CAM''s request lands pending');
+
+  -- The request moved nothing. This is the acceptance criterion that matters.
+  select owner_id into v_owner from public.organisations where id = v_org_cam_b;
+  return next is(v_owner, v_cam_b, 'the client has not moved: a request is not a handover');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'ownership_requested' and target_id = v_org_cam_b;
+  return next is(v_count, 1::bigint, 'the request writes one ownership_requested audit row');
+
+  -- Still no direct route, request or no request.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.claim_organisation(%L)', v_org_cam_b)),
+    '55000',
+    'a pending request does not unlock claim_organisation on an owned client'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set owner_id = %L where id = %L', v_cam_a, v_org_cam_b)),
+    '42501',
+    'a CAM cannot write owner_id directly, request or no request'
+  );
+
+  -- The requester cannot approve their own ask.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.decide_ownership_request(%L, true, null)', v_req_id)),
+    '42501',
+    'the requesting CAM cannot decide their own request'
+  );
+
+  -- Nor can a second identical ask be queued.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.request_client_ownership(%L, ''asking again'')', v_org_cam_b)),
+    '23505',
+    'a second pending request from the same CAM for the same client is rejected'
+  );
+
+  -- Admin approves: this is what moves the client, through reassign_ownership.
+  perform tests.login_as(v_admin);
+  perform public.decide_ownership_request(v_req_id, true, 'agreed on the Wednesday call');
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status into v_status from public.ownership_requests where id = v_req_id;
+  return next is(v_status, 'approved'::public.ownership_request_status,
+    'admin approval marks the request approved');
+
+  select owner_id into v_owner from public.organisations where id = v_org_cam_b;
+  return next is(v_owner, v_cam_a, 'approval moves the client to the requesting CAM');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'ownership_reassigned' and target_id = v_org_cam_b;
+  return next is(v_count, 1::bigint,
+    'the handover is audited as a normal ownership_assigned transition');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'ownership_request_approved' and target_id = v_org_cam_b;
+  return next is(v_count, 1::bigint, 'the decision itself is audited too');
+
+  -- Deciding twice is refused, not silently re-applied.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.decide_ownership_request(%L, false, null)', v_req_id)),
+    '55000',
+    'deciding a request that is no longer pending is rejected'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- F019 (#22) Read-only shared client visibility
+-- ---------------------------------------------------------------------------
+-- The read half of "any CAM can open any client's profile": notes and sent
+-- outreach on someone else's client are readable but not actionable. The
+-- write half (a CAM cannot insert outreach_messages on another CAM's client)
+-- is suite_core; this suite covers what that leaves out — the shared SELECT
+-- of relationship history, and the author-scoped note UPDATE/DELETE.
+--
+-- Like suite_sensitive, a denied UPDATE/DELETE here raises nothing: the
+-- policies are USING-based, so the write matches zero rows. Asserting the
+-- resulting row, not an SQLSTATE, is the only check that can actually fail.
+
+create or replace function tests.suite_shared_visibility()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a     uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b     uuid := '00000000-0000-4000-a000-000000000003';
+  v_org_cam_b uuid := '00000000-0000-4000-b000-000000000003';
+  -- Every assertion targets these rows by id, never by counting the org's
+  -- rows: suites share one transaction, so suite_core has already left CAM
+  -- A's own "test note" on this same organisation (and a future suite could
+  -- leave anything). A per-org count would measure the other suites, not RLS.
+  v_note_id   uuid;
+  v_message_id uuid;
+  v_count     bigint;
+begin
+  if not tests.tables_exist('notes', 'outreach_messages', 'organisations') then
+    return next skip(6, 'step 4 create_org_children / step 11 create_outreach not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- CAM B's history on their own client: one note, one sent email.
+  insert into public.notes (organisation_id, author_id, content)
+  values (v_org_cam_b, v_cam_b, 'CAM B private context')
+  returning id into v_note_id;
+
+  insert into public.outreach_messages (organisation_id, sent_by_user_id, subject, body, send_status, sent_at)
+  values (v_org_cam_b, v_cam_b, 'Intro', 'Hello', 'sent', now())
+  returning id into v_message_id;
+
+  -- AC1: the full communication timeline is visible regardless of who owns
+  -- the client — notes first.
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.notes where id = v_note_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'CAM reads another CAM''s notes on their client (shared visibility)');
+
+  -- ...then sent outreach (F070's outreach_messages_select_active is what a
+  -- non-owner's timeline render depends on).
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.outreach_messages where id = v_message_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'CAM reads another CAM''s sent outreach messages on their client');
+
+  -- AC2: visible context is not editable context. notes_update_own is
+  -- USING-based, so the update silently matches zero rows — assert content.
+  perform tests.login_as(v_cam_a);
+  update public.notes set content = 'hijacked' where id = v_note_id;
+  select count(*) into v_count from public.notes
+    where id = v_note_id and content = 'CAM B private context';
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'CAM cannot edit another CAM''s note (row survives unchanged)');
+
+  -- Same for delete: notes_delete_own filters the row out, so it survives.
+  perform tests.login_as(v_cam_a);
+  delete from public.notes where id = v_note_id;
+  select count(*) into v_count from public.notes where id = v_note_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'CAM cannot delete another CAM''s note (row survives)');
+
+  -- Anon reaches neither table at all — grant-level REVOKE, not policy (same
+  -- shape as the users check in suite_users).
+  return next ok(
+    not has_table_privilege('anon', 'public.notes', 'SELECT'),
+    'anon holds no SELECT privilege on notes'
+  );
+  return next ok(
+    not has_table_privilege('anon', 'public.outreach_messages', 'SELECT'),
+    'anon holds no SELECT privilege on outreach_messages'
+  );
+end;
+$$;
+
+select * from tests.suite_core();
+select * from tests.suite_shared_visibility();
+
+-- ---------------------------------------------------------------------------
+-- outreach preferences (F195 / F187)
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_outreach_preferences()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_viewer uuid := '00000000-0000-4000-a000-000000000005';
+  v_count  bigint;
+begin
+  if not tests.tables_exist('outreach_preferences') then
+    return next skip(6, 'F195 outreach preferences table not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- CAM A writes their own preferences
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.outreach_preferences (user_id, preferred_geographic_reach, preferred_sectors, preferred_income_bands) values (%L, %L, %L, %L) on conflict (user_id) do nothing',
+      v_cam_a, '{local,regional}'::public.geographic_reach[], '{"Education","Health"}'::text[], '{under_10k,10k_100k}'::public.income_band[])),
+    null,
+    'a CAM can save their own outreach preferences (F195)'
+  );
+
+  -- CAM A reads their own preferences
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.outreach_preferences where user_id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'a CAM can view their own outreach preferences (F195)');
+
+  -- CAM B cannot read CAM A's preferences
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.outreach_preferences where user_id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a CAM cannot read another CAM''s outreach preferences');
+
+  -- CAM A cannot write CAM B's preferences
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.outreach_preferences (user_id) values (%L)', v_cam_b)),
+    '42501',
+    'a CAM cannot insert preferences on another CAM''s behalf'
+  );
+
+  -- F187: Admin CAN read any CAM's preferences to inspect their queue configuration
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.outreach_preferences where user_id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'an admin can view a CAM''s outreach preferences (F187)');
+
+  -- Leadership (viewer) reads a CAM's preferences as an admin does, and cannot
+  -- write them (no write policy names viewers).
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.outreach_preferences where user_id = v_cam_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, (select count(*) from public.outreach_preferences where user_id = v_cam_a),
+    'a viewer (leadership) reads a CAM''s outreach preferences, as an admin does');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- edit_suggestions (#79, F077)
+-- ---------------------------------------------------------------------------
+-- The point of this suite is the same negative as ownership_requests: a CAM has no
+-- path to a sensitive field except proposing, and proposing changes nothing. Plus
+-- the two duplicate rules (supersede own, block others) and the RLS visibility split.
+
+create or replace function tests.suite_edit_suggestions()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org         uuid := '00000000-0000-4000-b000-000000000001';  -- unowned, legal_name set
+  v_suggestion  uuid;
+  v_reject_id   uuid;
+  v_approve_id  uuid;
+  v_status      public.edit_suggestion_status;
+  v_current     text;
+  v_live        text;
+  v_count       bigint;
+  v_decided_by  uuid;
+  v_decided_at  timestamptz;
+  v_reason      text;
+begin
+  if not tests.tables_exist('organisations', 'users', 'edit_suggestions')
+     or to_regprocedure('public.suggest_organisation_edit(uuid, text, text)') is null
+     or to_regprocedure('public.decide_edit_suggestion(uuid, boolean, text)') is null then
+    return next skip(38, 'edit_suggestions table or RPCs not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Every write is RPC-only (recipe step 4), same shape as suppressions.
+  return next ok(
+    not has_table_privilege('authenticated', 'public.edit_suggestions', 'INSERT'),
+    'authenticated holds no direct INSERT privilege on edit_suggestions'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.edit_suggestions', 'UPDATE'),
+    'authenticated holds no direct UPDATE privilege on edit_suggestions'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.edit_suggestions (organisation_id, field_name, proposed_value, requested_by) values (%L, ''city'', ''X'', %L)',
+      v_org, v_cam_a)),
+    '42501',
+    'a direct table insert is refused even for a CAM'
+  );
+
+  -- Who may call the RPC at all.
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.suggest_organisation_edit(%L, ''city'', ''Leeds'')', v_org)),
+    '42501',
+    'a viewer cannot suggest an edit'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.suggest_organisation_edit(%L, ''city'', ''Leeds'')', v_org)),
+    '42501',
+    'an admin cannot suggest an edit — they hold UPDATE on these columns directly'
+  );
+
+  -- What the RPC refuses on content.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''owner_id'', ''someone'')', v_org)),
+    '23514',
+    'a field outside the six-field allowlist is rejected'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''city'', ''   '')', v_org)),
+    '23514',
+    'a blank proposed value is rejected — suggestions cannot clear a field'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''city'', ''Leeds'')',
+      '00000000-0000-4000-b000-000000000099')),
+    'P0002',
+    'an unknown client is rejected'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''legal_name'', ''Unowned Org Ltd'')', v_org)),
+    '55000',
+    'proposing the value already on record is refused as a no-op'
+  );
+
+  -- The sanctioned path: CAM A proposes a website for a client with none.
+  perform tests.login_as(v_cam_a);
+  select public.suggest_organisation_edit(v_org, 'website', 'https://example.org')
+    into v_suggestion;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status into v_status from public.edit_suggestions where id = v_suggestion;
+  return next is(v_status, 'pending'::public.edit_suggestion_status,
+    'a CAM''s suggestion lands pending');
+
+  select current_value into v_current from public.edit_suggestions where id = v_suggestion;
+  return next is(v_current, null,
+    'current_value snapshots what the field actually said (null here)');
+
+  select website into v_live from public.organisations where id = v_org;
+  return next is(v_live, null,
+    'the live record is untouched: a suggestion is not an edit');
+
+  select count(*) into v_count from public.audit_log
+   where target_table = 'edit_suggestions' or action like 'edit_suggestion%';
+  return next is(v_count, 0::bigint,
+    'submission writes no audit row — flagging is not a decision');
+
+  -- Duplicate rules.
+  return next is(
+    tests.sqlstate_of(v_cam_b, format(
+      'select public.suggest_organisation_edit(%L, ''website'', ''https://other.org'')', v_org)),
+    '23505',
+    'another CAM''s pending suggestion blocks the field'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''website'', ''https://corrected.org'')', v_org)),
+    null,
+    'the author may re-suggest their own pending field (supersede)'
+  );
+
+  select status into v_status
+    from public.edit_suggestions where id = v_suggestion;
+  return next is(v_status, 'superseded'::public.edit_suggestion_status,
+    're-suggesting marks the old proposal superseded, not deleted');
+
+  select count(*) into v_count
+    from public.edit_suggestions
+   where organisation_id = v_org and field_name = 'website' and status = 'pending';
+  return next is(v_count, 1::bigint,
+    'exactly one pending suggestion per field survives the supersede');
+
+  -- RLS visibility: pending rows are team-visible to CAMs; settled history is not.
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.edit_suggestions
+   where organisation_id = v_org and status = 'pending';
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'any active CAM can see another CAM''s pending suggestion');
+
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.edit_suggestions
+   where organisation_id = v_org and status = 'superseded';
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'settled history stays between the author and admins');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.edit_suggestions
+   where organisation_id = v_org;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, (select count(*) from public.edit_suggestions where organisation_id = v_org),
+    'a viewer (leadership) sees every suggestion, as an admin does');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.edit_suggestions
+   where organisation_id = v_org;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 2::bigint, 'an admin sees every row, decided or not');
+
+  -- ---------------------------------------------------------------------------
+  -- Decisions (#80/#81): decide_edit_suggestion
+  -- ---------------------------------------------------------------------------
+
+  -- Who may decide.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.decide_edit_suggestion(%L, true, null)', v_suggestion)),
+    '42501',
+    'a CAM cannot decide a suggested edit — not even their own'
+  );
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.decide_edit_suggestion(%L, true, null)', v_suggestion)),
+    '42501',
+    'a viewer cannot call decide_edit_suggestion'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin,
+      'select public.decide_edit_suggestion(''00000000-0000-4000-e000-000000000009'', true, null)'),
+    'P0002',
+    'deciding an unknown suggestion is a clean miss, not a crash'
+  );
+
+  -- Reject first (CAM B's fresh proposal on another field), then approve.
+  perform tests.login_as(v_cam_b);
+  select public.suggest_organisation_edit(v_org, 'city', 'Leeds') into v_reject_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  -- Stale-snapshot guard: an admin's direct edit moves the live value after
+  -- submission; approval must refuse rather than clobber it.
+  perform tests.login_as(v_admin);
+  update public.organisations set city = 'Sheffield' where id = v_org;
+  -- Drop the impersonation before touching schema tests again: while the session
+  -- IS `authenticated`, it has no USAGE on `tests` and the next sqlstate_of call
+  -- would die with "permission denied for schema tests" (see harness note above).
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.decide_edit_suggestion(%L, true, null)', v_reject_id)),
+    '55000',
+    'approval refuses when the live value drifted from the submission snapshot'
+  );
+  select status into v_status from public.edit_suggestions where id = v_reject_id;
+  return next is(v_status, 'pending'::public.edit_suggestion_status,
+    'a refused approval leaves the suggestion pending');
+  select count(*) into v_count from public.audit_log
+   where action like 'edit_suggestion%';
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'a refused approval writes no audit row and applies nothing');
+
+  -- The admin puts the field back; now rejection works and touches nothing.
+  perform tests.login_as(v_admin);
+  update public.organisations set city = null where id = v_org;
+  perform public.decide_edit_suggestion(v_reject_id, false, 'Registry disagrees with that postcode-level change');
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select status, decided_by, decided_at, rejection_reason
+    into v_status, v_decided_by, v_decided_at, v_reason
+    from public.edit_suggestions where id = v_reject_id;
+  return next is(v_status, 'rejected'::public.edit_suggestion_status,
+    'admin rejection marks the suggestion rejected');
+  return next is(v_decided_by, v_admin, 'the decision records who decided it');
+  return next ok(v_decided_at is not null, 'the decision records when');
+  return next is(v_reason, 'Registry disagrees with that postcode-level change',
+    'the rejection reason is stored for the CAM');
+  select city into v_live from public.organisations where id = v_org;
+  return next is(v_live, null,
+    'rejection changed nothing on the live record (F079 AC1)');
+
+  -- Double-decide is refused.
+  return next is(
+    tests.sqlstate_of(v_admin, format(
+      'select public.decide_edit_suggestion(%L, true, null)', v_reject_id)),
+    '55000',
+    'deciding an already-settled suggestion is rejected'
+  );
+
+  -- Approval path: CAM A proposes a legal_name fix over the known value; admin approves.
+  perform tests.login_as(v_cam_a);
+  select public.suggest_organisation_edit(v_org, 'legal_name', 'Renamed Org Ltd')
+    into v_approve_id;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  perform tests.login_as(v_admin);
+  perform public.decide_edit_suggestion(v_approve_id, true, null);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select legal_name into v_live from public.organisations where id = v_org;
+  return next is(v_live, 'Renamed Org Ltd',
+    'approval applies the proposed value to the live record (F078 AC2)');
+
+  select status into v_status from public.edit_suggestions where id = v_approve_id;
+  return next is(v_status, 'approved'::public.edit_suggestion_status,
+    'approval marks the suggestion approved');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'edit_suggestion_approved' and target_id = v_org;
+  return next is(v_count, 1::bigint, 'the approval is audited');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'edit_suggestion_rejected' and target_id = v_org;
+  return next is(v_count, 1::bigint, 'the rejection is audited too');
+
+  -- Since F020 (#23) both decide branches notify the submitting CAM. These tests
+  -- are about the decision, not the notification — clear the side effect so
+  -- suite_notifications' counts see a clean slate (all suites share one transaction).
+  delete from public.notifications where notification_type = 'edit_suggestion_decided';
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- notifications (F173 / #169)
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_notifications()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b  uuid := '00000000-0000-4000-a000-000000000003';
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_gone   uuid := '00000000-0000-4000-a000-000000000004';
+  v_notif  uuid;
+  v_result uuid;
+  v_again  boolean;
+  v_flag   text;
+  v_count  bigint;
+begin
+  if not tests.tables_exist('notifications') then
+    return next skip(14, 'F173 notifications table not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Ownership moves in earlier suites (reassign, assign, offboard, request
+  -- approval) now notify the former owner via the owner-change trigger. Clear
+  -- that side effect so this suite's counts see a clean slate — same pattern
+  -- as the edit_suggestion_decided cleanup above.
+  delete from public.notifications where notification_type = 'client_ownership_changed';
+
+  -- Producer path: an active user creates a notification for another user.
+  perform tests.login_as(v_admin);
+  select public.create_notification(
+    v_cam_a, 'team_activity', 'Client assigned to you',
+    'Oxford Homeless Project was assigned to you.',
+    '/clients', 'organisations', null, null
+  ) into v_notif;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_notif is not null,
+    'an active user can produce a notification for another user');
+
+  select count(*) into v_count from public.notifications
+   where recipient_user_id = v_cam_a;
+  return next is(v_count, 1::bigint, 'the produced row exists exactly once');
+
+  -- Unknown recipients are skipped silently, not fatal to the producer flow.
+  perform tests.login_as(v_admin);
+  select public.create_notification(
+    gen_random_uuid(), 'reminder', 'Nobody home'
+  ) into v_result;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_result is null, 'an unknown recipient is skipped, returning null');
+
+  -- Deactivated recipients are skipped too.
+  perform tests.login_as(v_admin);
+  select public.create_notification(v_gone, 'reminder', 'Offboarded') into v_result;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_result is null, 'a deactivated recipient is skipped');
+
+  -- Self-notifications are skipped too (actor = recipient), not a 23514.
+  perform tests.login_as(v_cam_a);
+  select public.create_notification(
+    v_cam_a, 'reminder', 'Note to self', null, null, null, null, v_cam_a
+  ) into v_result;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next ok(v_result is null, 'a self-notification is skipped, returning null');
+
+  -- Wrong-recipient prevention: CAM B sees none of CAM A's rows.
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.notifications where id = v_notif;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a non-recipient cannot SELECT someone else''s notification');
+
+  -- ...and gets a plain false, not an error, from their read RPC.
+  perform tests.login_as(v_cam_b);
+  select case when public.mark_notification_read(v_notif) then 'transitioned' else 'false' end
+    into v_flag;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_flag, 'false',
+    'mark_notification_read for a non-recipient returns false, no existence oracle');
+
+  -- Recipient reads it and marks it read.
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.notifications where id = v_notif and read_at is null;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'the recipient sees their own unread notification');
+
+  perform tests.login_as(v_cam_a);
+  select case when public.mark_notification_read(v_notif) then 'transitioned' else 'no-op' end
+    into v_flag;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_flag, 'transitioned', 'mark_notification_read transitions an unread own row');
+
+  perform tests.login_as(v_cam_a);
+  select public.mark_notification_read(v_notif) into v_again;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_again, false, 'marking an already-read notification is a no-op returning false');
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.notifications where id = v_notif and read_at is not null;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'read_at is set after the transition');
+
+  -- Read state is one-way.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.notifications set read_at = null where id = %L', v_notif)),
+    '42501',
+    'a read notification cannot be un-read'
+  );
+
+  -- The column grant pins every other field even for the owner.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.notifications set title = ''hijacked'' where id = %L', v_notif)),
+    '42501',
+    'even the owner cannot edit notification content'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.notifications set recipient_user_id = %L where id = %L', v_cam_b, v_notif)),
+    '42501',
+    'the recipient cannot readdress a notification to someone else'
+  );
+
+  -- Mark-all is strictly scoped and counted.
+  insert into public.notifications (recipient_user_id, notification_type, title)
+  values (v_cam_a, 'reminder', 'batch one'), (v_cam_a, 'reminder', 'batch two'),
+         (v_cam_b, 'reminder', 'not mine');
+  perform tests.login_as(v_cam_a);
+  select public.mark_all_notifications_read() into v_count;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 2::bigint, 'mark_all touches only the caller''s unread rows');
+
+  -- Inactive callers are locked out of both directions.
+  return next is(
+    tests.sqlstate_of(v_gone, format(
+      'select public.create_notification(%L, ''reminder'', ''hi'')', v_cam_b)),
+    '42501',
+    'a deactivated account cannot produce notifications'
+  );
+
+  -- A deactivated account's read is denied silently — §4: a blocked SELECT
+  -- returns 0 rows, never an error.
+  perform tests.login_as(v_gone);
+  select count(*) into v_count from public.notifications where recipient_user_id = v_gone;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(
+    v_count,
+    0::bigint,
+    'a deactivated account reads no notifications (silent empty result, matrix §4)'
+  );
+
+  -- No direct INSERT door exists for any client role.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.notifications (recipient_user_id, notification_type, title) values (%L, ''x'', ''y'')', v_cam_a)),
+    '42501',
+    'clients cannot INSERT notification rows directly'
+  );
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- Attachments (F080 / #83): shared read for active roles, no write path yet
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_attachments()
+returns setof text language plpgsql as $$
+declare
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_a       uuid := '00000000-0000-4000-b000-000000000002';  -- owned by cam_a
+  v_att         uuid;
+  v_reply       uuid;
+  v_path        text;
+  v_count       bigint;
+  v_rls         boolean;
+begin
+  if not tests.tables_exist('attachments') then
+    return next skip(18, 'F080 attachments table not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Fixture row, inserted as the suite's superuser role: ATTACHMENTS grants
+  -- no INSERT to any client role — every write goes through record_attachment.
+  insert into public.attachments
+    (organisation_id, filename, storage_path, content_type, size_bytes, uploaded_by)
+  values
+    (v_org_a, 'grant-agreement.pdf',
+     v_org_a::text || '/11111111-1111-4111-8111-111111111111-grant-agreement.pdf',
+     'application/pdf', 48213, v_cam_a)
+  returning id into v_att;
+
+  -- RLS really is on — a missing ENABLE would make every later check vacuous.
+  select relrowsecurity into v_rls
+    from pg_class where oid = 'public.attachments'::regclass;
+  return next ok(v_rls, 'RLS is enabled on public.attachments');
+
+  -- Shared read (matrix §3.21): a CAM who does not own the client still sees
+  -- its attachment list — same shape as NOTES (§3.3).
+  perform tests.login_as(v_cam_b);
+  select count(*) into v_count from public.attachments where id = v_att;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'a CAM who does not own the client can read its attachments (shared read)');
+
+  -- Viewers read too — every active role, per F019 shared visibility.
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.attachments where id = v_att;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint,
+    'a viewer reads attachments like any other active role');
+
+  -- A deactivated account is silently locked out — §4: a blocked SELECT
+  -- returns 0 rows, never an error.
+  perform tests.login_as(v_deactivated);
+  select count(*) into v_count from public.attachments where id = v_att;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint,
+    'a deactivated account reads no attachments (silent empty result)');
+
+  -- No direct table write path exists for any client role, before or after
+  -- F081: uploads create rows only through record_attachment.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'insert into public.attachments (organisation_id, filename, storage_path) values (%L, ''x.pdf'', ''p/x.pdf'')', v_org_a)),
+    '42501',
+    'no role can INSERT an attachment row directly'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.attachments set filename = ''hijacked.pdf'' where id = %L', v_att)),
+    '42501',
+    'attachments cannot be renamed'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'delete from public.attachments where id = %L', v_att)),
+    '42501',
+    'attachments cannot be deleted from the client side'
+  );
+
+  -- Storage doors: exactly SELECT + INSERT on the bucket, never UPDATE/DELETE.
+  select count(*) into v_count from pg_policies
+   where schemaname = 'storage' and tablename = 'objects'
+     and policyname = 'attachments_bucket_select_active'
+     and cmd = 'SELECT';
+  return next is(v_count, 1::bigint,
+    'the client-attachments bucket SELECT policy exists');
+
+  select count(*) into v_count from pg_policies
+   where schemaname = 'storage' and tablename = 'objects'
+     and policyname = 'attachments_bucket_insert_active'
+     and cmd = 'INSERT';
+  return next is(v_count, 1::bigint,
+    'the client-attachments bucket INSERT policy exists (F081 upload door)');
+
+  select count(*) into v_count from pg_policies
+   where schemaname = 'storage' and tablename = 'objects'
+     and policyname like 'attachments%'
+     and cmd not in ('SELECT', 'INSERT');
+  return next is(v_count, 0::bigint,
+    'no UPDATE/DELETE policy on the bucket for client roles');
+
+  -- -----------------------------------------------------------------------
+  -- F081: record_attachment — the sanctioned write path
+  -- -----------------------------------------------------------------------
+
+  if to_regprocedure('public.record_attachment(uuid,text,text,text,bigint)') is null then
+    return next skip(9, 'record_attachment not yet migrated (F081)');
+    return;
+  end if;
+
+  -- Permission: read-only roles cannot attach files.
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.record_attachment(%L, ''x.pdf'', %L || ''/a-x.pdf'')', v_org_a, v_org_a)),
+    '42501',
+    'a viewer cannot record an attachment'
+  );
+
+  -- The RPC refuses content problems with distinct, deliberate errcodes.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.record_attachment(%L, '''', %L || ''/a-x.pdf'')', v_org_a, v_org_a)),
+    '23514',
+    'a blank filename is refused'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.record_attachment(%L, ''x.pdf'', ''other-org/99999999-9999-4999-8999-999999999999-x.pdf'')', v_org_a)),
+    '22023',
+    'a storage path under another organisation''s prefix is refused'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.record_attachment(%L, ''ghost.pdf'', %L || ''/22222222-2222-4222-8222-222222222222-ghost.pdf'')', v_org_a, v_org_a)),
+    'P0002',
+    'a storage path with no actual object behind it is refused'
+  );
+
+  -- The happy path requires the object to really be in the bucket first:
+  -- fixture it as the superuser, exactly as the browser's upload would have.
+  insert into storage.objects (bucket_id, name)
+  values ('client-attachments',
+          v_org_a::text || '/33333333-3333-4333-8333-333333333333-signed.pdf');
+
+  perform tests.login_as(v_cam_a);
+  select public.record_attachment(
+    v_org_a, 'signed agreement.pdf',
+    v_org_a::text || '/33333333-3333-4333-8333-333333333333-signed.pdf',
+    'application/pdf', 12345)
+    into v_att;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  return next ok(v_att is not null, 'a CAM records an attachment whose object exists');
+  select count(*) into v_count from public.attachments
+   where id = v_att and uploaded_by = v_cam_a
+     and filename = 'signed agreement.pdf' and size_bytes = 12345;
+  return next is(v_count, 1::bigint,
+    'the recorded row carries the caller as uploaded_by plus the metadata given');
+
+  -- Duplicate recording of the same path hits the unique storage_path.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.record_attachment(%L, ''again.pdf'', %L || ''/33333333-3333-4333-8333-333333333333-signed.pdf'')', v_org_a, v_org_a)),
+    '23505',
+    'recording the same storage path twice is refused'
+  );
+
+  -- -----------------------------------------------------------------------
+  -- F219: stable attachment-to-timeline links
+  -- -----------------------------------------------------------------------
+  if to_regprocedure('public.link_attachment_to_timeline(uuid,uuid,text,uuid)') is null then
+    return next skip(4, 'link_attachment_to_timeline not yet migrated (F219)');
+    return;
+  end if;
+
+  insert into public.reply_events (organisation_id, reply_body, received_at)
+  values (v_org_a, 'Please see the attached proposal.', now())
+  returning id into v_reply;
+
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.link_attachment_to_timeline(%L, %L, ''reply_event'', %L)',
+      v_att, v_org_a, v_reply)),
+    '42501',
+    'a viewer cannot change an attachment timeline link'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.link_attachment_to_timeline(%L, %L, ''reply_event'', %L)',
+      v_att, v_org_a, '99999999-9999-4999-8999-999999999999'::uuid)),
+    'P0002',
+    'an attachment cannot link to a missing or different-client event'
+  );
+
+  perform tests.login_as(v_cam_a);
+  perform public.link_attachment_to_timeline(v_att, v_org_a, 'reply_event', v_reply);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select count(*) into v_count from public.attachments
+   where id = v_att
+     and timeline_context_type = 'reply_event'
+     and timeline_context_id = v_reply;
+  return next is(v_count, 1::bigint,
+    'a CAM links an attachment to a reply on the same client');
+
+  insert into public.notes (organisation_id, author_id, content)
+  values (v_org_a, v_cam_a, 'A later timeline event');
+  select count(*) into v_count from public.attachments
+   where id = v_att and timeline_context_id = v_reply;
+  return next is(v_count, 1::bigint,
+    'adding later timeline events does not change the stored attachment link');
+
+  -- -----------------------------------------------------------------------
+  -- delete_attachment — the sanctioned delete path
+  -- -----------------------------------------------------------------------
+  if to_regprocedure('public.delete_attachment(uuid,uuid)') is null then
+    return next skip(6, 'delete_attachment not yet migrated');
+    return;
+  end if;
+
+  -- Read-only roles cannot delete.
+  return next is(
+    tests.sqlstate_of(v_viewer, format(
+      'select public.delete_attachment(%L, %L)', v_att, v_org_a)),
+    '42501',
+    'a viewer cannot delete an attachment'
+  );
+
+  -- A mismatched id pair is "not found", never an existence oracle for
+  -- another client's files.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.delete_attachment(%L, %L)', v_att, '99999999-9999-4999-8999-999999999999')),
+    'P0002',
+    'deleting with another client''s id is refused as not found'
+  );
+
+  select count(*) into v_count from public.attachments where id = v_att;
+  return next is(v_count, 1::bigint,
+    'refused deletes leave the row in place');
+
+  -- Any CAM with write access can delete: client files are shared, like the
+  -- shared attachment reads — not scoped to the uploader. The function hands
+  -- back the storage path the caller must remove from the bucket.
+  perform tests.login_as(v_cam_b);
+  select public.delete_attachment(v_att, v_org_a) into v_path;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  return next is(v_path,
+    v_org_a::text || '/33333333-3333-4333-8333-333333333333-signed.pdf',
+    'a CAM deletes a client file and gets back its storage path');
+
+  select count(*) into v_count from public.attachments where id = v_att;
+  return next is(v_count, 0::bigint,
+    'the deleted attachment row is gone');
+
+  -- Deleting twice is not found, not a shape-shifting error.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.delete_attachment(%L, %L)', v_att, v_org_a)),
+    'P0002',
+    'deleting an already-deleted attachment is refused as not found'
+  );
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- Restricted editing (F020, #23): the config table, the column-guard trigger and
+-- the config-driven suggestion path
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_restricted_editing()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_cam_b       uuid := '00000000-0000-4000-a000-000000000003';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_a       uuid := '00000000-0000-4000-b000-000000000002';  -- owned by cam_a
+  v_suggestion  uuid;
+  v_live        text;
+  v_count       bigint;
+begin
+  if not tests.tables_exist('organisations', 'users', 'edit_suggestions', 'restricted_edit_fields')
+     or to_regproc('public.enforce_restricted_org_columns') is null
+     or to_regprocedure('public.add_restricted_edit_field(text, text)') is null then
+    return next skip(24, 'restricted editing tables/RPCs not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- AC1: an owning CAM cannot save a sensitive-field change directly. This is the
+  -- direct-write hole §3.2 documented — same wall meets a hand-crafted API call,
+  -- because the trigger sits below the app.
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set legal_name = ''Sneaky Rename'' where id = %L', v_org_a)),
+    '42501',
+    'an owning CAM cannot update legal_name directly (AC1)'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set website = ''https://sneaky.example'' where id = %L', v_org_a)),
+    '42501',
+    'an owning CAM cannot update website directly'
+  );
+
+  -- AC2: non-sensitive fields stay directly editable.
+  return next ok(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set trading_name = ''My Trading Name'' where id = %L', v_org_a)) is null,
+    'an owning CAM can still edit a non-restricted column (AC2)'
+  );
+
+  -- Admin keeps the §3.2 write path in full.
+  return next ok(
+    tests.sqlstate_of(v_admin, format(
+      'update public.organisations set legal_name = ''Admin Renamed Ltd'' where id = %L', v_org_a)) is null,
+    'an admin updates restricted columns directly, as before'
+  );
+
+  -- Everyone else is stopped upstream by the §3.2 UPDATE policy: their statement
+  -- touches zero rows rather than raising. The point of these two is that neither
+  -- role gains anything from the trigger's existence.
+  perform tests.login_as(v_viewer);
+  update public.organisations set trading_name = 'Viewer Was Here' where id = v_org_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select trading_name into v_live from public.organisations where id = v_org_a;
+  return next is(v_live, 'My Trading Name',
+    'a viewer''s direct write touches zero rows (RLS stops it before the trigger)');
+
+  perform tests.login_as(v_deactivated);
+  update public.organisations set trading_name = 'Ghost Was Here' where id = v_org_a;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select trading_name into v_live from public.organisations where id = v_org_a;
+  return next is(v_live, 'My Trading Name',
+    'a deactivated user''s direct write touches zero rows too');
+
+  -- Config table RLS: admins manage it, CAMs read active rows (the suggest-edit UI
+  -- needs the live list), viewers get nothing.
+  return next ok(
+    not has_table_privilege('authenticated', 'public.restricted_edit_fields', 'INSERT')
+    and not has_table_privilege('authenticated', 'public.restricted_edit_fields', 'UPDATE')
+    and not has_table_privilege('authenticated', 'public.restricted_edit_fields', 'DELETE'),
+    'authenticated holds no direct write privilege on restricted_edit_fields'
+  );
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.restricted_edit_fields;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 6::bigint,
+    'a CAM sees exactly the six seeded active restricted fields');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.restricted_edit_fields;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, (select count(*) from public.restricted_edit_fields),
+    'a viewer (leadership) reads the restricted-field configuration, as an admin does');
+  return next is(
+    tests.sqlstate_of(v_viewer, 'select * from public.list_restrictable_edit_fields()'),
+    null,
+    'a viewer (leadership) may list the restrictable fields');
+  return next is(
+    tests.sqlstate_of(v_viewer,
+      'select public.add_restricted_edit_field(''trading_name'', ''leadership trying to lock'')'),
+    '42501',
+    'a viewer (leadership) still cannot restrict a field');
+
+  -- Who may change the configuration: admins only, with a reason, on real text
+  -- columns only.
+  return next is(
+    tests.sqlstate_of(v_cam_b, format(
+      'select public.add_restricted_edit_field(''trading_name'', ''test'')')),
+    '42501',
+    'only an admin may add a restriction'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''trading_name'', ''   '')'),
+    '23514',
+    'a blank reason is refused — the panel shows why a field is locked'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''no_such_column'', ''test'')'),
+    '23514',
+    'restricting a column organisations does not have is refused'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''owner_id'', ''test'')'),
+    '23514',
+    'the protected system columns cannot be restricted'
+  );
+  return next is(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''organisation_type'', ''test'')'),
+    '23514',
+    'enum-typed columns cannot be restricted — only text columns'
+  );
+
+  -- The payoff: restricting trading_name at runtime moves BOTH enforcement points.
+  return next ok(
+    tests.sqlstate_of(v_admin, 'select public.add_restricted_edit_field(''trading_name'', ''Trading names feed dedup too — restricted from the #23 follow-up call.'')') is null,
+    'admin adds trading_name to the restricted set'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set trading_name = ''Now Sneaky'' where id = %L', v_org_a)),
+    '42501',
+    'the column-guard trigger enforces a newly added restriction immediately'
+  );
+  return next ok(
+    tests.sqlstate_of(v_cam_b, format(
+      'select public.suggest_organisation_edit(%L, ''trading_name'', ''B Co Trading'')', v_org_a)) is null,
+    'and the suggestion path accepts the runtime-added field'
+  );
+
+  -- Approval must APPLY through the guarded dynamic apply-back — this is the case
+  -- the F078/F079 hardcoded UPDATE silently dropped on the floor.
+  select id into v_suggestion
+    from public.edit_suggestions
+   where organisation_id = v_org_a and field_name = 'trading_name' and status = 'pending';
+
+  perform tests.login_as(v_admin);
+  perform public.decide_edit_suggestion(v_suggestion, true, null);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select trading_name into v_live from public.organisations where id = v_org_a;
+  return next is(v_live, 'B Co Trading',
+    'approving a suggestion against a runtime-added field applies the value (dynamic apply-back)');
+
+  select count(*) into v_count from public.audit_log
+   where action = 'restricted_field_added';
+  return next ok(v_count >= 1,
+    'adding a restriction is audited');
+
+  -- Retire the restriction: history survives, new suggestions stop, direct writes
+  -- resume.
+  return next ok(
+    tests.sqlstate_of(v_admin, 'select public.deactivate_restricted_edit_field(''trading_name'')') is null,
+    'admin retires the trading_name restriction'
+  );
+  return next is(
+    tests.sqlstate_of(v_cam_a, format(
+      'select public.suggest_organisation_edit(%L, ''trading_name'', ''Whatever'')', v_org_a)),
+    '23514',
+    'a retired field stops accepting suggestions immediately'
+  );
+  return next ok(
+    tests.sqlstate_of(v_cam_a, format(
+      'update public.organisations set trading_name = ''Free Again'' where id = %L', v_org_a)) is null,
+    'and its direct write opens again for the owning CAM'
+  );
+
+  select count(*) into v_count from public.audit_log
+   where action = 'restricted_field_removed';
+  return next ok(v_count >= 1,
+    'retiring a restriction is audited too');
+
+  -- Same side-effect hygiene as suite_edit_suggestions: the AC3 notification was
+  -- asserted above; clear it before suite_notifications counts fixtures.
+  delete from public.notifications where notification_type = 'edit_suggestion_decided';
+
+  -- The FK swap: a suggestion row cannot reference a field outside the config.
+  -- Runs unimpersonated (the table owner bypasses RLS) so the FK itself is what is
+  -- under test, not the missing INSERT grant.
+  begin
+    insert into public.edit_suggestions
+      (organisation_id, field_name, proposed_value, requested_by)
+    values
+      (v_org_a, 'not_in_config', 'X', v_cam_a);
+    return next ok(false, 'an unknown field_name violates the config FK');
+  exception when foreign_key_violation then
+    return next ok(true, 'an unknown field_name violates the config FK');
+  end;
+end;
+$$;
+
+-- F192 (Remove Tag from Client): the org_tags DELETE policy, the DELETE
+-- grant, and the Data Model's NOT NULL on added_by_user_id. Drives a real
+-- delete through RLS as each role against the same tag assigned to two
+-- organisations, so cross-assignment scoping (AC1) is exercised against the
+-- production query path, not just app code.
+create or replace function tests.suite_org_tags()
+returns setof text language plpgsql as $$
+declare
+  v_admin  uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a  uuid := '00000000-0000-4000-a000-000000000002';
+  v_gone   uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer uuid := '00000000-0000-4000-a000-000000000005';
+  v_org_a  uuid := '00000000-0000-4000-b000-000000000002';
+  v_org_b  uuid := '00000000-0000-4000-b000-000000000003';
+  v_tag    uuid := '00000000-0000-4000-c000-000000000001';
+  v_count  bigint;
+begin
+  if not tests.tables_exist('users', 'organisations', 'tags', 'org_tags') then
+    return next skip(10, 'tags or org_tags table not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  -- Fixtures run unimpersonated: the owner writes rows directly so only the
+  -- DELETE policy is under test here. The tag is shared by two clients and
+  -- both assignments record added_by_user_id (NOT NULL per the Data Model).
+  insert into public.tags (id, name, created_by_user_id)
+  values (v_tag, 'pgtap org_tags fixture', v_admin)
+  on conflict do nothing;
+
+  insert into public.org_tags (organisation_id, tag_id, added_by_user_id)
+  values
+    (v_org_a, v_tag, v_admin),
+    (v_org_b, v_tag, v_admin)
+  on conflict do nothing;
+
+  -- The grant F192's migration exists to add: without it every delete below
+  -- would silently match zero rows regardless of policy outcome.
+  return next ok(
+    has_table_privilege('authenticated', 'public.org_tags', 'DELETE'),
+    'authenticated holds the DELETE privilege on org_tags'
+  );
+
+  -- added_by_user_id must be truly required, matching ORG_TAGS in
+  -- 04-entities.md (Nullable = No), not nullable with ON DELETE SET NULL.
+  return next is(
+    (select is_nullable from information_schema.columns
+     where table_schema = 'public' and table_name = 'org_tags'
+       and column_name = 'added_by_user_id'),
+    'NO',
+    'org_tags.added_by_user_id is NOT NULL per the Data Model'
+  );
+
+  -- A viewer passes the SELECT policy but fails can_write(), so their delete
+  -- matches zero rows — no error, no removal.
+  perform tests.login_as(v_viewer);
+  delete from public.org_tags where organisation_id = v_org_a and tag_id = v_tag;
+  get diagnostics v_count = row_count;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a viewer cannot remove a tag assignment');
+
+  -- A deactivated CAM fails is_active_user() — same silent zero-row outcome.
+  perform tests.login_as(v_gone);
+  delete from public.org_tags where organisation_id = v_org_a and tag_id = v_tag;
+  get diagnostics v_count = row_count;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(
+    v_count, 0::bigint, 'a deactivated user cannot remove a tag assignment'
+  );
+
+  -- An active CAM removes one client's assignment. The policy is not
+  -- author-scoped: this row was added by the admin, not the deleting CAM.
+  perform tests.login_as(v_cam_a);
+  delete from public.org_tags where organisation_id = v_org_a and tag_id = v_tag;
+  get diagnostics v_count = row_count;
+  return next is(v_count, 1::bigint, 'an active CAM can remove a tag assignment');
+
+  -- AC1: removing one client's assignment leaves the same tag's assignment
+  -- on the other client untouched.
+  select count(*) into v_count from public.org_tags
+   where organisation_id = v_org_b and tag_id = v_tag;
+  return next is(
+    v_count, 1::bigint,
+    'removing an assignment from one client never touches another client''s assignment of the same tag'
+  );
+
+  -- AC3: removing the last assignment never deletes the parent tag.
+  delete from public.org_tags where organisation_id = v_org_b and tag_id = v_tag;
+  get diagnostics v_count = row_count;
+  return next is(v_count, 1::bigint, 'the second client''s assignment is also removable');
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+
+  select count(*) into v_count from public.tags where id = v_tag;
+  return next is(
+    v_count, 1::bigint,
+    'the tag itself survives after its last assignment is removed (deleting tags is F190''s job)'
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- The `(select ...)` wrapper on the zero-argument role helpers
+-- (20260923133000_hoist_rls_helper_initplans).
+--
+-- This is the one suite here that asserts on policy *text* rather than only on
+-- behaviour, and deliberately so. The wrapper is invisible from the outside:
+-- `app.is_active_user()` and `(select app.is_active_user())` admit exactly the
+-- same rows, so every behavioural test in this file passes either way. What
+-- differs is that the bare form is SECURITY DEFINER and cannot be inlined, so
+-- Postgres calls it once per row — 629ms versus 39ms on the client-list query,
+-- measured on staging with 2,738 organisations.
+--
+-- Without this assertion the fix has no guard at all: the next person to edit
+-- one of these policies drops the wrapper, nothing goes red, and the per-row
+-- cost quietly comes back. Supabase's own `auth_rls_initplan` advisor will not
+-- catch it either — it matches `auth.<fn>()` and is blind to `app.*`.
+--
+-- The behavioural half (deactivation still bites on these tables) is already
+-- covered by suite_core, suite_users, suite_org_tags and suite_latest_scores,
+-- which is what proves the rewrite changed no access.
+--
+-- Covers every policy in `public` — all 97 at the time of writing, across the
+-- two migrations 20260923133000 and 20260923134000. A new table that ships a
+-- bare helper call fails here, on its own migration, rather than becoming the
+-- next slow page nobody can explain.
+-- ---------------------------------------------------------------------------
+
+create or replace function tests.suite_rls_initplan()
+returns setof text language plpgsql as $$
+declare
+  r record;
+  v_bare text[];
+begin
+  -- Every policy in `public`, not a listed subset: a new table added without
+  -- the wrapper should fail here on the migration that introduces it, and a
+  -- hand-maintained table list would silently stop covering the schema.
+  -- Argument-taking helpers (app.owns_organisation and friends) are
+  -- row-correlated and correctly left alone, so they are not checked.
+  for r in
+    select tablename, policyname,
+           concat_ws(' | ', qual, with_check) as expr
+    from pg_policies
+    where schemaname = 'public'
+    order by tablename, policyname
+  loop
+    -- A bare call is the helper name NOT preceded by "select ". Checked per
+    -- helper so a policy mixing a wrapped and a bare call is still caught.
+    v_bare := array(
+      select h from unnest(array[
+               'app.is_active_user()', 'app.is_admin()',
+               'app.is_cam()', 'app.is_viewer()', 'app.can_write()'
+             ]) as h
+       where r.expr like '%' || h || '%'
+         and r.expr not like '%( SELECT ' || h || '%'
+         and r.expr not like '%(select ' || h || '%'
+    );
+
+    return next ok(
+      cardinality(v_bare) = 0,
+      format(
+        '%s.%s wraps its zero-argument helpers in (select ...)%s',
+        r.tablename, r.policyname,
+        case when cardinality(v_bare) = 0 then ''
+             else ' -- unwrapped: ' || array_to_string(v_bare, ', ') end
+      )
+    );
+  end loop;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Outreach cycles: shared read, admin-only writes
+-- ---------------------------------------------------------------------------
+create or replace function tests.suite_cycles()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_count       bigint;
+begin
+  if not tests.tables_exist('outreach_cycles') then
+    return next skip(10, 'outreach cycles not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  return next is(
+    tests.sqlstate_of(v_admin,
+      'insert into public.outreach_cycles (name, starts_on, ends_on) values (''Spring 26'', ''2026-01-12'', ''2026-04-03'')'),
+    null,
+    'an admin defines a cycle'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      'insert into public.outreach_cycles (name, starts_on, ends_on) values (''CAM cycle'', ''2026-04-04'', ''2026-06-01'')'),
+    '42501',
+    'a CAM cannot define a cycle'
+  );
+
+  -- A cycle is a name and two dates — no personal data — so every active role
+  -- reads the definitions the analytics pickers list.
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.outreach_cycles;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 1::bigint, 'a viewer reads cycle definitions');
+
+  perform tests.login_as(v_deactivated);
+  select count(*) into v_count from public.outreach_cycles;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a deactivated user reads no cycles');
+
+  -- Names collide case-insensitively: "spring 26" cannot sit beside "Spring 26".
+  return next is(
+    tests.sqlstate_of(v_admin,
+      'insert into public.outreach_cycles (name, starts_on, ends_on) values (''spring 26'', ''2026-04-04'', ''2026-06-01'')'),
+    '23505',
+    'a duplicate cycle name is refused case-insensitively'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_admin,
+      'insert into public.outreach_cycles (name, starts_on, ends_on) values (''Backwards'', ''2026-06-01'', ''2026-04-04'')'),
+    '23514',
+    'an end before the start is refused'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      'update public.outreach_cycles set name = ''Renamed'''),
+    null,
+    'a CAM cannot rename a cycle'
+  );
+
+  perform tests.login_as(v_admin);
+  update public.outreach_cycles set name = 'Spring 26 (revised)' where name = 'Spring 26';
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.outreach_cycles where name = 'Spring 26 (revised)';
+  return next is(v_count, 1::bigint, 'an admin renames a cycle');
+
+  -- A blocked DELETE removes zero rows and raises nothing (§4), so the assertion
+  -- is that the row survives someone else trying.
+  perform tests.login_as(v_cam_a);
+  delete from public.outreach_cycles;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.outreach_cycles;
+  return next is(v_count, 1::bigint, 'a CAM cannot delete a cycle');
+
+  perform tests.login_as(v_admin);
+  delete from public.outreach_cycles;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  select count(*) into v_count from public.outreach_cycles;
+  return next is(v_count, 0::bigint, 'an admin deletes a cycle');
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Charity register coverage: shared read, service-only refresh
+-- ---------------------------------------------------------------------------
+create or replace function tests.suite_charity_register_coverage()
+returns setof text language plpgsql as $$
+declare
+  v_admin       uuid := '00000000-0000-4000-a000-000000000001';
+  v_cam_a       uuid := '00000000-0000-4000-a000-000000000002';
+  v_deactivated uuid := '00000000-0000-4000-a000-000000000004';
+  v_viewer      uuid := '00000000-0000-4000-a000-000000000005';
+  v_count       bigint;
+  v_stale_at    timestamptz;
+begin
+  if not tests.tables_exist('charity_register_coverage') then
+    return next skip(18, 'charity register coverage not yet migrated');
+    return;
+  end if;
+
+  perform tests.seed();
+
+  perform tests.login_as(v_cam_a);
+  select count(*) into v_count from public.charity_register_coverage;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 4::bigint, 'a CAM reads all four coverage figures');
+
+  perform tests.login_as(v_admin);
+  select count(*) into v_count from public.charity_register_coverage;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 4::bigint, 'an admin reads all four coverage figures');
+
+  perform tests.login_as(v_viewer);
+  select count(*) into v_count from public.charity_register_coverage;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 4::bigint, 'a viewer reads all four coverage figures');
+
+  perform tests.login_as(v_deactivated);
+  select count(*) into v_count from public.charity_register_coverage;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', null, true);
+  return next is(v_count, 0::bigint, 'a deactivated user reads no coverage figures');
+
+  return next ok(
+    not has_table_privilege('anon', 'public.charity_register_coverage', 'SELECT'),
+    'anonymous callers have no coverage table privilege'
+  );
+  return next ok(
+    has_table_privilege('authenticated', 'public.charity_register_coverage', 'SELECT'),
+    'authenticated callers have the coverage read privilege'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.charity_register_coverage', 'INSERT'),
+    'authenticated callers have no coverage insert privilege'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.charity_register_coverage', 'UPDATE'),
+    'authenticated callers have no coverage update privilege'
+  );
+  return next ok(
+    not has_table_privilege('authenticated', 'public.charity_register_coverage', 'DELETE'),
+    'authenticated callers have no coverage delete privilege'
+  );
+  return next ok(
+    has_table_privilege('service_role', 'public.charity_register_coverage', 'SELECT')
+      and has_table_privilege('service_role', 'public.charity_register_coverage', 'UPDATE'),
+    'service role has the table privileges its invoker refresh RPCs require'
+  );
+
+  return next ok(
+    not has_function_privilege('authenticated',
+      'public.claim_charity_register_coverage_refreshes(date)', 'EXECUTE'),
+    'authenticated callers cannot claim a coverage refresh'
+  );
+  return next ok(
+    not has_function_privilege('authenticated',
+      'public.finish_charity_register_coverage_refresh(text,timestamptz,date,integer,integer,integer,integer)',
+      'EXECUTE'),
+    'authenticated callers cannot finish a coverage refresh'
+  );
+  return next ok(
+    not has_function_privilege('authenticated',
+      'public.fail_charity_register_coverage_refresh(text,timestamptz)', 'EXECUTE'),
+    'authenticated callers cannot fail a coverage refresh'
+  );
+  return next ok(
+    has_function_privilege('service_role',
+      'public.claim_charity_register_coverage_refreshes(date)', 'EXECUTE'),
+    'service role can claim a coverage refresh'
+  );
+  return next ok(
+    has_function_privilege('service_role',
+      'public.finish_charity_register_coverage_refresh(text,timestamptz,date,integer,integer,integer,integer)',
+      'EXECUTE'),
+    'service role can finish a coverage refresh'
+  );
+  return next ok(
+    has_function_privilege('service_role',
+      'public.fail_charity_register_coverage_refresh(text,timestamptz)', 'EXECUTE'),
+    'service role can record a failed coverage refresh'
+  );
+
+  return next is(
+    tests.sqlstate_of(v_cam_a,
+      'update public.charity_register_coverage set stale_at = now()'),
+    '42501',
+    'a CAM cannot alter a coverage reading'
+  );
+
+  update public.charity_register_coverage
+     set stale_at = null
+   where coverage_kind = 'profile';
+  update public.organisations
+     set charity_activities = charity_activities
+   where id = '00000000-0000-4000-b000-000000000001';
+  select stale_at into v_stale_at
+    from public.charity_register_coverage
+   where coverage_kind = 'profile';
+  return next ok(
+    v_stale_at is not null,
+    'a relevant organisation write marks profile coverage stale'
+  );
+end;
+$$;
+
+select * from tests.suite_rls_initplan();
 select * from tests.suite_core();
 select * from tests.suite_viewer();
 select * from tests.suite_users();
@@ -3209,7 +5792,8 @@ select * from tests.suite_ingestion();
 select * from tests.suite_audit();
 select * from tests.suite_role_rpc();
 select * from tests.suite_active_rpc();
-select * from tests.suite_deactivate_rpc();
+select * from tests.suite_suspend_user_rpc();
+select * from tests.suite_delete_user_rpc();
 select * from tests.suite_invite_rpc();
 select * from tests.suite_signup_domain();
 select * from tests.suite_default_role();
@@ -3221,11 +5805,24 @@ select * from tests.suite_claim_ownership();
 select * from tests.suite_outreach_status();
 select * from tests.suite_offboard_unified();
 select * from tests.suite_suppressions();
+select * from tests.suite_org_tags();
+select * from tests.suite_ownership_requests();
+select * from tests.suite_edit_suggestions();
+select * from tests.suite_notifications();
+select * from tests.suite_attachments();
+select * from tests.suite_restricted_editing();
 select * from tests.suite_source_tracking();
 select * from tests.suite_manual_entries();
 select * from tests.suite_url_import();
 select * from tests.suite_onboarding();
+select * from tests.suite_outreach_preferences();
+select * from tests.suite_saved_views();
+select * from tests.suite_cycles();
+select * from tests.suite_charity_register_coverage();
 select * from tests.suite_client_criteria();
+select * from tests.suite_data_handling_rules();
+select * from tests.suite_personal_data_exclusion();
+select * from tests.suite_latest_scores();
 
 select * from finish();
 

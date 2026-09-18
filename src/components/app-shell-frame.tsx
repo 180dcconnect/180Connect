@@ -66,7 +66,6 @@ export function AppShellFrame({
         onMobileClose={() => setMobileOpen(false)}
         onboarding={onboarding}
       />
-
       {mobileOpen && (
         <div
           aria-hidden="true"
@@ -88,7 +87,13 @@ export function AppShellFrame({
           <span className="truncate text-base font-extrabold tracking-tight text-black">180Connect</span>
         </div>
 
-        <main className="min-w-0 flex-1">{children}</main>
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="min-w-0 max-w-full flex-1 overflow-x-clip outline-none"
+        >
+          {children}
+        </main>
       </div>
     </div>
   );

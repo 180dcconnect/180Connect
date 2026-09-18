@@ -17,6 +17,7 @@ on:
       - 'supabase/**'
       - 'scripts/verify-rls-coverage.sql'
       - 'scripts/verify-anon-lockout.sh'
+      - 'scripts/verify-anon-function-lockout.sql'
       - 'scripts/verify-last-admin-guard.mts'
       - '.github/workflows/migrations.yml'
   pull_request:
@@ -24,6 +25,7 @@ on:
       - 'supabase/**'
       - 'scripts/verify-rls-coverage.sql'
       - 'scripts/verify-anon-lockout.sh'
+      - 'scripts/verify-anon-function-lockout.sql'
       - 'scripts/verify-last-admin-guard.mts'
       - '.github/workflows/migrations.yml'
   # Manual re-run, e.g. after fixing a failed apply.
@@ -76,6 +78,7 @@ jobs:
       - run: npm ci
 
       - uses: supabase/setup-cli@v1
+        id: supabase-cli
         with:
           # Pinned, not `latest`. Resolving `latest` costs an unauthenticated
           # call to the GitHub releases API, which is rate-limited per runner IP
@@ -103,7 +106,7 @@ jobs:
       - name: RLS behaviour tests
         run: supabase test db
 
-      # Matrix §6 gap 7: proves set_user_role, set_user_active and deactivate_user
+      # Matrix §6 gap 7: proves set_user_role, set_user_active, suspend_user and delete_user
       # actually serialize against each other under real concurrency, which pgTAP's
       # single-session suite structurally cannot exercise (see the script's header).
       - name: Last-admin concurrency guard
@@ -122,8 +125,16 @@ jobs:
           ANON_KEY="$(supabase status -o json | jq -r '.ANON_KEY')"
           scripts/verify-anon-lockout.sh "http://127.0.0.1:54321" "$ANON_KEY"
 
+      - name: Anonymous function lockout probe
+        run: psql "$LOCAL_DB_URL" -v ON_ERROR_STOP=1 -f scripts/verify-anon-function-lockout.sql
+
+      # Only meaningful when the stack was actually started — and the CLI only
+      # exists once setup-cli has run. Gating on that step's conclusion stops a
+      # job that failed before installation (e.g. the timestamp check above)
+      # from ending in a confusing "supabase: command not found" 127 on top of
+      # the real failure.
       - name: Stop local stack
-        if: always()
+        if: always() && steps.supabase-cli.conclusion == 'success'
         run: supabase stop --no-backup
 
   apply-staging:
@@ -170,6 +181,9 @@ jobs:
             "${{ vars.SUPABASE_STAGING_URL }}" \
             "${{ vars.SUPABASE_STAGING_ANON_KEY }}"
 
+      - name: Anonymous function lockout probe (staging)
+        run: supabase db query --linked --file scripts/verify-anon-function-lockout.sql
+
   apply-prod:
     name: db push -> 180connect-production
     runs-on: ubuntu-latest
@@ -197,7 +211,13 @@ jobs:
           supabase migration list
 
       - name: Apply migrations
-        run: supabase db push
+        # Production once recorded the data-handling migrations under two
+        # earlier filenames. Their history was reconciled to the repository's
+        # replacement versions before the September 2026 release, which means
+        # several genuinely pending migrations now sort before an applied
+        # history row. --include-all is required for that backlog and remains
+        # safe because verify-migration-order.sh rejects newly stale filenames.
+        run: supabase db push --include-all
 
       - name: Confirm local and remote are in sync
         run: supabase migration list
@@ -210,3 +230,6 @@ jobs:
           scripts/verify-anon-lockout.sh \
             "${{ vars.SUPABASE_PROD_URL }}" \
             "${{ vars.SUPABASE_PROD_ANON_KEY }}"
+
+      - name: Anonymous function lockout probe (production)
+        run: supabase db query --linked --file scripts/verify-anon-function-lockout.sql

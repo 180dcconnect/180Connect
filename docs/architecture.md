@@ -25,7 +25,7 @@ so they describe the version we actually run.
   what renders.
 - **No API routes exist yet** (`src/app/api/**`). Every mutation goes through
   a **Server Action** — a `"use server"` file colocated with the page that
-  uses it, e.g. `src/app/login/actions.ts`, `src/app/dashboard/actions.ts`.
+  uses it, e.g. `src/app/login/actions.ts`, `src/app/(app)/dashboard/actions.ts`.
   If you're adding a new mutation, follow that pattern rather than adding a
   route handler, unless you specifically need one (webhooks, cron endpoints).
 
@@ -110,7 +110,7 @@ Two related but distinct logging paths:
 
 A third, separate thing: **`public.audit_log`** is a database table, not an
 application logger. It is the append-only trail for privileged actions — role
-changes, deactivations — written by `SECURITY DEFINER` RPCs such as
+changes, suspensions, deletions — written by `SECURITY DEFINER` RPCs such as
 `public.set_user_role`, readable by admins only, with no insert/update/delete
 policy at all. Application code never writes to it directly. Spec:
 [`docs/rls-permission-matrix.md`](rls-permission-matrix.md) §3.8.
@@ -142,11 +142,36 @@ schema) and validated at startup via `assertEnv()`. See
 [`docs/environment-variables.md`](environment-variables.md) for what each
 variable is, where to get its value, and how local/staging/production differ.
 
+## The two outreach rates
+
+Every screen that reports how outreach is going reports the same two numbers,
+built by `src/lib/outreach-rates.ts` and nowhere else:
+
+- **Reply rate** — of the clients we contacted, how many replied.
+- **Win rate** — of the clients who replied, how many converted.
+
+Both are ratios of **clients**, never of messages: a four-message thread with one
+charity is one responding client, and dividing replies by emails once reported
+400%. A recorded conversion counts as proof of a response, so win rate's
+denominator is replied ∪ converted (a client won by phone call is a win, and
+leaving it out of both halves would hide it); the ceiling is therefore 100%, and
+a rate is `null` — never `0%` — when its denominator is empty, because "nothing
+contacted yet" and "contacted everyone and won nothing" are different findings.
+
+`replyRate × winRate` equals the converted share of contacted clients, which is
+the number the funnel draws — that is the point of having exactly two. Team
+analytics (`cam-analytics.ts`), sector performance (`performance-metrics.ts`),
+the dashboard summary (`dashboard-metrics.ts`), tone performance
+(`tone-performance.ts`) and a team member's dial all consume this module. A new
+screen with a percentage on it uses it too, rather than dividing two numbers of
+its own.
+
 ## `src/lib/` map
 
 | Path | What it's for |
 | --- | --- |
 | `validation.ts` | Shared Zod-based input validation |
+| `outreach-rates.ts` | The two outreach rates above — reply rate and win rate, defined once |
 | `auth/permissions.ts` | Central permission check (`authorizeUserProfile`) — unauthenticated/inactive/profile/role |
 | `log-security-event.ts` | Structured logging for validation/permission/auth failures |
 | `error-logging.ts` | Unhandled-error capture, scrubbing, Sentry/console dispatch |

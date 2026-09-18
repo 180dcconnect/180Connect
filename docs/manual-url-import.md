@@ -91,6 +91,30 @@ around — it becomes the "not enough to identify the organisation" outcome, wit
 manual form directly below it (F256). `mind.org.uk` is a live example: its server HTML
 carries a name and a description but no registration number anywhere.
 
+## The same read, on a record that already exists
+
+F037 above is the new-client path: no record yet, so a CAM fills a draft and an admin
+approves it. An **ordinary limited company already on the client list** has the
+opposite problem — it will never gain a mission from a register, because no register
+publishes a purpose statement for a company. That is why the record header's
+completeness strip ticks `Mission` on about half the book and no more — see
+`src/lib/client-completeness.ts`. The website is the only place the text exists.
+
+For that case the General Information card's Mission row carries a **"Read from
+website"** control, available to admins only (mission is not a column on
+`organisations`, so it can never be a restricted field and a CAM has no proposal
+route for it — the pencil on that row is already admin-only). It runs the same
+`fetchImportPage` + `extractOrganisation` pair as an import, reads the description the
+page publishes about itself, and **puts it in the draft**. Nothing is written by the
+lookup: the admin reads it, edits it, and saves it through the normal admin edit path,
+which is where a mission on an existing record has always been written. So there is
+still exactly one writer for this field, and the value that lands on the record is one
+a person read first.
+
+The resulting text is the site's own sentence, quoted — not a model's summary of the
+site. A page that publishes no description, or only repeats the organisation's own
+name, returns a sentence saying so rather than a guess.
+
 ## Retrieving website content: the legal and technical position
 
 The open question on the ticket was the basis for retrieving public website content.

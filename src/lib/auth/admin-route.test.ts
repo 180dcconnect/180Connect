@@ -23,6 +23,7 @@ const ALL_REASONS: Record<PermissionFailureReason, true> = {
   inactive: true,
   profile_missing: true,
   forbidden: true,
+  view_only: true,
 };
 
 describe("admin route boundary (F017 AC2)", () => {
@@ -48,14 +49,17 @@ describe("admin route boundary (F017 AC2)", () => {
     );
   });
 
-  it("sends a viewer the same way — no role but admin reaches an admin route", () => {
-    const refusal = authorizeUserProfile(
-      testUser(),
-      { id: testUser().id, full_name: "Viewer", role: "viewer", is_active: true },
-      "user:manage",
-    );
-    assert.deepEqual(refusal, { ok: false, reason: "forbidden" });
-    assert.equal(adminRouteDestination("forbidden"), ADMIN_ACCESS_DENIED_PATH);
+  it("lets a viewer (leadership) open an admin route, but not act on it", () => {
+    // Q-06 revised 15 Sep 2026: pages gate with `view` access, which a viewer
+    // passes; the actions behind them gate with `use`, which a viewer never does.
+    const viewer = { id: testUser().id, full_name: "Viewer", role: "viewer", is_active: true };
+    assert.deepEqual(authorizeUserProfile(testUser(), viewer, "user:manage", "view"), {
+      ok: true,
+      role: "viewer",
+    });
+    const refusal = authorizeUserProfile(testUser(), viewer, "user:manage");
+    assert.deepEqual(refusal, { ok: false, reason: "view_only" });
+    assert.equal(adminRouteDestination("view_only"), ADMIN_ACCESS_DENIED_PATH);
   });
 
   it("sends an unusable session to the login page, not through the dashboard", () => {

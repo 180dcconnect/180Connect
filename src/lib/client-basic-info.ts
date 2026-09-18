@@ -6,7 +6,12 @@
  * the admin team list.
  */
 
-import { formatLocation, formatOutreachStatus } from "./organisation-format.ts";
+import { containsRedactionPlaceholder } from "./ingestion/personal-data.ts";
+import {
+  formatLocation,
+  formatOrganisationType,
+  formatOutreachStatus,
+} from "./organisation-format.ts";
 
 /** AC2's explicit blank. Exported so the UI can render it as muted rather than
  * re-deriving "is this a real value?" from a string comparison of its own. */
@@ -23,6 +28,31 @@ export type OrganisationDetailRow = {
   postcode: string | null;
   country_code: string;
   outreach_status: string;
+  geographic_reach?: string | null;
+  sector?: string | null;
+  sub_sector?: string | null;
+  /** Companies House SIC2007 codes, register order. Null for a charity, which
+   *  has no company registration. Codes only — the register's own wording for
+   *  them is resolved server-side from the companies-register file and reaches
+   *  the panel as `sicTitles`, because the file is not readable from a client
+   *  component. */
+  sic_codes?: string[] | null;
+  /** Filed purpose text. Charity Commission activities for charities, the CIC36
+   *  community-interest statement for CICs — the two canonical inputs to
+   *  resolveMission, selected wherever the row is loaded for AI context. */
+  charity_activities?: string | null;
+  cic_community_statement?: string | null;
+  /**
+   * The Charity Commission's solvency flags, as the regulator published them.
+   *
+   * Three-valued on purpose: `null` means the register has never been read for
+   * this organisation, which is not the same claim as `false` (the register
+   * says it is solvent). Nine tenths of the client list reads null, because it
+   * was imported before the columns existed.
+   */
+  insolvent?: boolean | null;
+  in_administration?: boolean | null;
+  created_at?: string;
 };
 
 /** Basic-info state as held by the client component: the org row plus the
@@ -68,9 +98,18 @@ export function buildBasicInfo(state: BasicInfoState): BasicInfo {
   const { organisation, missionStatement } = state;
   return {
     name: organisation.legal_name,
-    type: organisation.organisation_type,
+    // Formatted, like every other enum on this page: the row read
+    // "social_enterprise" while /clients showed "Social enterprise" for the
+    // same record. formatOrganisationType falls back to the raw value, so a
+    // type the database grew first still shows rather than vanishing.
+    type: formatOrganisationType(organisation.organisation_type),
     mission: displayValue(missionStatement),
-    email: displayValue(organisation.contact_email),
+    // A redaction placeholder is a record of a removal, not an address: shown
+    // as the blank it is rather than printed back at the reader as though the
+    // register had published `[redacted:personal-email]`.
+    email: containsRedactionPlaceholder(organisation.contact_email)
+      ? NOT_PROVIDED
+      : displayValue(organisation.contact_email),
     address: formatAddress(organisation),
     location: formatLocation(organisation),
     website: displayValue(organisation.website),

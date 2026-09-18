@@ -74,17 +74,23 @@ function CtaBody({
     <>
       {/* Both halves share a height so the disc stays a circle and the two keep
           meeting at a single tangent point. overflow-hidden clips the oversized
-          wash block to the pill's rounded shape. */}
+          wash block to the pill's rounded shape. The blur deliberately lives on
+          the underlay below, not here: WebKit fails to paint a transformed child
+          inside a backdrop-filter element, which made the wash vanish entirely
+          on Safari. */}
       <motion.span
-        className={`relative flex items-center overflow-hidden rounded-full ring-1 ring-white/25 ${t.blur} ${
+        className={`relative flex items-center overflow-hidden rounded-full ring-1 ring-white/25 ${
           large ? "h-10 px-6" : "h-9 px-4 sm:px-5"
         }`}
         style={{ boxShadow: LIP }}
       >
         {/* Resting dark glass underlay: fades out on hover so dark pixels never bleed
-            through the antialiased pill boundary against the page ground. */}
+            through the antialiased pill boundary against the page ground. Carries the
+            pill's backdrop-blur itself — WebKit copes with opacity animating on the
+            same element as its backdrop-filter, just not on an ancestor of a
+            transformed sibling. */}
         <motion.span
-          className="pointer-events-none absolute inset-0 rounded-full"
+          className={`pointer-events-none absolute inset-0 rounded-full ${t.blur}`}
           style={{ backgroundColor: t.pill }}
           variants={{
             rest: { opacity: 1, transition: { duration: 0.2 } },
@@ -93,11 +99,12 @@ function CtaBody({
           aria-hidden="true"
         />
         {/* Wide enough that its square trailing edge never enters frame — only
-            the rounded leading edge is ever on screen. The 1px vertical bleed is
-            load-bearing; see ctaWash. */}
+            the rounded leading edge is ever on screen. Sized relative to the
+            pill so ctaWash can travel as a transform; see ctaWash. The 2px
+            vertical bleed is load-bearing. */}
         <motion.span
           variants={ctaWash}
-          className="absolute -inset-y-[2px] block w-[999px] rounded-l-full"
+          className="absolute -inset-y-[2px] left-full block w-[200%] rounded-l-full"
           style={{ backgroundColor: t.accent }}
           aria-hidden="true"
         />

@@ -6,6 +6,26 @@
 export type DiscrepancyStatus = "pending" | "resolved";
 export type DiscrepancyChoice = "existing" | "incoming";
 
+/**
+ * Field names in the words of the job — never column names. Shared by the
+ * discrepancies queue and the duplicates screen's merge dialog so the same
+ * field cannot be labelled two ways on two screens.
+ */
+export const DISCREPANCY_FIELD_LABEL: Record<string, string> = {
+  legal_name: "Legal name",
+  website: "Website",
+  contact_email: "Contact email",
+  address_line_1: "Address",
+  city: "City",
+  postcode: "Postcode",
+};
+
+export function discrepancyFieldLabel(fieldName: string): string {
+  // A newly-added database field must not leak its column name into an admin
+  // screen before the plain-English label is added above.
+  return DISCREPANCY_FIELD_LABEL[fieldName] ?? "Other detail";
+}
+
 export type FieldDiscrepancyRow = {
   id: string;
   organisation_id: string;

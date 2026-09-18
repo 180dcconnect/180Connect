@@ -4,6 +4,7 @@
 // (AC2's "empty, not omitted" rule, the mapper/write-layer split) — this file
 // only documents what's different for this source.
 
+import { normalizeCity } from "../city.ts";
 import {
   computeCompletenessScore,
   type StandardOrganisation,
@@ -67,6 +68,63 @@ const ASSUMED_COUNTRY_CODE = "GB";
  * built here. Flagged explicitly (same boundary write-organisations.ts draws
  * for F042/F048) rather than silently assumed away.
  */
+/**
+ * Derive a finer F041 organisation_type from Companies House legal form.
+ * CIC subtype is the strongest signal (community-interest-company); CIO forms
+ * map to cio; Tier C (SIC-gated) maps to social_enterprise as probable
+ * mission-fit where legal form alone isn't definitive.
+ */
+function deriveCompaniesHouseOrganisationType(
+  raw: RawCompaniesHouseRecord,
+): StandardOrganisation["organisation_type"] {
+  const subtype = typeof raw.company_subtype === "string" ? raw.company_subtype.toLowerCase() : "";
+  if (subtype === "community-interest-company") return "cic";
+
+  const companyType = typeof raw.company_type === "string" ? raw.company_type.toLowerCase() : "";
+  if (
+    companyType === "charitable-incorporated-organisation" ||
+    companyType === "scottish-charitable-incorporated-organisation"
+  ) {
+    return "cio";
+  }
+  if (companyType === "further-education-or-sixth-form-college-corporation") {
+    return "social_enterprise";
+  }
+
+  const tier = classifyCompaniesHouseTier(raw);
+  if (tier === "C") return "social_enterprise";
+  // Tier B without subtype already handled above, but keep fallback
+  if (tier === "B") return "cic";
+  if (tier === "A") return "cio";
+  return "company";
+}
+
+const COMPANY_SECTOR_RULES = [
+  { codes: ["88910"], sector: "Youth & Children" },
+  { codes: ["91020", "91030"], sector: "Heritage & Museums" },
+  { codes: ["91040", "38320", "39000"], sector: "Environment & Conservation" },
+  { codes: ["91011", "91012"], sector: "Arts & Culture" },
+  { codes: ["86", "87", "88"], sector: "Health & Social Care" },
+  { codes: ["85"], sector: "Education & Training" },
+  { codes: ["90"], sector: "Arts & Culture" },
+  { codes: ["93"], sector: "Sports & Recreation" },
+] as const;
+
+export function companiesHouseSector(sicCodes: unknown): string | null {
+  if (!Array.isArray(sicCodes)) return null;
+  const codes = sicCodes
+    .filter((code): code is string => typeof code === "string")
+    .map((code) => code.trim())
+    .filter((code) => /^\d{5}$/.test(code));
+
+  for (const rule of COMPANY_SECTOR_RULES) {
+    if (rule.codes.some((prefix) => codes.some((code) => code.startsWith(prefix)))) {
+      return rule.sector;
+    }
+  }
+  return null;
+}
+
 export function standardizeCompaniesHouseRecord(
   raw: RawCompaniesHouseRecord,
 ): StandardOrganisation {
@@ -82,7 +140,7 @@ export function standardizeCompaniesHouseRecord(
     // official government register counts as "verified" in this project's
     // sense is unresolved — left false pending clarification.
     is_verified: false,
-    organisation_type: "company",
+    organisation_type: deriveCompaniesHouseOrganisationType(raw),
     // The /company profile endpoint has no contact fields at all (no
     // website, no email) — unlike Charity Commission's enrichment calls,
     // there's no richer Companies House endpoint this adapter could call for
@@ -90,7 +148,7 @@ export function standardizeCompaniesHouseRecord(
     website: "",
     contact_email: "",
     address_line_1: address.address_line_1 ?? "",
-    city: address.locality ?? "",
+    city: normalizeCity(address.locality ?? ""),
     postcode: address.postal_code ?? "",
     // geographic_reach has no source signal at all yet — null, not a guess.
     geographic_reach: null,

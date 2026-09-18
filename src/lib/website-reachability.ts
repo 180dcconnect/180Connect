@@ -93,7 +93,7 @@ export function pinnedLookup(address: string, family: 4 | 6) {
  * The URL hostname remains intact for the Host header and TLS SNI/certificate check,
  * while the TCP connection cannot be redirected by a second DNS answer.
  */
-async function requestPinned(url: string, address: string) {
+async function requestWithMethod(url: string, address: string, method: "HEAD" | "GET") {
   const target = new URL(url);
   const family = isIP(address);
   if (family !== 4 && family !== 6) throw new Error("Resolved address is not an IP");
@@ -102,7 +102,7 @@ async function requestPinned(url: string, address: string) {
     const request = (target.protocol === "https:" ? httpsRequest : httpRequest)(
       target,
       {
-        method: "HEAD",
+        method,
         headers: { Host: target.host, "User-Agent": "180Connect-Website-Validator/1.0" },
         lookup: pinnedLookup(address, family),
       },
@@ -121,6 +121,23 @@ async function requestPinned(url: string, address: string) {
     request.on("error", reject);
     request.end();
   });
+}
+
+/**
+ * HEAD first, with a one-shot GET fallback when the server refuses HEAD.
+ *
+ * Some hosts (e.g. http://www.cads-online.org/, behind AWS ELB) answer HEAD
+ * with 405 while GET serves the page normally — a live site our check reported
+ * as unreachable. 405/501 says the method is unsupported, not that the site is
+ * down, so retry the same pinned address with GET rather than failing the row.
+ *
+ * Exported for tests: points at a local HTTP server, so the fallback runs
+ * without touching the public internet or the hostname safety checks.
+ */
+export async function requestPinned(url: string, address: string) {
+  const head = await requestWithMethod(url, address, "HEAD");
+  if (head.status !== 405 && head.status !== 501) return head;
+  return requestWithMethod(url, address, "GET");
 }
 
 /** Production wrapper; decision logic stays injectable and unit-testable. */

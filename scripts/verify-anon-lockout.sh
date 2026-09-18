@@ -9,7 +9,9 @@
 # public by design — RLS is the only thing standing behind it.
 #
 # Every table must return either an empty array or a permission error. A single
-# non-empty array is a data leak.
+# non-empty array is a data leak. Function EXECUTE privileges are checked by
+# scripts/verify-anon-function-lockout.sql because hosted PostgREST projects can
+# disable anonymous OpenAPI access, making HTTP schema introspection return 401.
 #
 # Usage:
 #   scripts/verify-anon-lockout.sh <supabase-url> <anon-key>
@@ -42,11 +44,19 @@ leaked=()
 pending=0
 checked=0
 
+# Legacy anon keys are JWTs and belong in both headers. Supabase's newer
+# sb_publishable_ keys are API keys, not JWTs: sending one as a Bearer token
+# makes the gateway return 401 before PostgREST/RLS is exercised, which would
+# turn every table check into a false pass.
+AUTH_HEADERS=(-H "apikey: ${KEY}")
+if [[ "$KEY" != sb_publishable_* ]]; then
+  AUTH_HEADERS+=(-H "Authorization: Bearer ${KEY}")
+fi
+
 for table in "${TABLES[@]}"; do
   response="$(curl -sS -w '\n%{http_code}' \
     "${URL}/rest/v1/${table}?select=*&limit=1" \
-    -H "apikey: ${KEY}" \
-    -H "Authorization: Bearer ${KEY}")"
+    "${AUTH_HEADERS[@]}")"
 
   status="$(tail -n1 <<<"$response")"
   body="$(sed '$d' <<<"$response")"
@@ -74,10 +84,10 @@ for table in "${TABLES[@]}"; do
 done
 
 if ((${#leaked[@]} > 0)); then
-  echo "FAIL: the anon key reached data on ${#leaked[@]} table(s):" >&2
+  echo "FAIL: found ${#leaked[@]} anonymous data exposure(s):" >&2
   printf '  - %s\n' "${leaked[@]}" >&2
   echo >&2
-  echo "The anon key is public. Any table listed above is readable by anyone." >&2
+  echo "The anon key is public. Tables must return no rows." >&2
   exit 1
 fi
 

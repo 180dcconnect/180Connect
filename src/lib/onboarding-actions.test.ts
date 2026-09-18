@@ -82,9 +82,12 @@ describe("onboarding action module", () => {
     assert.equal(reports.length, 2, "both write paths report their own failures");
   });
 
-  it("refreshes the dashboard after a successful write", async () => {
+  it("refreshes the shared shell, and so the dashboard, after a successful write", async () => {
     const source = await readFile(ACTIONS, "utf8");
-    const revalidations = source.match(/revalidatePath\("\/dashboard"\)/g) ?? [];
+    // The checklist renders in the sidebar every signed-in page shares through
+    // src/app/(app)/layout.tsx, which does not re-render on navigation — so the
+    // layout itself is revalidated. That covers the dashboard's guide too.
+    const revalidations = source.match(/revalidatePath\("\/", "layout"\)/g) ?? [];
 
     // AC4: the tick has to be there when the CAM returns, without them reloading.
     assert.equal(revalidations.length, 2);

@@ -1,20 +1,38 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { RESET_LINK_ERROR } from "@/lib/auth/password-reset";
+import { INVITE_LINK_ERROR } from "@/lib/auth/invite";
 import { GROUND, INK } from "@/components/brand/tokens";
 import { fieldVars } from "@/components/brand/fields";
 import { Wordmark } from "@/components/brand/wordmark";
 import { ResetPasswordForm } from "./reset-password-form";
+import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Set Password | 180Connect" };
 
 export default async function ResetPasswordPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; flow?: string; email?: string }>;
+  searchParams: Promise<{ error?: string; flow?: string; email?: string; token_hash?: string }>;
 }) {
-  const { error, flow, email } = await searchParams;
+  const { error, flow, email, token_hash: tokenHash } = await searchParams;
   const isInvite = flow === "invite";
+
+  let existingFullName: string | null = null;
+  try {
+    const supabase = await createClient();
+    const { data: userData } = await supabase.auth.getUser();
+    if (userData?.user) {
+      const { data: profile } = await supabase
+        .from("users")
+        .select("full_name")
+        .eq("id", userData.user.id)
+        .maybeSingle();
+      existingFullName = profile?.full_name ?? null;
+    }
+  } catch {
+    // Ignore prefetch error
+  }
 
   return (
     <main
@@ -39,13 +57,20 @@ export default async function ResetPasswordPage({
         </h1>
         <p className="mt-2 font-body text-sm leading-[1.65] text-[#0c1014]/50">
           {isInvite
-            ? "Set a password to finish creating your account."
+            ? "Set your name and password to finish creating your account."
             : "Your reset link is single-use."}
         </p>
         <ResetPasswordForm
-          linkError={error ? RESET_LINK_ERROR : undefined}
+          linkError={error ? (isInvite ? INVITE_LINK_ERROR : RESET_LINK_ERROR) : undefined}
           isInvite={isInvite}
           email={email}
+          existingFullName={existingFullName}
+          // Deferred invite verification: the token this link carried rides
+          // the form as a hidden field and is verified when the password is
+          // submitted — never rendered, never logged. Recovery never carries
+          // one (it verifies on landing), so a stray hash on that flow is
+          // ignored rather than trusted.
+          inviteTokenHash={isInvite ? tokenHash : undefined}
         />
       </section>
     </main>

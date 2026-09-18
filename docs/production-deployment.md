@@ -13,6 +13,13 @@ configured on the production Supabase project, verified by probe — see
 **Last updated:** 30 July 2026
 **Component Owner:** Ben. **Reviewer:** Bashir.
 
+> **Going live?** Start with [prod-go-live-checklist.md](prod-go-live-checklist.md).
+> This document covers the pipeline, rollbacks and the CAPTCHA; that one covers the
+> per-environment configuration (Vercel variables, Supabase Vault, the reply-check
+> function, Resend) that no merge can do for you. Written 17 September 2026, after
+> this document was last reviewed — its environment-variable section below predates
+> Gmail, Exa and the current cron fleet.
+
 ---
 
 ## Production at a glance
@@ -201,6 +208,7 @@ marks which variables those are.
 
 ## Related files
 
+- [Production go-live checklist](prod-go-live-checklist.md)
 - [Staging Environment Setup](staging-environment-setup.md)
 - [Environment Variables](environment-variables.md)
 - [Open Questions](open-questions.md)

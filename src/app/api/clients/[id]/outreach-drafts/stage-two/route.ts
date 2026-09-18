@@ -1,0 +1,503 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { actorFailureMessage, getCurrentActor } from "@/lib/auth/actor";
+import { reportError } from "@/lib/error-logging";
+import { logSecurityEvent } from "@/lib/log-security-event";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
+import { isUuid, safeValidate, uuidField } from "@/lib/validation";
+import {
+  createStageTwoModelCall,
+  generateStageTwoDraft,
+  isStageTwoEligible,
+} from "@/lib/outreach/stage-two-generation";
+import { buildStageTwoGenerationInsert } from "@/lib/outreach/stage-two-persistence";
+import { emailHtmlToPlainText } from "@/lib/outreach/email-html";
+import { stripQuotedReply } from "@/lib/gmail/reply-message";
+import { EMAIL_LENGTHS, EMAIL_REGISTERS } from "@/lib/outreach/stage-one-prompt";
+import {
+  STAGE_TWO_CLOSINGS,
+  type ReplyIntent,
+  type ReplySentiment,
+} from "@/lib/outreach/stage-two-prompt";
+import {
+  checkSuppressionBeforeSend,
+  suppressionBlockedMessage,
+  type ActiveSuppression,
+} from "@/lib/outreach/suppression-check";
+import { checkOwnershipConflict } from "@/lib/outreach/ownership-conflict";
+import { computeCostUsd } from "@/lib/outreach/generation-cost";
+import { loadModelRate } from "@/lib/ai/model-rate";
+import { consumeAiGenerationAllowance } from "@/lib/ai/rate-limit";
+import { buildAttachmentEmailContext } from "@/lib/attachments";
+import { lookupLiveNewsHook } from "@/lib/outreach/news-hook";
+import { resolveMissionText } from "@/lib/mission";
+
+// No maxDuration export — see the stage-one route: the 300s project default
+// applies, and a distinct value would cost a Vercel function.
+
+// Follow-up preferences, as the composer's panel sends them. Every field has a
+// default, so an absent body still parses. Field rules come from
+// @/lib/validation (uuidField for the echoed reply-event id); z.object here is
+// only the shape they are assembled into — the same split the reference usage
+// in lib/auth/login.ts uses. Validation runs through safeValidate below, so a
+// bad payload reports per-field rather than throwing.
+const bodySchema = z.object({
+  length: z.enum(EMAIL_LENGTHS).default("standard"),
+  register: z.enum(EMAIL_REGISTERS).default("professional"),
+  closing: z.enum(STAGE_TWO_CLOSINGS).default("soft_cta"),
+  replyEventId: uuidField().optional(),
+  skipNews: z.boolean().optional(),
+});
+
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const authorization = await getCurrentActor("client:contact", { route: "/clients/[id]" });
+  if (!authorization.ok) {
+    return NextResponse.json(
+      { error: actorFailureMessage(authorization.reason) },
+      { status: authorization.reason === "unauthenticated" ? 401 : 403 },
+    );
+  }
+
+  const { id: organisationId } = await params;
+  if (!isUuid(organisationId)) {
+    return NextResponse.json({ error: "That client could not be found." }, { status: 400 });
+  }
+
+  // The booklet is deliberately NOT part of the request body — same decision as
+  // Stage 1 (F103): the saved booklet (F085/F086) is read straight from
+  // client_booklets below, so the text reaching the prompt is exactly what
+  // RLS-protected storage holds, never a client-supplied string.
+  const parsed = safeValidate(bodySchema, await request.json().catch(() => ({})));
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Choose valid follow-up preferences and try again." }, { status: 400 });
+  }
+
+  const admin = createAdminClient();
+  if (!admin) {
+    return NextResponse.json({ error: "Email generation is not configured. Contact an administrator." }, { status: 503 });
+  }
+
+  const supabase = await createClient();
+  const { data: organisation, error: organisationError } = await supabase
+    .from("organisations")
+    .select(
+      "id, legal_name, trading_name, organisation_type, website, city, country_code, geographic_reach, sector, sub_sector, outreach_status, owner_id, charity_activities, cic_community_statement, owner:users!organisations_owner_id_fkey(full_name)",
+    )
+    .eq("id", organisationId)
+    .maybeSingle<{
+      id: string;
+      legal_name: string;
+      trading_name: string | null;
+      organisation_type: string;
+      website: string | null;
+      city: string | null;
+      country_code: string | null;
+      geographic_reach: string | null;
+      sector: string | null;
+      sub_sector: string | null;
+      outreach_status: string;
+      owner_id: string | null;
+      charity_activities: string | null;
+      cic_community_statement: string | null;
+      owner: { full_name: string | null } | null;
+    }>();
+  if (organisationError || !organisation) {
+    if (organisationError) await reportError(organisationError, { operation: "outreach.stage_two.load_client", organisationId });
+    return NextResponse.json({ error: "That client could not be loaded." }, { status: organisation ? 500 : 404 });
+  }
+  let replyEvent: {
+    id: string;
+    outreach_message_id: string | null;
+    reply_body: string;
+    /** Populated at capture when the sender's address matched a contact. */
+    contact_id: string | null;
+    /** The classifier's read of the reply — computed when it arrived, never here. */
+    sentiment: ReplySentiment | null;
+    intent: ReplyIntent | null;
+    received_at: string;
+  } | null = null;
+  if (parsed.data.replyEventId) {
+    const { data, error } = await supabase
+      .from("reply_events")
+      .select("id, outreach_message_id, reply_body, contact_id, sentiment, intent, received_at")
+      .eq("id", parsed.data.replyEventId)
+      .eq("organisation_id", organisationId)
+      .maybeSingle<{
+        id: string;
+        outreach_message_id: string | null;
+        reply_body: string;
+        contact_id: string | null;
+        sentiment: ReplySentiment | null;
+        intent: ReplyIntent | null;
+        received_at: string;
+      }>();
+    if (error) {
+      await reportError(error, {
+        operation: "outreach.stage_two.load_reply",
+        organisationId,
+        replyEventId: parsed.data.replyEventId,
+      });
+      return NextResponse.json({ error: "The client reply could not be loaded. Try again." }, { status: 500 });
+    }
+    if (!data) {
+      return NextResponse.json({ error: "That client reply is no longer available." }, { status: 404 });
+    }
+    replyEvent = data;
+  }
+
+  if (!replyEvent && !isStageTwoEligible(organisation.outreach_status)) {
+    return NextResponse.json(
+      { error: "A follow-up can only be generated after the Stage 1 email was sent and before a response or follow-up is recorded." },
+      { status: 409 },
+    );
+  }
+
+  // Server-side re-check of ownership and suppression immediately before paying
+  // for generation — identical to Stage 1's gate and for the same reason: a
+  // suppression or ownership change can land after the page loaded, and calling
+  // this endpoint directly must not spend a paid Gemini call on a blocked
+  // organisation. The outreach_messages RLS can_contact_organisation WITH CHECK
+  // remains the final backstop at insert.
+  const conflict = checkOwnershipConflict({
+    ownerId: organisation.owner_id,
+    ownerName: organisation.owner?.full_name,
+    actorId: authorization.actor.id,
+    actorRole: authorization.actor.role,
+  });
+  if (conflict.hasConflict) {
+    logSecurityEvent("outreach.ownership_conflict_blocked", {
+      operation: "outreach.stage_two",
+      organisationId,
+      ownerId: conflict.ownerId,
+      userId: authorization.actor.id,
+    });
+    return NextResponse.json(
+      { error: conflict.warning, kind: "ownership_conflict" },
+      { status: 409 },
+    );
+  }
+
+  let suppressionLookupError: unknown;
+  const suppressionResult = await checkSuppressionBeforeSend(organisationId, async () => {
+    const { data, error } = await supabase
+      .from("suppressions")
+      .select("id, reason")
+      .eq("organisation_id", organisationId)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<ActiveSuppression>();
+    if (error) {
+      suppressionLookupError = error;
+      throw error;
+    }
+    return data;
+  });
+  if (!suppressionResult.allowed && suppressionResult.kind === "unavailable") {
+    await reportError(suppressionLookupError ?? new Error("Suppression lookup failed."), {
+      operation: "outreach.stage_two.suppression_lookup",
+      organisationId,
+    });
+    return NextResponse.json(
+      { error: "Suppression status could not be checked. Nothing was generated. Please try again." },
+      { status: 503 },
+    );
+  }
+  if (!suppressionResult.allowed) {
+    logSecurityEvent("outreach.suppression_blocked", {
+      operation: "outreach.stage_two",
+      organisationId,
+      suppressionId: suppressionResult.suppressionId,
+      userId: authorization.actor.id,
+    });
+    return NextResponse.json(
+      { error: suppressionBlockedMessage(suppressionResult.reason), reason: suppressionResult.reason },
+      { status: 409 },
+    );
+  }
+
+  // F135: when drafting from a reply, use the exact sent message that reply is
+  // linked to. The browser supplies only the event id; both reply text and the
+  // original email are loaded under RLS and scoped to this client here.
+  let previousMessageQuery = supabase
+    .from("outreach_messages")
+    .select("subject, body")
+    .eq("organisation_id", organisationId)
+    .eq("send_status", "sent");
+  if (replyEvent?.outreach_message_id) {
+    previousMessageQuery = previousMessageQuery.eq("id", replyEvent.outreach_message_id);
+  } else {
+    previousMessageQuery = previousMessageQuery.order("sent_at", { ascending: false }).limit(1);
+  }
+
+  const [
+    { data: contact, error: contactError },
+    { data: enrichment, error: enrichmentError },
+    { data: financialPeriod, error: financialError },
+    { data: previousMessage, error: previousMessageError },
+  ] = await Promise.all([
+    supabase.from("contacts").select("id, first_name, last_name, job_title").eq("organisation_id", organisationId).order("is_primary", { ascending: false }).order("created_at", { ascending: true }).limit(1).maybeSingle(),
+    supabase.from("enrichment_results").select("mission_statement, mission_keywords, sector, sub_sector, news_hooks").eq("organisation_id", organisationId).order("enriched_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("financial_periods").select("income_band").eq("organisation_id", organisationId).order("period_end", { ascending: false }).limit(1).maybeSingle(),
+    previousMessageQuery.maybeSingle(),
+  ]);
+  if (contactError) await reportError(contactError, { operation: "outreach.stage_two.load_contact", organisationId });
+  if (enrichmentError) await reportError(enrichmentError, { operation: "outreach.stage_two.load_context", organisationId });
+  if (financialError) await reportError(financialError, { operation: "outreach.stage_two.load_financial_context", organisationId });
+  if (previousMessageError) await reportError(previousMessageError, { operation: "outreach.stage_two.load_previous_email", organisationId });
+  if (previousMessageError || !previousMessage) {
+    return NextResponse.json(
+      { error: "The previously sent email could not be loaded, so a safe follow-up cannot be generated." },
+      { status: previousMessageError ? 500 : 409 },
+    );
+  }
+
+  // Who actually wrote in. Named only when the capture could match the sender's
+  // address to a contact on the record; when it could not, the greeting falls
+  // back to the team form rather than to the primary contact, who is a
+  // different person often enough to matter in a live thread.
+  let replyAuthorName: string | null = null;
+  if (replyEvent?.contact_id) {
+    const { data: author, error: authorError } = await supabase
+      .from("contacts")
+      .select("first_name, last_name")
+      .eq("id", replyEvent.contact_id)
+      .maybeSingle<{ first_name: string | null; last_name: string | null }>();
+    if (authorError) {
+      await reportError(authorError, { operation: "outreach.stage_two.load_reply_author", organisationId });
+    }
+    replyAuthorName = [author?.first_name, author?.last_name].filter(Boolean).join(" ") || null;
+  }
+
+  // A reply keeps the thread's subject. The model is not asked for one (see
+  // StageTwoDraft) — composing it here is what makes the reviewed draft, the
+  // saved outreach_messages row and the email the client receives all carry the
+  // same subject, instead of a generated line that was stored and then ignored.
+  const threadSubject = previousMessage.subject?.trim() ?? "";
+  const replySubject = threadSubject
+    ? /^re:/i.test(threadSubject)
+      ? threadSubject
+      : `Re: ${threadSubject}`
+    : "Re:";
+
+  // F103 AC1 parity with Stage 1: the client's saved booklet (latest version per
+  // F085/F086) is passed to generation as additional context. A missing booklet
+  // is not an error — a follow-up still has the previous email to build on — so
+  // this is tolerant of a failed read the same way the enrichment lookup is.
+  const { data: savedBooklet, error: bookletError } = await supabase
+    .from("client_booklets")
+    .select("booklet_text")
+    .eq("organisation_id", organisationId)
+    .order("generated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ booklet_text: string }>();
+  if (bookletError) {
+    await reportError(bookletError, { operation: "outreach.stage_two.load_booklet", organisationId });
+  }
+
+  const { data: extractedAttachments, error: attachmentContextError } = await supabase
+    .from("attachments")
+    .select("filename, extracted_text")
+    .eq("organisation_id", organisationId)
+    .eq("text_extraction_status", "succeeded")
+    .order("created_at", { ascending: false });
+  if (attachmentContextError) {
+    await reportError(attachmentContextError, { operation: "outreach.stage_two.load_attachment_context", organisationId });
+  }
+  const attachmentText = buildAttachmentEmailContext(extractedAttachments ?? []);
+
+  // F110: pull one live news hook at draft-generation time (Exa, fail-open).
+  // lookupLiveNewsHook never throws and resolves to null on any failure, so the follow-up still generates. A live hit takes
+  // precedence (it is the fresh evidence AC1 asks for); otherwise the stored
+  // enrichment hooks keep the previous behaviour. newsSource/newsHook/newsUrl
+  // are additive in the response so the review UI can show a verifiable link.
+  const liveNews = parsed.data.skipNews
+    ? null
+    : await lookupLiveNewsHook({
+        organisationId,
+        organisationName: organisation.legal_name,
+        tradingName: organisation.trading_name,
+        website: organisation.website,
+        city: organisation.city,
+        countryCode: organisation.country_code,
+        geographicReach: organisation.geographic_reach,
+        sector: organisation.sector,
+      });
+  const storedHooks = parsed.data.skipNews
+    ? []
+    : (enrichment?.news_hooks?.filter(Boolean) ?? []);
+  // The Source line persists the verification URL verbatim in
+  // ai_generations.prompt_user (F112): outreach_messages has no vessel for it,
+  // so without this the URL would exist only in the transient response below
+  // and be unverifiable once the draft is reopened. A model that cites the
+  // source in the draft is fine — the CAM reviews every word before approval.
+  const newsHooks =
+    liveNews?.url != null
+      ? [`${liveNews.text}\nSource: ${liveNews.url}`]
+      : liveNews
+        ? [liveNews.text]
+        : storedHooks;
+  const newsSource = liveNews ? "live" : storedHooks.length > 0 ? "stored" : "none";
+
+  let callModel;
+  let model: string;
+  try {
+    ({ callModel, model } = createStageTwoModelCall());
+  } catch (error) {
+    await reportError(error, { operation: "outreach.stage_two.configure", organisationId });
+    return NextResponse.json({ error: "Email generation is not configured. Contact an administrator." }, { status: 503 });
+  }
+
+  const allowance = await consumeAiGenerationAllowance(admin, authorization.actor.id);
+  if (!allowance.allowed) {
+    if ("unavailable" in allowance) {
+      return NextResponse.json({ error: allowance.message }, { status: 503 });
+    }
+    return NextResponse.json(
+      { error: allowance.message, retryAt: allowance.retryAt.toISOString() },
+      { status: 429, headers: { "Retry-After": String(allowance.retryAfterSeconds) } },
+    );
+  }
+
+  const result = await generateStageTwoDraft(
+    organisationId,
+    {
+      organisationName: organisation.legal_name,
+      tradingName: organisation.trading_name,
+      organisationType: organisation.organisation_type,
+      website: organisation.website,
+      city: organisation.city,
+      countryCode: organisation.country_code,
+      geographicReach: organisation.geographic_reach,
+      incomeBand: financialPeriod?.income_band,
+      contactName: contact ? [contact.first_name, contact.last_name].filter(Boolean).join(" ") : null,
+      contactJobTitle: contact?.job_title,
+      // Canonical register purpose first, enrichment mission as the fallback —
+      // the same resolution Stage 1 applies. Sector likewise prefers the
+      // canonical column, matching both Stage 1 routes.
+      missionStatement: resolveMissionText({
+        charity_activities: organisation.charity_activities,
+        cic_community_statement: organisation.cic_community_statement,
+        enrichment_mission: enrichment?.mission_statement,
+      }),
+      missionKeywords: enrichment?.mission_keywords,
+      sector: organisation.sector?.trim() || enrichment?.sector,
+      subSector: organisation.sub_sector?.trim() || enrichment?.sub_sector,
+      newsHooks,
+      booklet: savedBooklet?.booklet_text ?? null,
+      attachmentText,
+      senderName: authorization.actor.fullName,
+      previousSubject: previousMessage.subject,
+      // F117: the sent message's body may be HTML (new) or plain text (sent
+      // before this feature) — either way the model prompt wants readable
+      // plain text, not markup.
+      previousBody: emailHtmlToPlainText(previousMessage.body),
+      // Stripped rather than passed raw: a normal Gmail reply carries our own
+      // previous email quoted underneath it, so the un-stripped text puts our
+      // words inside the block the model is told to read as the client's. Rows
+      // captured before this stripping existed are the reason it is applied
+      // here as well as at capture time.
+      replyBody: replyEvent?.reply_body ? stripQuotedReply(replyEvent.reply_body) : null,
+      replyAuthorName,
+      replyReceivedAt: replyEvent?.received_at ?? null,
+      replySentiment: replyEvent?.sentiment ?? null,
+      replyIntent: replyEvent?.intent ?? null,
+    },
+    callModel,
+    {
+      length: parsed.data.length,
+      register: parsed.data.register,
+      closing: parsed.data.closing,
+      newsEnabled: newsHooks.length > 0,
+    },
+  );
+  if ("error" in result) return NextResponse.json({ error: result.error }, { status: 502 });
+
+  // A generated follow-up is persisted only as a draft. This route contains no send
+  // operation and cannot set sent_at/send_status, preserving the human checkpoint.
+  // The news columns travel with the draft row so a saved draft reopened later
+  // (inbox resume) still restores its verification link — a URL kept only in
+  // the transient response below would be unverifiable on reopen.
+  const { data: message, error: draftError } = await supabase
+    .from("outreach_messages")
+    .insert({
+      organisation_id: organisationId,
+      contact_id: contact?.id ?? null,
+      sent_by_user_id: authorization.actor.id,
+      subject: replySubject,
+      body: result.draft.body,
+      send_status: "draft",
+      news_source: liveNews ? "live" : null,
+      news_hook: liveNews?.text ?? null,
+      news_url: liveNews?.url ?? null,
+    })
+    .select("id")
+    .single();
+  if (draftError || !message) {
+    await reportError(draftError ?? new Error("Draft insert returned no row."), { operation: "outreach.stage_two.save_draft", organisationId });
+    return NextResponse.json({ error: "The follow-up was generated but could not be saved. Try again." }, { status: 500 });
+  }
+
+  // F213 — LLM Cost Tracking AC3, mirroring Stage 1: a pricing lookup failure must
+  // never block saving a generation that already succeeded, so this is best-effort
+  // — a missing or errored rate prices as unknown (null), never a fabricated 0.
+  const pricing = await loadModelRate(
+    () =>
+      supabase
+        .from("model_pricing")
+        .select("input_usd_per_1k_tokens, output_usd_per_1k_tokens")
+        .eq("model", model)
+        .maybeSingle(),
+    model,
+    "outreach.stage_two.load_pricing",
+  );
+  const costUsd = computeCostUsd(
+    { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
+    pricing,
+  );
+
+  const { error: generationError } = await admin
+    .from("ai_generations")
+    .insert(
+      buildStageTwoGenerationInsert({
+        outreachMessageId: message.id,
+        subject: replySubject,
+        draft: result.draft,
+        model,
+        activity: "follow_up_email",
+        usage: result.usage,
+        costUsd,
+        prompt: result.prompt,
+        // F209: the tone dials the reply composer sent, recorded at generation time.
+        toneRegister: parsed.data.register,
+        toneLength: parsed.data.length,
+      }),
+    );
+  if (generationError) {
+    // Compensating delete: roll back the orphan draft. If the rollback itself
+    // fails, report it rather than silently leaving an outreach_messages row
+    // with no ai_generations record behind.
+    const { error: rollbackError } = await supabase
+      .from("outreach_messages")
+      .delete()
+      .eq("id", message.id);
+    if (rollbackError) {
+      await reportError(rollbackError, { operation: "outreach.stage_two.rollback_draft", organisationId, outreachMessageId: message.id });
+    }
+    await reportError(generationError, { operation: "outreach.stage_two.save_generation", organisationId, outreachMessageId: message.id });
+    return NextResponse.json({ error: "The follow-up draft could not be saved safely. Try again." }, { status: 500 });
+  }
+
+  return NextResponse.json(
+    {
+      id: message.id,
+      subject: replySubject,
+      body: result.draft.body,
+      newsSource,
+      newsHook: liveNews?.text ?? null,
+      newsUrl: liveNews?.url ?? null,
+    },
+    { status: 201 },
+  );
+}

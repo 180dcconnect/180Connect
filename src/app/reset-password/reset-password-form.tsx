@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useActionState, useState } from "react";
-import { PASSWORD_RULES } from "@/lib/auth/password-rules";
 import type { ResetPasswordState } from "@/lib/auth/password-reset";
 import { setNewPassword } from "./actions";
 import {
@@ -16,29 +15,16 @@ import {
   PreviewLinkCardTrigger,
   PreviewLinkCardPanel,
 } from "@/components/animate-ui/components/base/preview-link-card";
-import { PasswordStrengthMeter } from "@/components/spectrumui/password-strength";
 import { BrandCtaButton } from "@/components/brand/brand-cta";
+import { NewPasswordField, PasswordField } from "@/components/brand/password-field";
 import {
   bannerClass,
   fieldClass,
   fieldErrorClass,
-  fieldWithAffordanceClass,
-  iconButtonClass,
 } from "@/components/brand/fields";
 
 const initialState: ResetPasswordState = { status: "idle" };
 
-/**
- * Live checklist of the password rules.
- *
- * Rendered from `PASSWORD_RULES`, the same list `passwordSchema` is built from,
- * so what the user is told and what the server enforces cannot drift apart.
- *
- * The list is always present rather than appearing on first keystroke: a
- * checklist that materialises under the cursor shifts the layout and is easy to
- * miss. Each item carries its state in text for screen readers, since colour
- * and a tick glyph alone do not convey it.
- */
 /**
  * Live preview of a real route, shrunk to fit the panel.
  *
@@ -77,54 +63,36 @@ function PagePreviewPanel({ href, title }: { href: string; title: string }) {
   );
 }
 
-function PasswordChecklist({ value }: { value: string }) {
-  return (
-    <ul className="flex flex-col gap-1.5 pt-1" aria-label="Password requirements">
-      {PASSWORD_RULES.map((rule) => {
-        const met = rule.test(value);
-        return (
-          <li
-            key={rule.id}
-            className={`flex items-center gap-2 text-xs font-body transition-colors ${
-              met ? "text-green-700" : "text-[#0c1014]/50"
-            }`}
-          >
-            <span
-              aria-hidden="true"
-              className={`flex size-4 shrink-0 items-center justify-center rounded-full border text-[10px] leading-none transition-colors ${
-                met
-                  ? "border-green-600 bg-green-600 text-white"
-                  : "border-[#0c1014]/20 text-transparent"
-              }`}
-            >
-              ✓
-            </span>
-            {rule.label}
-            <span className="sr-only">{met ? " — met" : " — not yet met"}</span>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
 export function ResetPasswordForm({
   linkError,
   isInvite,
   email,
   existingFullName,
+  inviteTokenHash,
 }: {
   linkError?: string;
   isInvite?: boolean;
   email?: string;
   existingFullName?: string | null;
+  /**
+   * Deferred invite token from the link, verified when this form submits —
+   * opening the link must not consume it. Hidden and never rendered.
+   */
+  inviteTokenHash?: string;
 }) {
   const [state, action, pending] = useActionState(setNewPassword, initialState);
   const [password, setPassword] = useState("");
-  const [passwordVisible, setPasswordVisible] = useState(false);
-  const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const needsName = !existingFullName;
+  // Setting up an account asks for a name and the terms; coming back through a
+  // forgot-password link does not. That person already has an account, already
+  // agreed to the terms, and knows which address they asked to reset — showing
+  // their own name and email back to them is noise on a form whose only job is
+  // the two password fields. A recovery account that somehow has no name still
+  // gets the field, because the Server Action refuses to finish without one.
+  const showName = Boolean(isInvite) || needsName;
+  const showEmail = Boolean(isInvite) && Boolean(email);
+  const showTerms = Boolean(isInvite);
 
   if (linkError) {
     return (
@@ -152,13 +120,14 @@ export function ResetPasswordForm({
 
   return (
     <form action={action} className="mt-6 flex flex-col gap-5" noValidate>
+      {inviteTokenHash && <input type="hidden" name="tokenHash" value={inviteTokenHash} />}
       {state.message && (
         <div role="alert" className={bannerClass("light", "error")}>
           {state.message}
         </div>
       )}
 
-      {email && (
+      {showEmail && (
         <div className="flex flex-col gap-1">
           <div className="relative">
             <FloatingInput
@@ -174,155 +143,44 @@ export function ResetPasswordForm({
         </div>
       )}
 
-      <div className="flex flex-col gap-1">
-        <FloatingLabelInput
-          id="fullName"
-          name="fullName"
-          type="text"
-          autoComplete="name"
-          defaultValue={existingFullName ?? ""}
-          aria-invalid={Boolean(state.fieldErrors?.fullName)}
-          className={fieldClass("light")}
-          label="Your name"
-          required={needsName}
-          maxLength={120}
-        />
-        {state.fieldErrors?.fullName?.[0] && (
-          <p className={fieldErrorClass("light")}>
-            {state.fieldErrors.fullName[0]}
-          </p>
-        )}
-      </div>
-
-      <div className="flex flex-col gap-1">
-        <div className="relative">
-          <FloatingInput
-            id="password"
-            name="password"
-            type={passwordVisible ? "text" : "password"}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            aria-invalid={Boolean(state.fieldErrors?.password)}
-            aria-describedby="password-requirements"
-            className={fieldWithAffordanceClass("light")}
-            required
+      {showName && (
+        <div className="flex flex-col gap-1">
+          <FloatingLabelInput
+            id="fullName"
+            name="fullName"
+            type="text"
+            autoComplete="name"
+            defaultValue={existingFullName ?? ""}
+            aria-invalid={Boolean(state.fieldErrors?.fullName)}
+            className={fieldClass("light")}
+            label="Your name"
+            required={needsName}
+            maxLength={120}
           />
-          <FloatingLabel htmlFor="password">
-            {isInvite ? "Password" : "New password"}
-          </FloatingLabel>
-
-          <button
-            type="button"
-            onClick={() => setPasswordVisible((visible) => !visible)}
-            aria-label={passwordVisible ? "Hide password" : "Show password"}
-            aria-controls="password"
-            className={iconButtonClass("light")}
-          >
-            {passwordVisible ? (
-              <svg
-                viewBox="0 0 24 24"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M3 3l18 18" />
-                <path d="M10.6 10.6a2 2 0 002.8 2.8" />
-                <path d="M9.4 5.2A9.4 9.4 0 0112 5c4.6 0 8.3 3.2 9.6 7a12 12 0 01-2.4 3.9" />
-                <path d="M6.2 6.7A12 12 0 002.4 12c1.3 3.8 5 7 9.6 7a9.7 9.7 0 004-.85" />
-              </svg>
-            ) : (
-              <svg
-                viewBox="0 0 24 24"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M2.4 12C3.7 8.2 7.4 5 12 5s8.3 3.2 9.6 7c-1.3 3.8-5 7-9.6 7s-8.3-3.2-9.6-7Z" />
-                <circle cx="12" cy="12" r="2.6" />
-              </svg>
-            )}
-          </button>
-        </div>
-
-        {/* Animated Password Strength Bar */}
-        <PasswordStrengthMeter value={password} rules={PASSWORD_RULES as unknown as Parameters<typeof PasswordStrengthMeter>[0]["rules"]} />
-
-        <div id="password-requirements" className="mt-1">
-          <PasswordChecklist value={password} />
-          {state.fieldErrors?.password?.[0] && (
+          {state.fieldErrors?.fullName?.[0] && (
             <p className={fieldErrorClass("light")}>
-              {state.fieldErrors.password[0]}
+              {state.fieldErrors.fullName[0]}
             </p>
           )}
         </div>
-      </div>
+      )}
 
+      <NewPasswordField
+        id="password"
+        name="password"
+        label={isInvite ? "Password" : "New password"}
+        value={password}
+        onChange={setPassword}
+        error={state.fieldErrors?.password?.[0]}
+      />
 
       <div className="flex flex-col gap-1">
-        <div className="relative">
-          <FloatingInput
-            id="confirmPassword"
-            name="confirmPassword"
-            type={confirmPasswordVisible ? "text" : "password"}
-            aria-invalid={Boolean(state.fieldErrors?.confirmPassword)}
-            className={fieldWithAffordanceClass("light")}
-            required
-          />
-          <FloatingLabel htmlFor="confirmPassword">
-            Confirm password
-          </FloatingLabel>
-
-          <button
-            type="button"
-            onClick={() => setConfirmPasswordVisible((visible) => !visible)}
-            aria-label={
-              confirmPasswordVisible ? "Hide password" : "Show password"
-            }
-            aria-controls="confirmPassword"
-            className={iconButtonClass("light")}
-          >
-            {confirmPasswordVisible ? (
-              <svg
-                viewBox="0 0 24 24"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M3 3l18 18" />
-                <path d="M10.6 10.6a2 2 0 002.8 2.8" />
-                <path d="M9.4 5.2A9.4 9.4 0 0112 5c4.6 0 8.3 3.2 9.6 7a12 12 0 01-2.4 3.9" />
-                <path d="M6.2 6.7A12 12 0 002.4 12c1.3 3.8 5 7 9.6 7a9.7 9.7 0 004-.85" />
-              </svg>
-            ) : (
-              <svg
-                viewBox="0 0 24 24"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M2.4 12C3.7 8.2 7.4 5 12 5s8.3 3.2 9.6 7c-1.3 3.8-5 7-9.6 7s-8.3-3.2-9.6-7Z" />
-                <circle cx="12" cy="12" r="2.6" />
-              </svg>
-            )}
-          </button>
-        </div>
-
+        <PasswordField
+          id="confirmPassword"
+          name="confirmPassword"
+          label="Confirm password"
+          invalid={Boolean(state.fieldErrors?.confirmPassword)}
+        />
         {state.fieldErrors?.confirmPassword?.[0] && (
           <p className={fieldErrorClass("light")}>
             {state.fieldErrors.confirmPassword[0]}
@@ -330,54 +188,58 @@ export function ResetPasswordForm({
         )}
       </div>
 
-      {/* Terms & Conditions Checkbox with PreviewLinkCard */}
-      <div className="pt-1">
-        <label htmlFor="terms" className="flex items-center gap-3 cursor-pointer select-none font-body text-xs leading-snug text-[#0c1014]/75">
-          <Checkbox
-            id="terms"
-            name="terms"
-            checked={acceptedTerms}
-            onCheckedChange={(checked) => setAcceptedTerms(Boolean(checked))}
-            required
-            className="border-[#0c1014]/30 data-[state=checked]:bg-[#0c1014] data-[state=checked]:text-[#f4f4ef]"
-          />
-          <span>
-            I agree to the{" "}
-            <PreviewLinkCard>
-              <PreviewLinkCardTrigger
-                render={
-                  <Link
-                    href="/terms"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-0.5 font-semibold text-[#0c1014] underline underline-offset-4 hover:opacity-80"
-                  >
-                    Terms &amp; Conditions
-                  </Link>
-                }
-              />
-              <PagePreviewPanel href="/terms" title="Terms & Conditions" />
-            </PreviewLinkCard>{" "}
-            and{" "}
-            <PreviewLinkCard>
-              <PreviewLinkCardTrigger
-                render={
-                  <Link
-                    href="/privacy"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-0.5 font-semibold text-[#0c1014] underline underline-offset-4 hover:opacity-80"
-                  >
-                    Privacy Policy
-                  </Link>
-                }
-              />
-              <PagePreviewPanel href="/privacy" title="Privacy Policy" />
-            </PreviewLinkCard>
-            .
-          </span>
-        </label>
-      </div>
+      {/* Terms & Conditions — account setup only. A password reset is not a
+          new agreement: the person accepted these when they set the account
+          up, so asking again would be a gate with nothing behind it. */}
+      {showTerms && (
+        <div className="pt-1">
+          <label htmlFor="terms" className="flex items-center gap-3 cursor-pointer select-none font-body text-xs leading-snug text-[#0c1014]/75">
+            <Checkbox
+              id="terms"
+              name="terms"
+              checked={acceptedTerms}
+              onCheckedChange={(checked) => setAcceptedTerms(Boolean(checked))}
+              required
+              className="border-[#0c1014]/30 data-[state=checked]:bg-[#0c1014] data-[state=checked]:text-[#f4f4ef]"
+            />
+            <span>
+              I agree to the{" "}
+              <PreviewLinkCard>
+                <PreviewLinkCardTrigger
+                  render={
+                    <Link
+                      href="/terms"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-0.5 font-semibold text-[#0c1014] underline underline-offset-4 hover:opacity-80"
+                    >
+                      Terms &amp; Conditions
+                    </Link>
+                  }
+                />
+                <PagePreviewPanel href="/terms" title="Terms & Conditions" />
+              </PreviewLinkCard>{" "}
+              and{" "}
+              <PreviewLinkCard>
+                <PreviewLinkCardTrigger
+                  render={
+                    <Link
+                      href="/privacy"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-0.5 font-semibold text-[#0c1014] underline underline-offset-4 hover:opacity-80"
+                    >
+                      Privacy Policy
+                    </Link>
+                  }
+                />
+                <PagePreviewPanel href="/privacy" title="Privacy Policy" />
+              </PreviewLinkCard>
+              .
+            </span>
+          </label>
+        </div>
+      )}
 
       <BrandCtaButton
         label={
@@ -387,10 +249,9 @@ export function ResetPasswordForm({
               ? "Create account"
               : "Set new password"
         }
-        disabled={pending || !acceptedTerms}
+        disabled={pending || (showTerms && !acceptedTerms)}
         className="mt-2 self-start"
       />
     </form>
   );
 }
-

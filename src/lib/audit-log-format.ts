@@ -93,7 +93,9 @@ export const AUDIT_ACTIONS: Record<string, ActionSpec> = {
 
   user_suspended: { label: "Account suspended", verb: "suspended", tone: "caution", icon: "access" },
   user_reactivated: { label: "Account reactivated", verb: "reactivated", tone: "positive", icon: "access" },
+  // No longer written (deactivation was replaced by delete_user); kept so history renders.
   user_deactivated: { label: "Account deactivated", verb: "deactivated", tone: "caution", icon: "access" },
+  user_deleted: { label: "Account deleted", verb: "deleted", tone: "caution", icon: "access" },
 
   invite_accepted: {
     label: "Invite accepted",
@@ -118,9 +120,26 @@ export const AUDIT_ACTIONS: Record<string, ActionSpec> = {
     icon: "ownership",
   },
   action_reassigned: { label: "Task reassigned", verb: "reassigned a task on", tone: "neutral", icon: "ownership" },
+  action_updated: { label: "Task updated", verb: "updated a task on", tone: "neutral", icon: "flag" },
+  action_completed: { label: "Task completed", verb: "completed a task on", tone: "positive", icon: "flag" },
+  action_cancelled: { label: "Task cancelled", verb: "cancelled a task on", tone: "caution", icon: "flag" },
+  action_reopened: { label: "Task restored", verb: "restored a task on", tone: "neutral", icon: "flag" },
   actions_moved: { label: "Tasks moved", verb: "moved the open tasks of", tone: "neutral", icon: "ownership" },
 
   status_changed: { label: "Pipeline status changed", verb: "moved", tone: "neutral", icon: "pipeline" },
+
+  edit_suggestion_approved: {
+    label: "Suggested edit approved",
+    verb: "approved a suggested edit on",
+    tone: "positive",
+    icon: "quality",
+  },
+  edit_suggestion_rejected: {
+    label: "Suggested edit rejected",
+    verb: "rejected a suggested edit on",
+    tone: "neutral",
+    icon: "quality",
+  },
 
   suppression_requested: {
     label: "Suppression requested",
@@ -140,6 +159,12 @@ export const AUDIT_ACTIONS: Record<string, ActionSpec> = {
     tone: "positive",
     icon: "suppression",
   },
+  suppression_lifted: {
+    label: "Suppression lifted",
+    verb: "lifted the suppression of",
+    tone: "positive",
+    icon: "suppression",
+  },
 
   organisation_status_flagged: { label: "Flag raised", verb: "flagged", tone: "caution", icon: "flag" },
   organisation_status_flag_acknowledged: {
@@ -156,6 +181,19 @@ export const AUDIT_ACTIONS: Record<string, ActionSpec> = {
     icon: "quality",
   },
 
+  website_marked_absent: {
+    label: "No website recorded",
+    verb: "recorded that there is no website for",
+    tone: "neutral",
+    icon: "quality",
+  },
+  website_absent_cleared: {
+    label: "Website needed again",
+    verb: "put a website back on the list for",
+    tone: "neutral",
+    icon: "quality",
+  },
+
   duplicate_confirmed: { label: "Duplicate confirmed", verb: "confirmed a duplicate of", tone: "neutral", icon: "duplicate" },
   duplicate_dismissed: {
     label: "Duplicate dismissed",
@@ -167,6 +205,32 @@ export const AUDIT_ACTIONS: Record<string, ActionSpec> = {
   client_criteria_rejected: {
     label: "Criteria not met",
     verb: "screened out",
+    tone: "caution",
+    icon: "quality",
+  },
+
+  url_import_drafted: {
+    label: "URL import drafted",
+    verb: "drafted a client from",
+    objectKey: "source_url",
+    tone: "neutral",
+    icon: "quality",
+  },
+  manual_entry_submitted: {
+    label: "Manual entry submitted",
+    verb: "submitted a manual entry for",
+    tone: "neutral",
+    icon: "quality",
+  },
+  manual_entry_approved: {
+    label: "Manual entry approved",
+    verb: "approved the manual entry for",
+    tone: "positive",
+    icon: "quality",
+  },
+  manual_entry_rejected: {
+    label: "Manual entry rejected",
+    verb: "rejected the manual entry for",
     tone: "caution",
     icon: "quality",
   },
@@ -203,13 +267,31 @@ const TARGET_NOUNS: Record<string, { singular: string; anonymous: string; missin
     anonymous: "an imported record",
     missing: "a deleted imported record",
   },
+  manual_entry_records: {
+    singular: "Draft entry",
+    anonymous: "a draft entry",
+    missing: "a deleted draft entry",
+  },
 };
+
+export type AuditEntityRef = {
+  entityType: "user" | "organisation";
+  id: string;
+  name: string;
+};
+
+export type AuditSentencePart =
+  | { type: "text"; text: string }
+  | { type: "entity"; entityType: "user" | "organisation"; id: string; name: string };
 
 export type AuditDetail = {
   label: string;
   value: string;
   /** A transition renders as one chip with an arrow; a note wraps onto its own line. */
   kind: "transition" | "value" | "note";
+  entity?: AuditEntityRef;
+  fromEntity?: AuditEntityRef;
+  toEntity?: AuditEntityRef;
 };
 
 export type AuditEventView = {
@@ -253,6 +335,9 @@ export type AuditEventView = {
   actorId: string | null;
   targetId: string | null;
   targetTable: string | null;
+  actorEntity: AuditEntityRef | null;
+  targetEntity: AuditEntityRef | null;
+  sentenceParts: AuditSentencePart[];
 };
 
 export type AuditRow = {
@@ -332,13 +417,18 @@ const ENUM_KEYS = new Set([
   "trigger",
 ]);
 
-/** Keys that only exist so a support engineer can find the row again. */
+/** Keys that only exist so a support engineer can find the row again, or raw technical payloads. */
 const OPAQUE_KEYS = new Set([
   "suppression_id",
   "flag_id",
   "event_id",
   "entity_match_candidate_id",
   "organisation_id",
+  "imported_field_paths",
+  "import_notes",
+  "import_raw_record_id",
+  "raw_record_id",
+  "source_url",
 ]);
 
 const DETAIL_LABELS: Record<string, string> = {
@@ -360,8 +450,9 @@ const DETAIL_LABELS: Record<string, string> = {
  *
  * `from`/`to` collapse into a single transition chip: they are always written as
  * a pair (docs/audit-log-pattern.md §3.4) and reading them as two separate
- * fields is what made the old table unreadable. Opaque ids are dropped — they
- * survive in the expanded panel's raw JSON, which is where an engineer looks.
+ * fields is what made the old table unreadable. Opaque ids and raw technical arrays
+ * are dropped from the uncollapsed row — they survive in the expanded panel's raw JSON,
+ * which is where an engineer looks.
  */
 export function formatDetails(
   detail: Record<string, unknown> | null,
@@ -375,22 +466,60 @@ export function formatDetails(
   if ("from" in detail || "to" in detail) {
     const from = formatDetailValue("from", detail.from, resolvers);
     const to = formatDetailValue("to", detail.to, resolvers);
-    entries.push({ label: "Changed", value: `${from} → ${to}`, kind: "transition" });
+    let fromEntity: AuditEntityRef | undefined;
+    let toEntity: AuditEntityRef | undefined;
+    if (typeof detail.from === "string" && UUID.test(detail.from)) {
+      const uName = resolvers.user(detail.from);
+      const oName = resolvers.organisation(detail.from);
+      if (uName) fromEntity = { entityType: "user", id: detail.from, name: uName };
+      else if (oName) fromEntity = { entityType: "organisation", id: detail.from, name: oName };
+    }
+    if (typeof detail.to === "string" && UUID.test(detail.to)) {
+      const uName = resolvers.user(detail.to);
+      const oName = resolvers.organisation(detail.to);
+      if (uName) toEntity = { entityType: "user", id: detail.to, name: uName };
+      else if (oName) toEntity = { entityType: "organisation", id: detail.to, name: oName };
+    }
+    entries.push({
+      label: "Changed",
+      value: `${from} → ${to}`,
+      kind: "transition",
+      ...(fromEntity ? { fromEntity } : {}),
+      ...(toEntity ? { toEntity } : {}),
+    });
   }
 
   for (const [key, value] of Object.entries(detail)) {
     if (key === "from" || key === "to") continue;
     if (OPAQUE_KEYS.has(key) || skip.has(key)) continue;
     if (value === null || value === undefined || value === "") continue;
+    // Arrays and complex nested objects belong in the expanded raw detail view, not uncollapsed chips
+    if (Array.isArray(value) || typeof value === "object") continue;
     const formatted = formatDetailValue(key, value, resolvers);
     // An id that resolved to nothing stays a uuid however it is shortened, and a
     // chip reading "#c77c901c" is noise on a row someone is skimming. The
     // expanded panel still prints the detail object untouched.
     if (formatted.startsWith("#") && typeof value === "string" && UUID.test(value)) continue;
+
+    let entity: AuditEntityRef | undefined;
+    if (typeof value === "string" && UUID.test(value)) {
+      const isOrg = key.includes("organisation");
+      const uName = resolvers.user(value);
+      const oName = resolvers.organisation(value);
+      if (isOrg && oName) {
+        entity = { entityType: "organisation", id: value, name: oName };
+      } else if (uName) {
+        entity = { entityType: "user", id: value, name: uName };
+      } else if (oName) {
+        entity = { entityType: "organisation", id: value, name: oName };
+      }
+    }
+
     entries.push({
       label: DETAIL_LABELS[key] ?? humaniseToken(key),
       value: formatted,
       kind: NOTE_KEYS.has(key) ? "note" : "value",
+      ...(entity ? { entity } : {}),
     });
   }
 
@@ -447,17 +576,72 @@ export function describeAuditEvent(
   // A key spent on the sentence is not repeated as a chip underneath it.
   const spentKeys = !targetName && namedFromDetail && spec?.objectKey ? [spec.objectKey] : [];
 
+  const actorEntity: AuditEntityRef | null =
+    row.actor_user_id && resolvers.user(row.actor_user_id)
+      ? { entityType: "user", id: row.actor_user_id, name: actorName }
+      : null;
+
+  const targetEntity: AuditEntityRef | null =
+    row.target_id && row.target_table
+      ? row.target_table === "organisations" && resolvers.organisation(row.target_id)
+        ? { entityType: "organisation", id: row.target_id, name: targetName ?? "Client" }
+        : row.target_table === "users" && resolvers.user(row.target_id)
+          ? { entityType: "user", id: row.target_id, name: targetName ?? "User" }
+          : null
+      : null;
+
+  const sentenceParts: AuditSentencePart[] = [];
+  if (actorEntity) {
+    sentenceParts.push({
+      type: "entity",
+      entityType: "user",
+      id: actorEntity.id,
+      name: actorEntity.name,
+    });
+  } else {
+    sentenceParts.push({ type: "text", text: actorName });
+  }
+
   let sentence: string;
   if (row.action === "invite_accepted" && row.actor_user_id && row.actor_user_id === row.target_id) {
     // Self-acceptance is the normal case; "X accepted the invite for X" is not English.
     sentence = `${actorName} accepted their invite`;
+    sentenceParts.push({ type: "text", text: " accepted their invite" });
   } else if (spec?.verb) {
     sentence = object ? `${actorName} ${spec.verb} ${object}` : `${actorName} ${spec.verb}`;
+    sentenceParts.push({ type: "text", text: ` ${spec.verb}` });
+    if (object) {
+      if (targetEntity && object === targetEntity.name) {
+        sentenceParts.push({ type: "text", text: " " });
+        sentenceParts.push({
+          type: "entity",
+          entityType: targetEntity.entityType,
+          id: targetEntity.id,
+          name: targetEntity.name,
+        });
+      } else {
+        sentenceParts.push({ type: "text", text: ` ${object}` });
+      }
+    }
   } else {
     // Unmapped action: say plainly what the token was rather than guessing grammar.
     sentence = object
       ? `${actorName} — ${label.toLowerCase()} on ${object}`
       : `${actorName} — ${label.toLowerCase()}`;
+    sentenceParts.push({ type: "text", text: ` — ${label.toLowerCase()}` });
+    if (object) {
+      if (targetEntity && object === targetEntity.name) {
+        sentenceParts.push({ type: "text", text: " on " });
+        sentenceParts.push({
+          type: "entity",
+          entityType: targetEntity.entityType,
+          id: targetEntity.id,
+          name: targetEntity.name,
+        });
+      } else {
+        sentenceParts.push({ type: "text", text: ` on ${object}` });
+      }
+    }
   }
 
   return {
@@ -484,6 +668,9 @@ export function describeAuditEvent(
     actorId: row.actor_user_id,
     targetId: row.target_id,
     targetTable: row.target_table,
+    actorEntity,
+    targetEntity,
+    sentenceParts,
   };
 }
 

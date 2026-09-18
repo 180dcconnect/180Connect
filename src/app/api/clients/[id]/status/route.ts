@@ -6,6 +6,7 @@ import { logSecurityEvent } from "@/lib/log-security-event";
 import { reportError } from "@/lib/error-logging";
 import { PIPELINE_STATUSES } from "@/lib/organisation-format";
 import { setOutreachStatusRpcFailure } from "@/lib/pipeline-status";
+import { reportRescoreFailure, rescoreOrganisation } from "@/lib/scoring/rescore";
 
 /**
  * F145 — change a client's pipeline status, reached from /clients/[id]. set_outreach_status
@@ -65,6 +66,16 @@ export async function POST(
     const { status, error: message } = setOutreachStatusRpcFailure(error);
     return NextResponse.json({ error: message }, { status });
   }
+
+  // F058/F059 AC2 — the pipeline status feeds the previous-contact factor, so a
+  // status change changes the score. Refresh it in the same request: "re-sorting
+  // after a score changes shows the new value" (#61) is only true if the change
+  // is picked up here, not at the next backfill. Best-effort — see rescore.ts.
+  await reportRescoreFailure(
+    await rescoreOrganisation(organisationId),
+    "clients.status.rescore",
+    organisationId,
+  );
 
   return NextResponse.json({ id: data as string }, { status: 200 });
 }

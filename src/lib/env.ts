@@ -156,7 +156,7 @@ export const SCHEMA: readonly EnvVarSpec[] = [
     required: false,
     secret: true,
     description:
-      "Shared secret the cron route handlers check before doing any work, so an endpoint cannot be triggered by anyone who finds the URL. Consumed by src/app/api/cron/companies-house-import and companies-house-status-recheck (pg_cron-triggered, see supabase/migrations/20260809100400_schedule_companies_house_cron.sql), which also set the Q-02 precedent for the still-unbuilt scheduled-send worker in docs/open-questions.md.",
+      "Shared secret the cron route handlers check before doing any work, so an endpoint cannot be triggered by anyone who finds the URL. Consumed by src/app/api/cron/companies-house-status-recheck (pg_cron-triggered, see supabase/migrations/20260809100400_schedule_companies_house_cron.sql), which also set the Q-02 precedent for the still-unbuilt scheduled-send worker in docs/open-questions.md.",
   },
   {
     name: "NEXT_PUBLIC_SENTRY_DSN",
@@ -222,13 +222,115 @@ export const SCHEMA: readonly EnvVarSpec[] = [
       "Charity Commission API key for charity data ingestion (F038/F033). Sent as `Ocp-Apim-Subscription-Key`. Not yet required — becomes required once F033 (Charity Commission data import) ships.",
   },
   {
-    name: "CHARITY_COMMISSION_BACKFILL_START",
+    name: "GEMINI_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "Google Gemini API key for LLM calls (F082 Client Booklet generation, and later F100 email drafts). Free tier via Google AI Studio for now — see docs/environment-variables.md. Passed explicitly to the AI SDK's createGoogleGenerativeAI rather than relying on its default GOOGLE_GENERATIVE_AI_API_KEY name, so every env var this app reads stays declared here. Not yet required — becomes required once F082 ships.",
+  },
+  {
+    name: "GEMINI_MODEL",
     required: false,
     secret: false,
     description:
-      "Start date (YYYY-MM-DD) for Charity Commission imports via GetSearchCharityByRegDate (F033). Optional — defaults to 2000-01-01 if unset.",
+      "Gemini model id for booklet generation (F082), e.g. a Flash-tier model — copy the exact id from the Google AI Studio model picker rather than guessing, since Google retires model ids frequently. No hardcoded default in code for that reason; unset means booklet generation cannot run.",
+  },
+  {
+    name: "GEMINI_SEARCH_MODEL",
+    required: false,
+    secret: false,
+    description:
+      "Gemini model id for F214 natural language search. Separate from GEMINI_MODEL on purpose: interpreting a search query is a much easier job than writing a booklet, and the LLM Provider Research doc puts it on the cheaper Flash-Lite tier ($0.30/$2.50 per million tokens against $0.75/$3.75) — running search on the booklet's model costs roughly two and a half times as much for the same answer. Optional; unset falls back to GEMINI_MODEL and logs a warning, so search still works on an environment that has not been told about it.",
+  },
+  {
+    name: "AI_SEARCH_RATE_LIMIT",
+    required: false,
+    secret: false,
+    description:
+      "Maximum natural language search interpretations each authenticated user may run per window (F214). Counted in its own bucket, so searching never consumes the booklet/draft allowance. Optional; defaults to 40. Only searches that actually reach the model count: a repeated query is served from cache and a plain name search never calls the API at all.",
     validate: (value) =>
-      /^\d{4}-\d{2}-\d{2}$/.test(value) ? null : "must be in YYYY-MM-DD format",
+      /^\d+$/.test(value) && Number(value) > 0
+        ? null
+        : "must be a positive whole number of requests",
+  },
+  {
+    name: "AI_SEARCH_RATE_WINDOW_SECONDS",
+    required: false,
+    secret: false,
+    description:
+      "Fixed-window duration in seconds for AI_SEARCH_RATE_LIMIT. Optional; defaults to 86400 (one day) — a day rather than an hour because search is bursty: a CAM works a list hard for twenty minutes and then not at all.",
+    validate: (value) =>
+      /^\d+$/.test(value) && Number(value) > 0
+        ? null
+        : "must be a positive whole number of seconds",
+  },
+  {
+    name: "AI_GENERATION_RATE_LIMIT",
+    required: false,
+    secret: false,
+    description:
+      "Maximum Gemini generation requests each authenticated user may start per fixed window across booklet, Stage 1, and Stage 2 generation. Optional; defaults to 20.",
+    validate: (value) =>
+      /^\d+$/.test(value) && Number(value) > 0
+        ? null
+        : "must be a positive whole number of requests",
+  },
+  {
+    name: "AI_GENERATION_RATE_WINDOW_SECONDS",
+    required: false,
+    secret: false,
+    description:
+      "Fixed-window duration in seconds for AI_GENERATION_RATE_LIMIT. Optional; defaults to 3600 (one hour).",
+    validate: (value) =>
+      /^\d+$/.test(value) && Number(value) > 0
+        ? null
+        : "must be a positive whole number of seconds",
+  },
+  {
+    name: "EMAIL_SEND_RATE_LIMIT",
+    required: false,
+    secret: false,
+    description: "Maximum outreach emails each CAM may send per fixed window. Optional; defaults to 100.",
+    validate: (value) => /^\d+$/.test(value) && Number(value) > 0 ? null : "must be a positive whole number of emails",
+  },
+  {
+    name: "EMAIL_SEND_RATE_WINDOW_SECONDS",
+    required: false,
+    secret: false,
+    description: "Fixed-window duration for EMAIL_SEND_RATE_LIMIT. Optional; defaults to 3600 seconds.",
+    validate: (value) => /^\d+$/.test(value) && Number(value) > 0 ? null : "must be a positive whole number of seconds",
+  },
+  {
+    name: "GMAIL_CLIENT_ID",
+    required: false,
+    secret: false,
+    description:
+      "OAuth client ID for the Google Cloud project used by the Gmail outreach integration (F241). Server-side only even though the identifier is not itself a secret.",
+  },
+  {
+    name: "GMAIL_CLIENT_SECRET",
+    required: false,
+    secret: true,
+    description:
+      "OAuth client secret for the Gmail outreach integration (F241). Store only in the deployment secret manager and .env.local.",
+  },
+  {
+    name: "GMAIL_REFRESH_TOKEN",
+    required: false,
+    secret: true,
+    description:
+      "Long-lived OAuth refresh token authorised by the clients.sheffield outreach mailbox. Never expose it to the browser or commit it.",
+  },
+  {
+    name: "GMAIL_SENDER_EMAIL",
+    required: false,
+    secret: false,
+    description:
+      "Exact Google Workspace mailbox used for client outreach (F124). No fallback is permitted when it is absent.",
+    validate: (value) =>
+      /^[^@<>\s]+@[^@<>\s]+\.[^@<>\s]+$/.test(value)
+        ? null
+        : "must be a valid email address",
   },
   {
     name: "NEXT_PUBLIC_ENV",
@@ -242,13 +344,20 @@ export const SCHEMA: readonly EnvVarSpec[] = [
         : "must be one of: local, staging, production",
   },
   {
-    name: "CHARITY_COMMISSION_BACKFILL_END",
+    name: "NEWS_HOOK_PROVIDER",
     required: false,
     secret: false,
     description:
-      "End date (YYYY-MM-DD) for Charity Commission imports via GetSearchCharityByRegDate (F033). Optional — defaults to today if unset.",
+      "Live news hook provider for Stage 2 follow-ups (F110): 'exa' pulls one recent item per generation via the Exa API, 'none' disables the lookup so follow-ups generate without a hook. Optional; defaults to none when unset. Server-only — never prefixed with NEXT_PUBLIC_.",
     validate: (value) =>
-      /^\d{4}-\d{2}-\d{2}$/.test(value) ? null : "must be in YYYY-MM-DD format",
+      ["none", "exa"].includes(value) ? null : "must be one of: none, exa",
+  },
+  {
+    name: "EXA_API_KEY",
+    required: false,
+    secret: true,
+    description:
+      "Exa API key for the F110 live news hook. Server-only — never prefixed with NEXT_PUBLIC_. Free tier at exa.ai needs no card ($10 credits/month; requests are blocked, never billed, on exhaustion). Required when NEWS_HOOK_PROVIDER is exa — startup refuses that combination without it.",
   },
 ];
 
@@ -289,8 +398,51 @@ export function collectEnvProblems(
 
   problems.push(...requireOneSupabaseKey(source));
   problems.push(...requireSenderWhenSendingEmail(source));
+  problems.push(...requireCompleteGmailConfiguration(source));
+  problems.push(...requireNewsHookKey(source));
 
   return problems;
+}
+
+function requireCompleteGmailConfiguration(
+  source: Record<string, string | undefined>,
+): EnvProblem[] {
+  const names = [
+    "GMAIL_CLIENT_ID",
+    "GMAIL_CLIENT_SECRET",
+    "GMAIL_REFRESH_TOKEN",
+    "GMAIL_SENDER_EMAIL",
+  ] as const;
+  const configured = names.filter((name) => source[name]?.trim());
+  if (configured.length === 0 || configured.length === names.length) return [];
+
+  return names
+    .filter((name) => !source[name]?.trim())
+    .map((name) => ({
+      name,
+      problem: "is required when any Gmail outreach setting is configured",
+    }));
+}
+
+/**
+ * The F110 news hook is cost-capped by design (fail-open null, free-tier
+ * allowance, blocked-not-billed exhaustion), but a staging/production deploy
+ * that selects the exa provider without its key would silently generate every
+ * follow-up hookless. Catch that pair at startup instead — same shape as the
+ * Gmail all-or-nothing check above.
+ */
+function requireNewsHookKey(
+  source: Record<string, string | undefined>,
+): EnvProblem[] {
+  if (source.NEWS_HOOK_PROVIDER?.trim() !== "exa" || source.EXA_API_KEY?.trim()) {
+    return [];
+  }
+  return [
+    {
+      name: "EXA_API_KEY",
+      problem: "is required when NEWS_HOOK_PROVIDER is exa",
+    },
+  ];
 }
 
 /**

@@ -1,7 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ChevronsUpDown, CircleUserRound, LogOut, SlidersHorizontal } from "lucide-react";
+import { ChevronsUpDown } from "lucide-react";
+import { AnimateIcon } from "@/components/animate-ui/icons/icon";
+import { Accessibility } from "@/components/animate-ui/icons/accessibility";
+import { LogOut } from "@/components/animate-ui/icons/log-out";
+import { Settings } from "@/components/animate-ui/icons/settings";
+import { User } from "@/components/animate-ui/icons/user";
+import { InitialsAvatar } from "@/components/ui/initials-avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,29 +16,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/animate-ui/components/radix/dropdown-menu";
-
-/**
- * Initials for the avatar: first name + last name, which is what a reader
- * recognises themselves by. Falls back through the single-word name to the
- * email, so the circle is never empty for an account with no profile name.
- */
-function initialsOf(name: string | null, email: string | null): string {
-  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (email ?? "?").slice(0, 1).toUpperCase();
-}
-
-function Avatar({ initials }: { initials: string }) {
-  return (
-    <span
-      aria-hidden="true"
-      className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand/15 text-xs font-bold tracking-wide text-brand-hover"
-    >
-      {initials}
-    </span>
-  );
-}
 
 /**
  * The rail's account block. The row itself carries name and role — the two
@@ -58,7 +41,6 @@ export function SidebarAccountMenu({
 }) {
   const router = useRouter();
   const displayName = name ?? email ?? "Account";
-  const initials = initialsOf(name, email);
 
   return (
     <DropdownMenu>
@@ -66,9 +48,11 @@ export function SidebarAccountMenu({
         <button
           type="button"
           title={collapsed ? displayName : undefined}
-          className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-all hover:bg-black/10 data-[state=open]:bg-black/12"
+          className={`flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-all hover:bg-black/10 data-[state=open]:bg-black/12 md:pl-1.5 ${
+            collapsed ? "md:pr-1.5" : ""
+          }`}
         >
-          <Avatar initials={initials} />
+          <InitialsAvatar name={name} email={email} />
           {/* Hidden by class rather than unmounted: `collapsed` is a desktop-only
               state (see Sidebar), and below `md` this block always shows. */}
           <span className={`min-w-0 flex-1 ${collapsed ? "md:hidden" : ""}`}>
@@ -98,7 +82,7 @@ export function SidebarAccountMenu({
         className="w-60 border-black/10 bg-white/85 backdrop-blur-xl"
       >
         <DropdownMenuLabel className="flex items-center gap-3 px-2 py-2 font-normal">
-          <Avatar initials={initials} />
+          <InitialsAvatar name={name} email={email} />
           <span className="min-w-0">
             <span className="block truncate text-sm font-bold text-black">{displayName}</span>
             {email && <span className="block truncate text-xs text-black/55">{email}</span>}
@@ -113,22 +97,35 @@ export function SidebarAccountMenu({
          * prop, so an item cannot *be* an anchor. `logout` redirects, so
          * calling the action directly ends the same way the form post did.
          */}
-        <DropdownMenuItem onSelect={() => router.push("/profile")}>
-          <CircleUserRound aria-hidden="true" />
-          Account
-        </DropdownMenuItem>
+        <AnimateIcon animateOnHover asChild>
+          <DropdownMenuItem onSelect={() => router.push("/settings/profile")}>
+            <User aria-hidden="true" />
+            Profile
+          </DropdownMenuItem>
+        </AnimateIcon>
 
-        <DropdownMenuItem onSelect={() => router.push("/settings/outreach-preferences")}>
-          <SlidersHorizontal aria-hidden="true" />
-          Settings
-        </DropdownMenuItem>
+        <AnimateIcon animateOnHover asChild>
+          <DropdownMenuItem onSelect={() => router.push("/settings")}>
+            <Settings aria-hidden="true" />
+            Settings
+          </DropdownMenuItem>
+        </AnimateIcon>
+
+        <AnimateIcon animateOnHover asChild>
+          <DropdownMenuItem onSelect={() => router.push("/settings/accessibility")}>
+            <Accessibility aria-hidden="true" />
+            Accessibility
+          </DropdownMenuItem>
+        </AnimateIcon>
 
         <DropdownMenuSeparator />
 
-        <DropdownMenuItem onSelect={() => void onLogout()}>
-          <LogOut aria-hidden="true" />
-          Log out
-        </DropdownMenuItem>
+        <AnimateIcon animateOnHover asChild>
+          <DropdownMenuItem variant="destructive" onSelect={() => void onLogout()}>
+            <LogOut aria-hidden="true" />
+            Log out
+          </DropdownMenuItem>
+        </AnimateIcon>
       </DropdownMenuContent>
     </DropdownMenu>
   );

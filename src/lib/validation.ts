@@ -16,6 +16,17 @@ export type ValidationResult<T> =
   | { success: false; fieldErrors: FieldErrors };
 
 /**
+ * Builds an object schema at the shared validation boundary.
+ *
+ * Feature modules compose the field helpers below through this function rather
+ * than importing Zod themselves, keeping schema construction and future Zod
+ * changes behind one module.
+ */
+export function objectSchema<T extends z.ZodRawShape>(shape: T) {
+  return z.object(shape);
+}
+
+/**
  * Runs a Zod schema against input and returns per-field errors instead of
  * throwing, so every failing field can be reported to the user at once
  * rather than one at a time.
@@ -47,9 +58,58 @@ export function emailField(message = "Enter a valid email address.") {
   return z.string().trim().toLowerCase().pipe(z.email(message));
 }
 
+/**
+ * Route-param identity check: true only for a well-formed UUID. Route
+ * handlers guard every lookup with this so a malformed id never reaches a
+ * Postgres cast (which 500s) instead of a clean 400.
+ */
+export function isUuid(value: unknown): boolean {
+  return z.uuid().safeParse(value).success;
+}
+
+/** A real calendar day in the database's YYYY-MM-DD format. */
+export function isIsoDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
+
+/**
+ * Well-formed UUID, as a schema field.
+ *
+ * The schema half of `isUuid`: an id that arrives from the client — a route
+ * param, a row id echoed back by a form — is checked here rather than by a
+ * Postgres cast, which would 500 instead of refusing. Not for anything a person
+ * types, and the message never names a table or a column.
+ */
+export function uuidField(message = "That identifier could not be read. Try again.") {
+  return z.uuid(message);
+}
+
 /** Absolute http:// or https:// URL. */
 export function urlField(message = "Enter a valid URL.") {
   return z.string().trim().pipe(z.url({ protocol: /^https?$/, message }));
+}
+
+/**
+ * Optional @mention choices echoed back by a note composer, capped at `max`
+ * entries. Each entry pairs the selected user id with the display name that
+ * was spliced into the draft (`MentionedUserInput` in @/lib/note-mentions):
+ * the server binds with the submitted name — the text actually in the note,
+ * so a rename between composing and saving keeps a genuine mention — while
+ * verifying the id is still an active user. Entries are machine-generated,
+ * so a malformed shape fails the payload rather than notifying half a list.
+ */
+export function optionalMentionedUsers(max: number) {
+  return z
+    .array(z.object({ id: z.uuid(), name: z.string().trim().min(1).max(200) }))
+    .max(max)
+    .optional();
 }
 
 /**

@@ -1,8 +1,8 @@
-// Shared Companies House status watch — the one function both the weekly cron
-// route (src/app/api/cron/companies-house-status-recheck/route.ts) calls today,
-// kept in this shared-function shape (rather than inlined in the route) for the
-// same reason companies-house-discovery.ts is: so the logic is unit-testable and
-// has exactly one place to change.
+// Shared Companies House status watch — the one function the weekly cron
+// route (src/app/api/cron/companies-house-status-recheck/route.ts) calls,
+// kept in this shared-function shape (rather than inlined in the route) so
+// the logic is unit-testable and has exactly one place to change. (The
+// retired discovery job was shared the same way, for the same reason.)
 //
 // Never writes organisations.outreach_status — see the migration header on
 // 20260809100200_create_organisation_status_flags.sql for why. This function only

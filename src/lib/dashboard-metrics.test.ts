@@ -7,7 +7,9 @@ import {
   organisationGrowthSeries,
   type DashboardOrgRow,
   type OpenSuppression,
+  type OverdueActionCandidate,
 } from "./dashboard-metrics.ts";
+import type { FollowUpRecommendation } from "./outreach/follow-up-recommendations.ts";
 
 function org(overrides: Partial<DashboardOrgRow> = {}): DashboardOrgRow {
   return {
@@ -27,7 +29,13 @@ describe("computeDashboardMetrics", () => {
       totalCharities: 0,
       contacted: 0,
       responsesReceived: 0,
+      respondingClients: 0,
+      respondedClients: 0,
       converted: 0,
+      contactRate: 0,
+      // No denominator, so no rate. 0% would claim we tried and got nothing.
+      replyRate: null,
+      winRate: null,
     });
   });
 
@@ -45,16 +53,52 @@ describe("computeDashboardMetrics", () => {
     assert.equal(computeDashboardMetrics(rows).contacted, 2);
   });
 
-  it("counts responses received only for statuses past 'sent, waiting'", () => {
+  it("counts actual linked reply events rather than inferring replies from status", () => {
+    const rows = [org({ id: "a", outreach_status: "responded" })];
+    const metrics = computeDashboardMetrics(rows, {
+      totalReplies: 3,
+      respondingClients: 1,
+      byClient: new Map([["a", 3]]),
+    });
+    assert.equal(metrics.responsesReceived, 3);
+    assert.equal(metrics.respondingClients, 1);
+  });
+
+  it("builds both rates from clients, not from reply counts", () => {
     const rows = [
-      org({ id: "a", outreach_status: "initial_outreach_sent" }),
-      org({ id: "b", outreach_status: "follow_up_sent" }),
-      org({ id: "c", outreach_status: "no_response" }),
-      org({ id: "d", outreach_status: "responded" }),
-      org({ id: "e", outreach_status: "converted" }),
-      org({ id: "f", outreach_status: "soft_no" }),
+      org({ id: "a", outreach_status: "responded" }),
+      org({ id: "b", outreach_status: "initial_outreach_sent" }),
+      org({ id: "c", outreach_status: "converted" }),
     ];
-    assert.equal(computeDashboardMetrics(rows).responsesReceived, 3);
+    // Three replies from client a, one from c: four replies, two clients.
+    const metrics = computeDashboardMetrics(rows, {
+      totalReplies: 4,
+      respondingClients: 2,
+      byClient: new Map([
+        ["a", 3],
+        ["c", 1],
+      ]),
+    });
+
+    assert.equal(metrics.responsesReceived, 4);
+    assert.equal(metrics.replyRate, 2 / 3); // 2 replied clients ÷ 3 contacted
+    assert.equal(metrics.respondedClients, 2);
+    assert.equal(metrics.winRate, 1 / 2); // c converted, of the two who responded
+  });
+
+  it("ignores replies belonging to records the caller did not load", () => {
+    const rows = [org({ id: "a", outreach_status: "responded" })];
+    const metrics = computeDashboardMetrics(rows, {
+      totalReplies: 2,
+      respondingClients: 2,
+      byClient: new Map([
+        ["a", 1],
+        ["suppressed-or-elsewhere", 1],
+      ]),
+    });
+
+    assert.equal(metrics.respondingClients, 1);
+    assert.equal(metrics.replyRate, 1);
   });
 
   it("counts converted only", () => {
@@ -104,14 +148,14 @@ describe("needsAttention", () => {
       org({
         id: "newer",
         owner_id: "cam-1",
-        outreach_status: "follow_up_sent",
+        outreach_status: "no_response",
         legal_name: "Newer Charity",
         updated_at: "2026-02-01T00:00:00Z",
       }),
       org({
         id: "older",
         owner_id: "cam-1",
-        outreach_status: "initial_outreach_sent",
+        outreach_status: "no_response",
         legal_name: "Older Charity",
         updated_at: "2026-01-01T00:00:00Z",
       }),
@@ -122,12 +166,116 @@ describe("needsAttention", () => {
       ["older", "newer"],
     );
     assert.equal(result[0].legalName, "Older Charity");
-    assert.equal(result[0].outreachStatusLabel, "Initial outreach sent");
+    assert.equal(result[0].outreachStatusLabel, "No response");
+    assert.equal(result[0].trigger, "stalled");
+  });
+
+  it("excludes clients in-flight within normal silence window", () => {
+    const rows = [
+      org({ id: "in-flight-1", owner_id: "cam-1", outreach_status: "initial_outreach_sent" }),
+      org({ id: "in-flight-2", owner_id: "cam-1", outreach_status: "follow_up_sent" }),
+    ];
+    assert.deepEqual(needsAttention(rows, "cam-1"), []);
+  });
+
+  it("surfaces inbound replies awaiting response with priority", () => {
+    const rows = [
+      org({ id: "reply", owner_id: "cam-1", outreach_status: "responded", legal_name: "Active Reply" }),
+      org({ id: "stalled", owner_id: "cam-1", outreach_status: "no_response", legal_name: "Stalled Org" }),
+    ];
+    const result = needsAttention(rows, "cam-1", { unreadOrgIds: new Set(["reply"]) });
+    assert.equal(result.length, 2);
+    assert.equal(result[0].id, "reply");
+    assert.equal(result[0].trigger, "inbound_reply");
+    assert.equal(result[0].isInboundReply, true);
+    assert.equal(result[0].isUnreadReply, true);
+    assert.equal(result[1].id, "stalled");
+  });
+
+  it("surfaces due follow-ups when silence exceeds thresholds", () => {
+    const rows = [
+      org({ id: "due-org", owner_id: "cam-1", outreach_status: "initial_outreach_sent", legal_name: "Due Client" }),
+    ];
+    const followUps: FollowUpRecommendation[] = [
+      {
+        organisationId: "due-org",
+        legalName: "Due Client",
+        statusLabel: "Initial outreach sent",
+        lastActivityAt: "2026-01-01T00:00:00Z",
+        daysWaiting: 8,
+        urgency: "due",
+      },
+    ];
+    const result = needsAttention(rows, "cam-1", { followUps });
+    assert.equal(result.length, 1);
+    assert.equal(result[0].id, "due-org");
+    assert.equal(result[0].trigger, "follow_up_due");
+    assert.equal(result[0].followUp?.urgency, "due");
   });
 
   it("treats no_response as needing attention", () => {
     const rows = [org({ id: "a", owner_id: "cam-1", outreach_status: "no_response" })];
     assert.equal(needsAttention(rows, "cam-1").length, 1);
+  });
+});
+
+describe("needsAttention overdue actions (F172 AC3)", () => {
+  function overdue(overrides: Partial<OverdueActionCandidate> = {}): OverdueActionCandidate {
+    return {
+      organisationId: "org-1",
+      title: "Send updated proposal",
+      dueDate: "2026-08-01",
+      ...overrides,
+    };
+  }
+
+  it("surfaces a client with an overdue action even outside the stale-status set", () => {
+    const rows = [org({ id: "org-1", owner_id: "cam-1", outreach_status: "converted" })];
+    const result = needsAttention(rows, "cam-1", [overdue({ organisationId: "org-1" })]);
+    assert.equal(result.length, 1);
+    assert.equal(result[0]?.overdueAction?.title, "Send updated proposal");
+  });
+
+  it("surfaces an overdue action's client even when this actor doesn't own it", () => {
+    const rows = [org({ id: "org-1", owner_id: "someone-else", outreach_status: "not_contacted" })];
+    const result = needsAttention(rows, "cam-1", [overdue({ organisationId: "org-1" })]);
+    assert.equal(result.length, 1);
+  });
+
+  it("does not surface an overdue action for a client not in the fetched rows", () => {
+    const result = needsAttention([], "cam-1", [overdue({ organisationId: "org-missing" })]);
+    assert.deepEqual(result, []);
+  });
+
+  it("attaches the overdue-action badge onto a row that also qualifies by status", () => {
+    const rows = [org({ id: "org-1", owner_id: "cam-1", outreach_status: "no_response" })];
+    const result = needsAttention(rows, "cam-1", [overdue({ organisationId: "org-1" })]);
+    assert.equal(result.length, 1);
+    assert.ok(result[0]?.overdueAction);
+  });
+
+  it("leaves overdueAction unset for a row with no overdue action", () => {
+    const rows = [org({ id: "org-1", owner_id: "cam-1", outreach_status: "no_response" })];
+    const result = needsAttention(rows, "cam-1", []);
+    assert.equal(result[0]?.overdueAction, undefined);
+  });
+
+  it("keeps only the earliest (most overdue) action when a client has more than one", () => {
+    const rows = [org({ id: "org-1", owner_id: "cam-1", outreach_status: "converted" })];
+    const result = needsAttention(rows, "cam-1", [
+      overdue({ organisationId: "org-1", title: "Later one", dueDate: "2026-08-20" }),
+      overdue({ organisationId: "org-1", title: "Earliest one", dueDate: "2026-08-01" }),
+    ]);
+    assert.equal(result[0]?.overdueAction?.title, "Earliest one");
+  });
+
+  it("sorts overdue-action-only rows before status-only rows", () => {
+    const rows = [
+      org({ id: "status-only", owner_id: "cam-1", outreach_status: "no_response", updated_at: "2026-01-01T00:00:00Z" }),
+      org({ id: "overdue-only", owner_id: "cam-1", outreach_status: "converted" }),
+    ];
+    const result = needsAttention(rows, "cam-1", [overdue({ organisationId: "overdue-only" })]);
+    assert.deepEqual(result.map((item) => item.id), ["overdue-only", "status-only"]);
   });
 });
 
@@ -211,15 +359,19 @@ describe("filterActiveSuppressed (F022 AC3)", () => {
     const activeRows = filterActiveSuppressed(rows, suppressions);
     assert.deepEqual(activeRows.map((r) => r.id), ["a", "b"]);
 
-    const metrics = computeDashboardMetrics(activeRows);
+    const metrics = computeDashboardMetrics(activeRows, {
+      totalReplies: 1,
+      respondingClients: 1,
+      byClient: new Map([["b", 1]]),
+    });
     assert.equal(metrics.totalCharities, 2);
     assert.equal(metrics.responsesReceived, 1);
   });
 
   it("excludes actively suppressed charities from needs attention", () => {
     const rows = [
-      org({ id: "a", owner_id: "cam-1", outreach_status: "initial_outreach_sent" }),
-      org({ id: "b", owner_id: "cam-1", outreach_status: "initial_outreach_sent" }),
+      org({ id: "a", owner_id: "cam-1", outreach_status: "no_response" }),
+      org({ id: "b", owner_id: "cam-1", outreach_status: "no_response" }),
     ];
     const suppressions: OpenSuppression[] = [{ organisation_id: "b", status: "active" }];
 

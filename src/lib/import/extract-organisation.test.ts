@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  countryFromHost,
   extractOrganisation,
   findCharityNumber,
   findCompanyNumber,
@@ -65,6 +66,40 @@ describe("extractOrganisation", () => {
 
     assert.deepEqual(extracted.charity, { register: "england_and_wales", number: "1101126" });
     assert.equal(extracted.companyNumber, "04905082");
+  });
+
+  it("infers the country from the ccTLD when a non-UK site states none (wakamate.ng)", () => {
+    // The shape of a real Nigerian business site: title, meta description and a
+    // contact email, no JSON-LD, no stated address anywhere.
+    const html = `
+      <!doctype html>
+      <html><head>
+        <title>WakaMate - Book Trusted Artisans On Demand</title>
+        <meta name="description" content="Connecting you with vetted professionals for all your home and office needs.">
+      </head><body>
+        <a href="mailto:hello@wakamate.ng">hello@wakamate.ng</a>
+      </body></html>
+    `;
+
+    const extracted = extractOrganisation(html, "https://wakamate.ng/");
+    assert.equal(extracted.legalName, "WakaMate");
+    assert.ok(extracted.missionStatement?.includes("vetted professionals"));
+    assert.equal(extracted.contactEmail, "hello@wakamate.ng");
+    assert.equal(extracted.countryCode, "NG");
+  });
+
+  it("prefers a stated country over the ccTLD when they could differ", () => {
+    const html = `<html><head><title>A Charity</title></head><body></body></html>`;
+    // A .com site that states its country in structured data.
+    const withAddress = `
+      <html><head><title>A Charity</title>
+        <script type="application/ld+json">{"@type":"NGO","name":"A Charity",
+          "address":{"@type":"PostalAddress","addressCountry":"Kenya"}}</script>
+      </head><body></body></html>
+    `;
+
+    assert.equal(extractOrganisation(html, "https://acharity.com").countryCode, null);
+    assert.equal(extractOrganisation(withAddress, "https://acharity.com").countryCode, "KE");
   });
 
   it("collects one link per social platform, ignoring bare homepages", () => {
@@ -258,9 +293,44 @@ describe("normaliseCountry", () => {
     }
   });
 
+  it("maps full country names from the CLDR, not just the UK's neighbours", () => {
+    assert.equal(normaliseCountry("Nigeria"), "NG");
+    assert.equal(normaliseCountry("Germany"), "DE");
+    assert.equal(normaliseCountry("Kenya"), "KE");
+    assert.equal(normaliseCountry("South Korea"), "KR");
+  });
+
+  it("matches accented and punctuated names case-insensitively", () => {
+    assert.equal(normaliseCountry("Côte d'Ivoire"), "CI");
+    assert.equal(normaliseCountry("côte d’ivoire"), "CI");
+    assert.equal(normaliseCountry("IVORY COAST"), "CI");
+  });
+
+  it("keeps the well-known aliases CLDR does not use", () => {
+    assert.equal(normaliseCountry("Holland"), "NL");
+    assert.equal(normaliseCountry("Czech Republic"), "CZ");
+  });
+
   it("returns null rather than guessing at something unrecognised", () => {
     assert.equal(normaliseCountry("Planet Earth"), null);
     assert.equal(normaliseCountry(null), null);
+  });
+});
+
+describe("countryFromHost", () => {
+  it("reads the ccTLD as the country", () => {
+    assert.equal(countryFromHost("https://wakamate.ng/"), "NG");
+    assert.equal(countryFromHost("https://example.co.za/about"), "ZA");
+    // Second-level suffixes resolve to their registry's ccTLD.
+    assert.equal(countryFromHost("https://www.example.com.ng"), "NG");
+    // .uk is not its own ISO code.
+    assert.equal(countryFromHost("https://www.example.co.uk/x"), "GB");
+  });
+
+  it("returns null for generic TLDs, which name no country", () => {
+    assert.equal(countryFromHost("https://www.ticketsforgood.com/uk"), null);
+    assert.equal(countryFromHost("https://hopefoundation.org"), null);
+    assert.equal(countryFromHost("not a url"), null);
   });
 });
 

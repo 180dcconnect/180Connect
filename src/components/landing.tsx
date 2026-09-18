@@ -11,7 +11,7 @@ import {
 import Image from "next/image";
 import { useEffect } from "react";
 
-import { BrandCtaButton } from "@/components/brand/brand-cta";
+import { BrandCta, BrandCtaButton } from "@/components/brand/brand-cta";
 import { EASE, entrance, stagger } from "@/components/brand/motion";
 import { SiteChrome } from "@/components/brand/site-chrome";
 import { useAuthDialog } from "@/components/brand/use-auth-dialog";
@@ -156,6 +156,12 @@ function Crop({ crop, delay, index }: { crop: CropSpec; delay: number; index: nu
   // Settles into a soft blur rather than fully sharp — depth-of-field, not a
   // second entrance state, so it still resolves from the same blur(10px) start.
   const restBlur = crop.blur ? "blur(4px)" : "blur(0px)";
+  // Crops hidden below a breakpoint still download (CSS hiding fetches), so
+  // only the always-visible ones are eager; the rest lazy-load and never cost
+  // a mobile first paint. `sizes` lets the optimizer serve the rendered width
+  // instead of the full PNG — previously `unoptimized` shipped full bytes.
+  const alwaysVisible = crop.className === "" && !crop.hero;
+  const eager = index < 2 || alwaysVisible;
 
   return (
     <motion.div
@@ -186,7 +192,16 @@ function Crop({ crop, delay, index }: { crop: CropSpec; delay: number; index: nu
           ease: "easeInOut",
         }}
       >
-        <Image src={crop.src} alt="" width={crop.size} height={crop.size} className="w-full h-full" unoptimized />
+        <Image
+          src={crop.src}
+          alt=""
+          width={crop.size}
+          height={crop.size}
+          sizes={`${crop.size}px`}
+          loading={eager ? "eager" : "lazy"}
+          priority={index === 0}
+          className="w-full h-full"
+        />
       </motion.div>
     </motion.div>
   );
@@ -209,7 +224,7 @@ function Crop({ crop, delay, index }: { crop: CropSpec; delay: number; index: nu
 const INLINE_MARK =
   "inline-block h-[0.78em] w-[0.78em] -translate-y-[0.06em] align-middle";
 
-function SheetsMark() {
+export function SheetsMark() {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -223,7 +238,7 @@ function SheetsMark() {
   );
 }
 
-function GmailMark() {
+export function GmailMark() {
   return (
     <Image
       src="/gmail.svg"
@@ -241,7 +256,7 @@ function GmailMark() {
  * other two (their 24-unit box carries some padding), so all three sit at the
  * same optical size on the line.
  */
-function MondayMark() {
+export function MondayMark() {
   return (
     <svg
       viewBox="0 0 256 156"
@@ -265,6 +280,7 @@ function MondayMark() {
 export default function Landing({
   skipIntro = false,
   notice = null,
+  isSignedIn = false,
 }: {
   /**
    * Set when an auth route (/login, /forgot-password) is rendering this rather
@@ -274,6 +290,11 @@ export default function Landing({
   skipIntro?: boolean;
   /** Passed straight to the dialog; only /login ever has one. */
   notice?: SignedOutNotice | null;
+  /**
+   * True when the visitor already holds a session. The nav pill and the hero
+   * CTA link straight to the app instead of opening the sign-in dialog.
+   */
+  isSignedIn?: boolean;
 }) {
   // Only for the hero button — the chrome renders the dialog itself.
   const { openSignin } = useAuthDialog();
@@ -313,7 +334,7 @@ export default function Landing({
   return (
     // "user" honours prefers-reduced-motion: transforms are dropped, opacity
     // fades survive, so the page still resolves rather than snapping in.
-    <MotionConfig reducedMotion="user">
+    <MotionConfig>
       <motion.main
         className="relative flex flex-1 flex-col overflow-hidden"
         style={{ "--t": introT, backgroundColor: GROUND } as React.CSSProperties}
@@ -343,7 +364,7 @@ export default function Landing({
         </div>
 
         <SiteChrome revealStyle={reveal} activeHref="/" onCtaClick={openSignin}
-          notice={notice} />
+          notice={notice} isSignedIn={isSignedIn} />
 
         <motion.div
           // The wordmark and burger are absolute now, so this pad stands in for
@@ -395,7 +416,11 @@ export default function Landing({
               />
             </div>
 
-            <BrandCtaButton type="button" label="Get Started" size="lg" onClick={openSignin} />
+            {isSignedIn ? (
+              <BrandCta href="/dashboard" label="Go to app" size="lg" ariaLabel="Go to app" />
+            ) : (
+              <BrandCtaButton type="button" label="Get Started" size="lg" onClick={openSignin} />
+            )}
           </motion.div>
 
           {/* Scattered crops of the same source photo — a few left soft to

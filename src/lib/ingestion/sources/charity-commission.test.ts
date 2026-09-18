@@ -2,27 +2,32 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 
 import {
-  charityCommissionAdapter,
   createCharityCommissionLookupAdapter,
   createCharityCommissionDiscoveryAdapter,
   createCharityCommissionStatusRecheckAdapter,
+  isBranchLocalCharity,
+  type CharityCommissionDetailItem,
 } from "./charity-commission.ts";
 
 const REAL_FETCH = globalThis.fetch;
 
 beforeEach(() => {
   process.env.CHARITY_COMMISSION_API_KEY = "test-key";
-  // Narrow range so tests don't loop through 26 years of chunking.
-  process.env.CHARITY_COMMISSION_BACKFILL_START = "2026-07-01";
-  process.env.CHARITY_COMMISSION_BACKFILL_END = "2026-07-08";
 });
 
 afterEach(() => {
   globalThis.fetch = REAL_FETCH;
   delete process.env.CHARITY_COMMISSION_API_KEY;
-  delete process.env.CHARITY_COMMISSION_BACKFILL_START;
-  delete process.env.CHARITY_COMMISSION_BACKFILL_END;
 });
+
+/**
+ * The discovery adapter with its watermark stubbed out, which is how every test
+ * below that exercises the search+details path runs it: a real watermark lookup
+ * would need a Supabase admin client, and the date arithmetic is asserted
+ * separately in its own describe.
+ */
+const discovery = () =>
+  createCharityCommissionDiscoveryAdapter({ resolveWatermark: async () => null });
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -47,15 +52,21 @@ const detailResult = {
   address_line_one: "The Old Rectory",
   address_line_two: "Rectory Road",
   address_line_three: "Great Holland",
-  address_line_four: "Frinton-on-Sea",
+  address_line_four: "Sheffield",
   address_line_five: null,
-  address_post_code: "CO13 0JP",
+  // Sheffield: discovery keeps only charities in the branch's postcode areas, so
+  // the shared fixture has to be one that survives the filter. `remoteDetail`
+  // below is the same record outside them.
+  address_post_code: "S1 2HE",
   phone: "07971648901",
   email: "info@nazeprotectionsociety.org",
   web: "https://nazeprotectionsociety.org",
   reporting_status: "New",
   last_modified_time: "2026-07-13T14:48:43.52",
 };
+
+/** The same charity, registered to an address outside the branch's areas. */
+const remoteDetail = { ...detailResult, address_post_code: "CO13 0JP" };
 
 /** Routes a mocked fetch by URL: search calls vs details calls get different responses. */
 function routedFetch(opts: {
@@ -78,11 +89,11 @@ function routedFetch(opts: {
   });
 }
 
-describe("charityCommissionAdapter.fetch — successful import", () => {
+describe("createCharityCommissionDiscoveryAdapter.fetch — successful import", () => {
   it("returns full detail records, not just search-level fields", async () => {
     globalThis.fetch = routedFetch({});
 
-    const { records, truncated } = await charityCommissionAdapter.fetch();
+    const { records, truncated } = await discovery().fetch();
 
     assert.equal(truncated, false);
     assert.ok(records.length >= 1);
@@ -91,7 +102,7 @@ describe("charityCommissionAdapter.fetch — successful import", () => {
     assert.equal(payload.email, "info@nazeprotectionsociety.org");
     assert.equal(payload.phone, "07971648901");
     assert.equal(payload.web, "https://nazeprotectionsociety.org");
-    assert.equal(payload.address_post_code, "CO13 0JP");
+    assert.equal(payload.address_post_code, "S1 2HE");
   });
 
   it("sends the confirmed auth header on both search and details calls", async () => {
@@ -102,7 +113,7 @@ describe("charityCommissionAdapter.fetch — successful import", () => {
       return jsonResponse([detailResult]);
     });
 
-    await charityCommissionAdapter.fetch();
+    await discovery().fetch();
 
     for (const headers of seenHeaders) {
       assert.equal(headers["Ocp-Apim-Subscription-Key"], "test-key");
@@ -126,7 +137,7 @@ describe("charityCommissionAdapter.fetch — successful import", () => {
       },
     });
 
-    await charityCommissionAdapter.fetch();
+    await discovery().fetch();
 
     // Both numbers went into ONE details call, not two separate ones.
     assert.equal(detailUrls.length, 1);
@@ -134,14 +145,14 @@ describe("charityCommissionAdapter.fetch — successful import", () => {
   });
 });
 
-describe("charityCommissionAdapter.fetch — API failure", () => {
+describe("createCharityCommissionDiscoveryAdapter.fetch — API failure", () => {
   it("throws when the search step fails persistently", async () => {
     globalThis.fetch = routedFetch({
       onSearch: () => jsonResponse({ error: "down" }, 500),
     });
 
     await assert.rejects(
-      () => charityCommissionAdapter.fetch(),
+      () => discovery().fetch(),
       /Charity Commission search API returned 500/,
     );
   });
@@ -152,7 +163,7 @@ describe("charityCommissionAdapter.fetch — API failure", () => {
     });
 
     await assert.rejects(
-      () => charityCommissionAdapter.fetch(),
+      () => discovery().fetch(),
       /Charity Commission details API returned 500/,
     );
   });
@@ -161,20 +172,20 @@ describe("charityCommissionAdapter.fetch — API failure", () => {
     delete process.env.CHARITY_COMMISSION_API_KEY;
 
     await assert.rejects(
-      () => charityCommissionAdapter.fetch(),
+      () => discovery().fetch(),
       /CHARITY_COMMISSION_API_KEY is not set/,
     );
   });
 });
 
-describe("charityCommissionAdapter.fetch — missing fields / malformed response", () => {
+describe("createCharityCommissionDiscoveryAdapter.fetch — missing fields / malformed response", () => {
   it("throws a clear error when the search response is not an array", async () => {
     globalThis.fetch = routedFetch({
       onSearch: () => jsonResponse({ unexpected: "envelope" }),
     });
 
     await assert.rejects(
-      () => charityCommissionAdapter.fetch(),
+      () => discovery().fetch(),
       /Charity Commission search response is not an array/,
     );
   });
@@ -185,7 +196,7 @@ describe("charityCommissionAdapter.fetch — missing fields / malformed response
     });
 
     await assert.rejects(
-      () => charityCommissionAdapter.fetch(),
+      () => discovery().fetch(),
       /Charity Commission details response is not an array/,
     );
   });
@@ -201,26 +212,39 @@ describe("charityCommissionAdapter.fetch — missing fields / malformed response
             email: null,
             web: null,
             address_line_one: null,
-            address_post_code: null,
           },
         ]),
     });
 
-    const { records } = await charityCommissionAdapter.fetch();
+    const { records } = await discovery().fetch();
     const payload = records[0].raw_payload as typeof detailResult;
     assert.equal(payload.phone, null);
     assert.equal(payload.email, null);
   });
+
+  it("drops a record with no postcode rather than throwing on it", async () => {
+    globalThis.fetch = routedFetch({
+      onDetails: () =>
+        jsonResponse([{ ...detailResult, address_post_code: null }]),
+    });
+
+    // A charity with no correspondence postcode cannot be shown to be local, and
+    // "we could not tell" is not a reason to import it — the bulk run picks it up
+    // later from its area of operation if it really is in the branch's patch.
+    const { records, stats } = await discovery().fetch();
+    assert.equal(records.length, 0);
+    assert.deepEqual(stats, { registeredNationally: 1, local: 0 });
+  });
 });
 
-describe("charityCommissionAdapter.fetch — source tracking", () => {
+describe("createCharityCommissionDiscoveryAdapter.fetch — source tracking", () => {
   it("reports its own name", () => {
-    assert.equal(charityCommissionAdapter.name, "charity_commission");
+    assert.equal(discovery().name, "charity_commission");
   });
 
   it("onError logs without throwing", () => {
     assert.doesNotThrow(() =>
-      charityCommissionAdapter.onError(new Error("network down")),
+      discovery().onError(new Error("network down")),
     );
   });
 });
@@ -390,7 +414,7 @@ describe("createCharityCommissionDiscoveryAdapter", () => {
     );
   });
 
-  it("returns full detail records, same as the fixed-range bulk adapter", async () => {
+  it("returns full detail records, not just the search-level fields", async () => {
     globalThis.fetch = routedFetch({});
 
     const { records, truncated } = await createCharityCommissionDiscoveryAdapter({
@@ -400,6 +424,43 @@ describe("createCharityCommissionDiscoveryAdapter", () => {
     assert.equal(truncated, false);
     assert.equal(records.length, 1);
     assert.equal(records[0].source_record_id, "5254841");
+  });
+
+  it("imports only charities in the branch's postcode areas", async () => {
+    globalThis.fetch = routedFetch({
+      onSearch: () =>
+        jsonResponse([
+          { ...searchResult, reg_charity_number: 1 },
+          { ...searchResult, reg_charity_number: 2 },
+          { ...searchResult, reg_charity_number: 3 },
+        ]),
+      onDetails: () =>
+        jsonResponse([
+          { ...detailResult, organisation_number: 1, address_post_code: "S1 2HE" },
+          { ...detailResult, organisation_number: 2, address_post_code: "DN1 1AA" },
+          // Swansea, not Sheffield — the case a startsWith("S") filter would let in.
+          { ...detailResult, organisation_number: 3, address_post_code: "SA1 1AA" },
+        ]),
+    });
+
+    const { records, stats } = await discovery().fetch();
+
+    assert.deepEqual(
+      records.map((record) => record.source_record_id).sort(),
+      ["1", "2"],
+    );
+    assert.deepEqual(stats, { registeredNationally: 3, local: 2 });
+  });
+
+  it("reports what it saw nationally alongside what it kept", async () => {
+    globalThis.fetch = routedFetch({ onDetails: () => jsonResponse([remoteDetail]) });
+
+    const { records, stats } = await discovery().fetch();
+
+    // The national count is the point of recording stats at all: a week where it
+    // equals `local` means the postcode filter has stopped filtering.
+    assert.equal(records.length, 0);
+    assert.deepEqual(stats, { registeredNationally: 1, local: 0 });
   });
 
   it("reports its own name", () => {
@@ -467,5 +528,34 @@ describe("createCharityCommissionStatusRecheckAdapter", () => {
     assert.doesNotThrow(() =>
       createCharityCommissionStatusRecheckAdapter(["1"]).onError(new Error("network down")),
     );
+  });
+});
+describe("isBranchLocalCharity", () => {
+  const withPostcode = (postcode: string | null) =>
+    ({
+      ...detailResult,
+      reg_status: "R",
+      address_post_code: postcode,
+    }) as CharityCommissionDetailItem;
+
+  it("accepts the branch's postcode areas", () => {
+    assert.equal(isBranchLocalCharity(withPostcode("S1 2HE")), true);
+    assert.equal(isBranchLocalCharity(withPostcode("S70 2AA")), true);
+    assert.equal(isBranchLocalCharity(withPostcode("DN1 1AA")), true);
+  });
+
+  it("rejects areas that merely start with the same letter", () => {
+    // The whole reason the area is parsed as a token: these are Swansea,
+    // Sheffield-adjacent-but-not, London SE/SW, Stockport, Slough, Southampton
+    // and Dorchester — roughly a tenth of the register between them.
+    for (const postcode of ["SA1 1AA", "SE1 1AA", "SW1A 1AA", "SK1 1AA", "SO14 1AA", "DT1 1AA"]) {
+      assert.equal(isBranchLocalCharity(withPostcode(postcode)), false, postcode);
+    }
+  });
+
+  it("rejects a missing or unparseable postcode rather than guessing", () => {
+    assert.equal(isBranchLocalCharity(withPostcode(null)), false);
+    assert.equal(isBranchLocalCharity(withPostcode("")), false);
+    assert.equal(isBranchLocalCharity(withPostcode("not a postcode")), false);
   });
 });

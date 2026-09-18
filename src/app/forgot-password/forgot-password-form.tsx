@@ -114,6 +114,7 @@ export function ForgotPasswordForm({
         action="send reset instructions"
         gerund="sending reset instructions"
         resetKey={state}
+        pending={pending}
         tone={tone}
       />
 

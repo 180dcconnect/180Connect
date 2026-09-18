@@ -38,6 +38,17 @@ const ZIP64_EOCD_LOCATOR_SIGNATURE = 0x07064b50;
 const STORED = 0;
 const DEFLATED = 8;
 
+/**
+ * Spreadsheet writers may put the main XLSX namespace on each element either
+ * as the default namespace (`<worksheet>`) or with a prefix (`<x:worksheet>`).
+ * The prefix has no semantic meaning, so remove element prefixes before the
+ * deliberately small regex reader runs. Attribute prefixes such as `r:id`
+ * stay untouched because the replacement only matches immediately after `<`.
+ */
+function withoutElementPrefixes(xml: string): string {
+  return xml.replace(/<(\/?)[A-Za-z_][\w.-]*:/g, "<$1");
+}
+
 /** Reads a zip archive into a map of entry name to uncompressed bytes. */
 function readZipEntries(archive: Buffer): Map<string, Buffer> {
   // The end-of-central-directory record sits at the very end, after a comment of
@@ -146,7 +157,8 @@ function collectText(fragment: string): string {
  */
 function parseSharedStrings(xml: string | undefined): string[] {
   if (!xml) return [];
-  return Array.from(xml.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>|<si\b[^>]*\/>/g)).map(
+  const normalized = withoutElementPrefixes(xml);
+  return Array.from(normalized.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>|<si\b[^>]*\/>/g)).map(
     (match) => collectText(match[1] ?? ""),
   );
 }
@@ -163,10 +175,11 @@ export function columnIndex(reference: string): number {
 
 /** Parses one worksheet into a padded grid. */
 function parseSheet(name: string, xml: string, sharedStrings: string[]): Sheet {
+  const normalized = withoutElementPrefixes(xml);
   const rows: string[][] = [];
   let width = 0;
 
-  for (const rowMatch of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+  for (const rowMatch of normalized.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
     const cells: string[] = [];
 
     // The attribute capture is lazy so a self-closing `<c .../>` matches the
@@ -221,14 +234,17 @@ function parseSheet(name: string, xml: string, sharedStrings: string[]): Sheet {
 export function readWorkbook(archive: Buffer): Sheet[] {
   const entries = readZipEntries(archive);
 
-  const workbookXml = entries.get("xl/workbook.xml")?.toString("utf8");
-  if (!workbookXml) {
+  const rawWorkbookXml = entries.get("xl/workbook.xml")?.toString("utf8");
+  if (!rawWorkbookXml) {
     throw new Error("Not an .xlsx file: xl/workbook.xml is missing.");
   }
+  const workbookXml = withoutElementPrefixes(rawWorkbookXml);
 
   // Sheets are named in workbook.xml but their file paths live in the rels file,
   // keyed by relationship id. Neither is derivable from the other.
-  const relsXml = entries.get("xl/_rels/workbook.xml.rels")?.toString("utf8") ?? "";
+  const relsXml = withoutElementPrefixes(
+    entries.get("xl/_rels/workbook.xml.rels")?.toString("utf8") ?? "",
+  );
   const targetsById = new Map<string, string>();
   for (const match of relsXml.matchAll(/<Relationship\b([^>]*)\/>/g)) {
     const attributes = match[1] ?? "";

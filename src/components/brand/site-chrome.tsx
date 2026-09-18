@@ -32,6 +32,7 @@ export function SiteChrome({
   showCta = true,
   onCtaClick,
   notice,
+  isSignedIn = false,
 }: {
   /**
    * Applied to the pill and the burger. The landing page uses it to hold both
@@ -53,6 +54,11 @@ export function SiteChrome({
   onCtaClick?: () => void;
   /** Only ever set by /login and /forgot-password, from their query string. */
   notice?: SignedOutNotice | null;
+  /**
+   * True when the visitor already holds a session. The pill links straight to
+   * the app instead of opening the sign-in dialog.
+   */
+  isSignedIn?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   // Derived from the URL, so calling this here as well as in a host page that
@@ -93,7 +99,9 @@ export function SiteChrome({
           style={revealStyle}
           className="absolute top-0 right-[68px] z-30 mt-6 flex h-11 items-center sm:right-[86px] sm:mt-8"
         >
-          {onCtaClick ? (
+          {isSignedIn ? (
+            <BrandCta href="/dashboard" size="sm" ariaLabel="Go to app" label="Go to app" />
+          ) : onCtaClick ? (
             <BrandCtaButton
               type="button"
               label="Get Started"
@@ -190,7 +198,16 @@ export function SiteChrome({
                 the clip-path reveal is the only thing that makes it appear. */}
             {showCta && (
               <div className="absolute top-0 right-[68px] mt-6 flex h-11 items-center sm:right-[86px] sm:mt-8">
-                {onCtaClick ? (
+                {isSignedIn ? (
+                  <BrandCta
+                    href="/dashboard"
+                    tone="sheet"
+                    size="sm"
+                    ariaLabel="Go to app"
+                    label="Go to app"
+                    onClick={() => setMenuOpen(false)}
+                  />
+                ) : onCtaClick ? (
                   <BrandCtaButton
                     type="button"
                     label="Get Started"

@@ -58,7 +58,7 @@
 | id | uuid | Primary Key |
 | :--- | :--- | :--- |
 | actor_user_id | uuid | Foreign Key to USERS for user who acted; null for system actions |
-| action | text | Machine Token: role changed, user_deactivated, etc |
+| action | text | Machine Token: role_changed, user_suspended, user_deleted, etc |
 | target_table | text | Table the action targeted |
 | target_id | uuid | Row targeted |
 | detail | jsonb | Action context: before/after, reason |
@@ -74,3 +74,12 @@
 | blocked_until | timestamp | When this address may next attempt a login; null or past means allowed |
 | created_at | timestamp | Row creation timestamp |
 | updated_at | timestamp | Last time a failure was counted. |
+
+## OUTREACH_DAILY_SEND_LIMIT
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| id | boolean | Primary Key |
+| daily_limit | integer | Maximum outreach emails allowed per UTC calendar day; defaults to 250 |
+| updated_by | uuid | Admin who last changed the limit; foreign key to USERS; null for the seeded default |
+| updated_at | timestamp | When the limit was last changed. |

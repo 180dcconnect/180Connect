@@ -37,6 +37,8 @@ export function SearchRail({
   headingClassName = "",
   className = "max-w-4xl",
   stageClassName = "",
+  railClassName = "",
+  barClassName = "",
   children,
 }: {
   /** The search bar itself. Rendered inside the sticky rail. */
@@ -47,12 +49,14 @@ export function SearchRail({
   /** Column width class. */
   className?: string;
   stageClassName?: string;
+  railClassName?: string;
+  barClassName?: string;
   children: ReactNode;
 }) {
   return (
     <div className={`relative mx-auto w-full ${className}`}>
-      <div className="pointer-events-none absolute inset-x-0 top-0 bottom-0 z-40 lg:top-3">
-        <div className="sticky top-4 flex justify-end lg:top-6">
+      <div className={`pointer-events-none absolute inset-x-0 -top-1.5 bottom-0 z-40 lg:-top-2.5 ${railClassName}`}>
+        <div className={`sticky top-3 flex justify-end lg:top-3.5 ${barClassName}`}>
           <div className={`pointer-events-auto w-full ${BAR_W}`}>{bar}</div>
         </div>
       </div>

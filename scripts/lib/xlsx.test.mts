@@ -27,20 +27,36 @@ describe("decodeXmlText", () => {
 });
 
 /** Builds a minimal but real .xlsx in memory, so the reader is tested end to end. */
-function buildXlsx(sharedStrings: string[], sheetRows: string): Buffer {
+function buildXlsx(
+  sharedStrings: string[],
+  sheetRows: string,
+  prefixedElements = false,
+): Buffer {
+  const elementPrefix = prefixedElements ? "x:" : "";
+  const namespace = prefixedElements
+    ? ' xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+    : "";
   const files: Record<string, string> = {
     "xl/workbook.xml":
-      '<?xml version="1.0"?><workbook xmlns:r="r">' +
-      '<sheets><sheet name="Sheet One" sheetId="1" r:id="rId1"/></sheets></workbook>',
+      `<?xml version="1.0"?><${elementPrefix}workbook${namespace} xmlns:r="r">` +
+      `<${elementPrefix}sheets><${elementPrefix}sheet name="Sheet One" sheetId="1" r:id="rId1"/>` +
+      `</${elementPrefix}sheets></${elementPrefix}workbook>`,
     "xl/_rels/workbook.xml.rels":
       '<?xml version="1.0"?><Relationships>' +
       '<Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
     "xl/sharedStrings.xml":
-      '<?xml version="1.0"?><sst>' +
-      sharedStrings.map((value) => `<si><t>${value}</t></si>`).join("") +
-      "</sst>",
+      `<?xml version="1.0"?><${elementPrefix}sst${namespace}>` +
+      sharedStrings
+        .map((value) => `<${elementPrefix}si><${elementPrefix}t>${value}</${elementPrefix}t></${elementPrefix}si>`)
+        .join("") +
+      `</${elementPrefix}sst>`,
     "xl/worksheets/sheet1.xml":
-      `<?xml version="1.0"?><worksheet><sheetData>${sheetRows}</sheetData></worksheet>`,
+      `<?xml version="1.0"?><${elementPrefix}worksheet${namespace}>` +
+      `<${elementPrefix}sheetData>${
+        prefixedElements
+          ? sheetRows.replace(/<(\/?)(row|c|v)\b/g, `<$1${elementPrefix}$2`)
+          : sheetRows
+      }</${elementPrefix}sheetData></${elementPrefix}worksheet>`,
   };
 
   // Assemble a real zip (stored entries) so the reader's zip layer runs for real.
@@ -87,6 +103,17 @@ describe("readWorkbook", () => {
     const xlsx = buildXlsx(
       ["Field", "Type"],
       '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>',
+    );
+    const [sheet] = readWorkbook(xlsx);
+    assert.equal(sheet.name, "Sheet One");
+    assert.deepEqual(sheet.rows[0], ["Field", "Type"]);
+  });
+
+  it("reads namespace-prefixed workbook, sheet and shared-string elements", () => {
+    const xlsx = buildXlsx(
+      ["Field", "Type"],
+      '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>',
+      true,
     );
     const [sheet] = readWorkbook(xlsx);
     assert.equal(sheet.name, "Sheet One");

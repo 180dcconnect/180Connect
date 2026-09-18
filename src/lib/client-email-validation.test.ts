@@ -3,8 +3,11 @@ import { describe, it } from "node:test";
 
 import {
   canSendClientOutreach,
+  onFileEmail,
+  REDACTED_EMAIL_MESSAGE,
   validateClientEmail,
 } from "./client-email-validation.ts";
+import { REDACTED_EMAIL } from "./ingestion/personal-data.ts";
 
 describe("validateClientEmail", () => {
   it("accepts and normalises a valid email", () => {
@@ -21,6 +24,27 @@ describe("validateClientEmail", () => {
       value: "not-an-email",
       message: "This email address has an invalid format. Correct it before outreach.",
     });
+  });
+
+  it("reports a redacted address as its own state, not as a malformed value", () => {
+    assert.deepEqual(validateClientEmail(REDACTED_EMAIL), {
+      status: "redacted",
+      value: null,
+      message: REDACTED_EMAIL_MESSAGE,
+    });
+  });
+
+  it("never returns the placeholder as a value a caller could render or send", () => {
+    // The whole point of `value: null` on this branch: nothing downstream can
+    // print `[redacted:personal-email]` at a CAM or hand it to a transport.
+    assert.equal(validateClientEmail(REDACTED_EMAIL).value, null);
+  });
+
+  it("catches a placeholder embedded in a longer value, not only a bare one", () => {
+    // Redaction is in place, so a scraped field arrives as surrounding text with
+    // the placeholder sitting inside it.
+    const result = validateClientEmail(`Contact ${REDACTED_EMAIL} for details`);
+    assert.equal(result.status, "redacted");
   });
 
   it("distinguishes a missing optional email from a malformed one", () => {
@@ -43,6 +67,25 @@ describe("validateClientEmail", () => {
   });
 });
 
+describe("onFileEmail", () => {
+  it("returns the trimmed address when there is one to write to", () => {
+    assert.equal(onFileEmail("  info@example.org "), "info@example.org");
+  });
+
+  it("returns null for a redacted address, so nothing offers it as a recipient", () => {
+    assert.equal(onFileEmail(REDACTED_EMAIL), null);
+  });
+
+  it("returns null for a blank or absent address", () => {
+    assert.equal(onFileEmail("   "), null);
+    assert.equal(onFileEmail(null), null);
+  });
+
+  it("keeps a malformed address — a value someone typed is still a recipient to warn about", () => {
+    assert.equal(onFileEmail("not-an-email"), "not-an-email");
+  });
+});
+
 describe("canSendClientOutreach", () => {
   it("blocks an invalid recipient and returns a visible warning", () => {
     assert.deepEqual(canSendClientOutreach("broken@", true), {
@@ -53,6 +96,13 @@ describe("canSendClientOutreach", () => {
 
   it("blocks a missing recipient", () => {
     assert.equal(canSendClientOutreach(null, true).allowed, false);
+  });
+
+  it("blocks a redacted recipient and explains why rather than calling it invalid", () => {
+    assert.deepEqual(canSendClientOutreach(REDACTED_EMAIL, true), {
+      allowed: false,
+      warning: REDACTED_EMAIL_MESSAGE,
+    });
   });
 
   it("blocks a valid recipient until a human explicitly approves it", () => {

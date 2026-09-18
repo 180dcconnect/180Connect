@@ -40,12 +40,50 @@ export type GuardRequest = {
   cookies: { get(name: string): { value: string } | undefined };
 };
 
-/** The slice of the Supabase client this module needs. */
+/**
+ * The slice of the Supabase client this module needs.
+ *
+ * `getClaims` is optional so a test fake need only provide `getUser`, and so a
+ * client from an older library version still satisfies the type. When it is
+ * there it is preferred — see `resolveUserId`.
+ */
 export type GuardClient = SignOutClient & {
   auth: {
     getUser: () => Promise<{ data: { user: { id: string } | null } }>;
+    getClaims?: () => Promise<{
+      data: { claims: { sub?: string } } | null;
+      error: unknown;
+    }>;
   };
 };
+
+/**
+ * Who is making this request, or null.
+ *
+ * The proxy matches essentially every request — every page, every RSC
+ * navigation, every server-action POST — so this runs constantly, and
+ * `getUser()` answers it with a network round trip to the Supabase Auth server
+ * each time. `getClaims()` verifies the access token locally against the
+ * project's published asymmetric signing key instead, which costs no network on
+ * the usual path, and still refreshes a token that is close to expiry.
+ *
+ * `getUser` remains the fallback rather than being deleted: a transient JWKS
+ * fetch failure, a token still signed with the legacy symmetric secret, or an
+ * environment without WebCrypto would otherwise sign every user out at once.
+ * The fallback is precisely the behaviour this function had before.
+ */
+async function resolveUserId(client: GuardClient): Promise<string | null> {
+  if (client.auth.getClaims) {
+    const { data, error } = await client.auth.getClaims();
+    if (data?.claims?.sub) return data.claims.sub;
+    if (!error) return null; // verified, and there is genuinely no session
+  }
+
+  const {
+    data: { user },
+  } = await client.auth.getUser();
+  return user?.id ?? null;
+}
 
 /** What the proxy should do with the request. */
 export type GuardOutcome =
@@ -117,12 +155,10 @@ export async function decideSessionAction(
   client: GuardClient,
   now: number = Date.now(),
 ): Promise<GuardOutcome> {
-  const {
-    data: { user },
-  } = await client.auth.getUser();
+  const userId = await resolveUserId(client);
 
   // Nothing to expire for a logged-out visitor, and /login must stay reachable.
-  if (!user) return { action: "pass", reason: "signed-out" };
+  if (!userId) return { action: "pass", reason: "signed-out" };
 
   // A session that arrived through a password-reset link (F004) is handled
   // before anything else, because it is not an ordinary signed-in session and
@@ -141,12 +177,12 @@ export async function decideSessionAction(
   const recoveryUserId = await readRecoveryMarker(
     request.cookies.get(RECOVERY_COOKIE_NAME)?.value,
   );
-  if (recoveryUserId !== null && recoveryUserId === user.id) {
+  if (recoveryUserId !== null && recoveryUserId === userId) {
     if (isRecoveryAllowedPath(request.pathname)) {
       return { action: "pass", reason: "recovery" };
     }
     logSecurityEvent("session.recovery_confined", {
-      userId: user.id,
+      userId: userId,
       pathname: request.pathname,
     });
     return { action: "confine", redirectTo: "/reset-password" };
@@ -168,7 +204,7 @@ export async function decideSessionAction(
     const signedOut = await signOutAndReport(client);
 
     logSecurityEvent("session.expired", {
-      userId: user.id,
+      userId: userId,
       hadActivityRecord: lastActivity !== null,
       idleMs: lastActivity === null ? undefined : now - lastActivity,
       signedOut,

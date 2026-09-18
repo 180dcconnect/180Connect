@@ -1,13 +1,19 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { cn } from "@/lib/utils";
 
 /** One point on a metric line: a value and the label for its x position. */
 export type SeriesPoint = { value: number; date: string };
 
 /** A named series, optionally pinned to its own accent colour. */
-export type MetricSeries = { name: string; data: SeriesPoint[]; accent?: MetricAccent };
+export type MetricSeries = {
+  name: string;
+  data: SeriesPoint[];
+  accent?: MetricAccent;
+  footerLabel?: string;
+};
 
 export type MetricAccent = "emerald" | "rose" | "neutral" | "brand";
 
@@ -55,6 +61,17 @@ export function formatPointDate(date: string): string {
   return `${get("day")} ${get("month")}, ${get("year")}`;
 }
 
+const AXIS_DAY_LABEL = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  timeZone: "UTC",
+});
+
+export function formatAxisDate(date: string): string {
+  if (!ISO_DAY.test(date)) return date;
+  return AXIS_DAY_LABEL.format(new Date(`${date}T00:00:00Z`));
+}
+
 /** 1_240 → "1.2K". Used for the headline and the peak/low/avg footer. */
 export function formatCompact(value: number): string {
   const abs = Math.abs(value);
@@ -73,11 +90,12 @@ export function formatCompact(value: number): string {
  * the bottom for its opaque footer — the chart sits behind both.
  */
 const BAND_TOP = 34;
-const BAND_BOTTOM = 99.5;
-const X_INSET = 3;
-
-const toX = (i: number, len: number) =>
-  len <= 1 ? 50 : X_INSET + (i / (len - 1)) * (100 - X_INSET * 2);
+const BAND_BOTTOM = 100;
+// Left keeps a small inset so the start of the line isn't glued to the card
+// edge; right is 0 so the last data point reaches the edge itself — stopping it
+// short read as if the series ended a day early.
+const X_INSET_LEFT = 3;
+const X_INSET_RIGHT = 0;
 
 const NUM_SPLINE_SAMPLES = 32;
 
@@ -99,8 +117,8 @@ function sampleMonotoneSplinePath(
     return { line: "", fill: "" };
   }
   if (n === 1) {
-    const x0 = X_INSET;
-    const x1 = 100 - X_INSET;
+    const x0 = X_INSET_LEFT;
+    const x1 = 100 - X_INSET_RIGHT;
     const y0 = pts[0].y;
     const step = (x1 - x0) / (numSamples - 1);
     let line = `M ${x0.toFixed(3)} ${y0.toFixed(3)}`;
@@ -227,26 +245,45 @@ function sampleMonotoneSplinePath(
   return { line, fill };
 }
 
-export function MetricChart({
-  series,
-  view,
-  defaultIndex,
-  valueFormatter,
-  dateFormatter,
-  bandBottom = BAND_BOTTOM,
-  bandTop = BAND_TOP,
-}: {
+export interface MetricChartProps {
   series: ChartSeries[];
   view: ChartView;
   /** Point the cursor rests on when nothing is hovered. */
   defaultIndex: number;
   valueFormatter: (value: number) => string;
   dateFormatter: (date: string) => string;
+  compactFormatter?: (value: number) => string;
   bandBottom?: number;
   bandTop?: number;
-}) {
+  showAxes?: boolean;
+  showXAxis?: boolean;
+  showYAxis?: boolean;
+  className?: string;
+}
+
+export function MetricChart({
+  series,
+  view,
+  defaultIndex,
+  valueFormatter,
+  dateFormatter,
+  compactFormatter = formatCompact,
+  bandBottom: bandBottomProp,
+  bandTop: bandTopProp,
+  showAxes = false,
+  showXAxis: showXAxisProp,
+  showYAxis: showYAxisProp,
+  className,
+}: MetricChartProps) {
   const rawId = useId().replace(/:/g, "");
   const [hovered, setHovered] = useState<number | null>(null);
+  const [hasEnteredView, setHasEnteredView] = useState(false);
+
+  const showXAxis = showXAxisProp ?? showAxes;
+  const showYAxis = showYAxisProp ?? showAxes;
+  const bandTop = bandTopProp ?? BAND_TOP;
+  const bandBottom = bandBottomProp ?? (showXAxis ? 84 : BAND_BOTTOM);
+  const xInsetRight = showYAxis ? 6 : X_INSET_RIGHT;
 
   const length = series[0]?.data.length ?? 0;
   const active = Math.min(Math.max(hovered ?? defaultIndex, 0), Math.max(length - 1, 0));
@@ -257,38 +294,94 @@ export function MetricChart({
     if (!values.length) return { min: 0, max: 1 };
     const lo = Math.min(...values);
     const hi = Math.max(...values);
-    return hi === lo ? { min: lo - 1, max: hi + 1 } : { min: lo, max: hi };
-  }, [series]);
+    const baseline = showYAxis && lo >= 0 ? 0 : lo;
+    return hi === baseline ? { min: baseline, max: baseline + 1 } : { min: baseline, max: hi };
+  }, [series, showYAxis]);
+
+  const toX = (i: number, len: number) =>
+    len <= 1
+      ? 50
+      : X_INSET_LEFT + (i / (len - 1)) * (100 - X_INSET_LEFT - xInsetRight);
 
   const toY = (value: number) =>
     bandBottom - ((value - min) / (max - min)) * (bandBottom - bandTop);
+
+  const yTicks = useMemo(() => {
+    if (!showYAxis) return [];
+    if (max <= min) return [min];
+    const diff = max - min;
+    const mid = min + diff / 2;
+    const roundMid = Number.isInteger(diff) ? Math.round(mid) : Number(mid.toFixed(1));
+    const unique = Array.from(new Set([max, roundMid, min]));
+    return unique.sort((a, b) => b - a);
+  }, [showYAxis, min, max]);
+
+  const xTicks = useMemo(() => {
+    if (!showXAxis || length < 1) return [];
+    if (length === 1) return [{ index: 0, date: series[0].data[0].date }];
+    if (length === 2) {
+      return [
+        { index: 0, date: series[0].data[0].date },
+        { index: 1, date: series[0].data[1].date },
+      ];
+    }
+    const midIndex = Math.floor((length - 1) / 2);
+    return [
+      { index: 0, date: series[0].data[0].date },
+      { index: midIndex, date: series[0].data[midIndex].date },
+      { index: length - 1, date: series[0].data[length - 1].date },
+    ];
+  }, [showXAxis, length, series]);
 
   if (!length) return null;
 
   const activeDate = series[0].data[active]?.date ?? "";
   const cursorX = toX(active, length);
 
+  const handlePointer = (event: React.PointerEvent<HTMLDivElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    if (!box.width || length <= 1) {
+      setHovered(0);
+      return;
+    }
+    const rawX = ((event.clientX - box.left) / box.width) * 100;
+    const fractionalIndex =
+      ((rawX - X_INSET_LEFT) / (100 - X_INSET_LEFT - xInsetRight)) * (length - 1);
+    const closestIndex = Math.min(length - 1, Math.max(0, Math.round(fractionalIndex)));
+    setHovered(closestIndex);
+  };
+
   return (
     <div
-      className="relative h-full w-full select-none touch-none"
+      className={cn("relative h-full w-full select-none touch-none overflow-visible", className)}
       onPointerLeave={() => setHovered(null)}
-      onPointerDown={(event) => {
-        const box = event.currentTarget.getBoundingClientRect();
-        const ratio = (event.clientX - box.left) / box.width;
-        setHovered(Math.min(length - 1, Math.max(0, Math.round(ratio * (length - 1)))));
+      ref={(node) => {
+        if (!node || hasEnteredView) return;
+        const observer = new IntersectionObserver(
+          ([entry]) => {
+            if (entry.isIntersecting) {
+              setHasEnteredView(true);
+              observer.disconnect();
+            }
+          },
+          { threshold: 0.2 },
+        );
+        observer.observe(node);
       }}
-      onPointerMove={(event) => {
-        const box = event.currentTarget.getBoundingClientRect();
-        const ratio = (event.clientX - box.left) / box.width;
-        setHovered(Math.min(length - 1, Math.max(0, Math.round(ratio * (length - 1)))));
-      }}
+      onPointerDown={handlePointer}
+      onPointerMove={handlePointer}
     >
-      <svg
-        className="h-full w-full"
-        viewBox="0 0 100 100"
-        preserveAspectRatio="none"
-        aria-hidden="true"
-      >
+      {/*
+       * Clips the plot to the chart region, inheriting the enclosing card's
+       * right-hand corner radius (e.g. rounded-2xl or rounded-[28px]) dynamically.
+       */}
+      <div className="absolute inset-0 overflow-hidden rounded-r-[inherit]">
+        <svg
+          className="h-full w-full"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
         <defs>
           {series.map((s, i) => (
             <linearGradient key={s.name} id={`${rawId}-fill-${i}`} x1="0" y1="0" x2="0" y2="1">
@@ -305,12 +398,12 @@ export function MetricChart({
           animate={{
             x1: cursorX,
             x2: cursorX,
-            opacity: hovered !== null ? 0.45 : 0.22,
+            opacity: hovered !== null ? 0.45 : 0,
           }}
           transition={{
             x1: { type: "spring", stiffness: 450, damping: 32 },
             x2: { type: "spring", stiffness: 450, damping: 32 },
-            opacity: { duration: 0.2 },
+            opacity: { duration: 0.15 },
           }}
           y1={bandTop - 6}
           y2={bandBottom}
@@ -321,17 +414,52 @@ export function MetricChart({
           className="text-foreground"
         />
 
+        {/* Y-axis gridlines */}
+        {showYAxis &&
+          yTicks.map((tick) => (
+            <line
+              key={`ygrid-${tick}`}
+              x1={0}
+              x2={100}
+              y1={toY(tick)}
+              y2={toY(tick)}
+              stroke="currentColor"
+              strokeDasharray="2 3"
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+              className="text-black/[0.06] dark:text-white/[0.08]"
+            />
+          ))}
+
+        {/* X-axis baseline */}
+        {showXAxis && (
+          <line
+            x1={0}
+            x2={100}
+            y1={bandBottom}
+            y2={bandBottom}
+            stroke="currentColor"
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+            className="text-black/[0.08] dark:text-white/[0.1]"
+          />
+        )}
+
         {series.map((s, seriesIndex) => {
           const pts = s.data.map((d, i) => ({ x: toX(i, s.data.length), y: toY(d.value) }));
 
           if (view === "bars") {
-            const slot = (100 - X_INSET * 2) / Math.max(s.data.length, 1);
+            const slot = (100 - X_INSET_LEFT - xInsetRight) / Math.max(s.data.length, 1);
             const width = Math.max(slot * (series.length > 1 ? 0.34 : 0.5), 0.6);
             const offset = (seriesIndex - (series.length - 1) / 2) * width;
             return (
               <g key={s.name}>
                 {pts.map((p, i) => {
-                  const barX = p.x + offset - width / 2;
+                  // The last point sits on the right edge (X_INSET_RIGHT = 0);
+                  // pull its bar half-a-width inward so it doesn't spill past
+                  // the card border.
+                  const barXShift = i === s.data.length - 1 ? -width / 2 : 0;
+                  const barX = p.x + offset - width / 2 + barXShift;
                   const barY = p.y;
                   const barHeight = Math.max(bandBottom - p.y, 0.5);
                   return (
@@ -340,11 +468,11 @@ export function MetricChart({
                       x={barX}
                       width={width}
                       rx={0.5}
-                      initial={false}
+                      initial={{ y: bandBottom, height: 0, opacity: 0 }}
                       animate={{
                         y: barY,
                         height: barHeight,
-                        opacity: i === active ? 1 : 0.42,
+                        opacity: hasEnteredView ? (hovered !== null ? (i === active ? 1 : 0.42) : 0.85) : 0,
                       }}
                       transition={{
                         type: "spring",
@@ -385,28 +513,79 @@ export function MetricChart({
           );
         })}
       </svg>
+      </div>
 
-      {/* Point markers outside the SVG with spring physics tracking */}
+      {/* Y-axis tick labels */}
+      {showYAxis &&
+        yTicks.map((tick) => (
+          <div
+            key={`ytick-${tick}`}
+            className="pointer-events-none absolute right-1.5 z-10 -translate-y-1/2 select-none"
+            style={{ top: `${toY(tick)}%` }}
+          >
+            <span className="font-mono text-[10px] font-medium tabular-nums text-foreground/40 dark:text-foreground/50">
+              {compactFormatter(tick)}
+            </span>
+          </div>
+        ))}
+
+      {/* X-axis date labels */}
+      {showXAxis && xTicks.length > 0 && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-1 z-10 select-none text-[10px] font-medium text-foreground/40 dark:text-foreground/50">
+          {xTicks.map((tick, i) => {
+            const xPercent = toX(tick.index, length);
+            const isFirst = i === 0;
+            const isLast = i === xTicks.length - 1;
+            return (
+              <span
+                key={`xtick-${tick.date}-${i}`}
+                className="absolute whitespace-nowrap"
+                style={{
+                  left: `${xPercent}%`,
+                  transform: isFirst
+                    ? "translateX(0)"
+                    : isLast
+                      ? "translateX(-100%)"
+                      : "translateX(-50%)",
+                }}
+              >
+                {formatAxisDate(tick.date)}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Point markers outside the SVG with spring physics tracking — kept outside the clipped wrapper so the end dot can sit on the border */}
+
       {view === "curve" &&
         series.map((s) => {
           const point = s.data[Math.min(active, s.data.length - 1)];
           if (!point) return null;
           const targetX = toX(Math.min(active, s.data.length - 1), s.data.length);
           const targetY = toY(point.value);
+          // The last point sits on the right edge; nudge its dot inward so it
+          // isn't half-clipped by the card's rounded border. This must ride the
+          // standalone `translate` property (Tailwind's -translate-* utilities
+          // set the same property) because Motion's `transform` would clobber it.
+          const edgeDotNudge = targetX >= 100 ? "8px" : null;
           return (
             <motion.div
               key={s.name}
               className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
+              style={edgeDotNudge ? { translate: `calc(-50% + ${edgeDotNudge}) -50%` } : undefined}
               initial={false}
               animate={{
                 left: `${targetX}%`,
                 top: `${targetY}%`,
-                scale: hovered !== null ? 1.15 : 1,
+                scale: hovered !== null ? 1.15 : 0.7,
+                opacity: hovered !== null ? 1 : 0,
               }}
               transition={{
-                type: "spring",
-                stiffness: 450,
-                damping: 30,
+                left: { type: "spring", stiffness: 450, damping: 30 },
+                top: { type: "spring", stiffness: 450, damping: 30 },
+                scale: { duration: 0.15 },
+                opacity: { duration: 0.15 },
               }}
             >
               {/* Glow ring */}
@@ -424,56 +603,73 @@ export function MetricChart({
         })}
 
       {/* Tooltip: Glassmorphic card floating with smooth spring tracking */}
-      <motion.div
-        className="pointer-events-none absolute z-30"
-        initial={false}
-        animate={{
-          left: `${cursorX}%`,
-          top: `${BAND_TOP}%`,
-        }}
-        transition={{
-          left: { type: "spring", stiffness: 450, damping: 32 },
-          top: { type: "spring", stiffness: 450, damping: 32 },
-        }}
-        style={{
-          transform: `translate(${active > length / 2 ? "-100%" : "0%"}, -50%)`,
-        }}
-      >
-        <div className="relative min-w-[130px] rounded-xl border border-black/[0.08] dark:border-white/[0.12] bg-popover/95 px-3.5 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.12),0_2px_6px_rgba(0,0,0,0.06)] backdrop-blur-md transition-shadow">
-          <p className="whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground/80">
-            {dateFormatter(activeDate)}
-          </p>
-          <div className="mt-1 space-y-1">
-            {series.map((s) => {
-              const val = s.data[Math.min(active, s.data.length - 1)]?.value ?? 0;
-              return (
-                <div
-                  key={s.name}
-                  className="flex items-center justify-between gap-3 whitespace-nowrap text-[13px] font-semibold tabular-nums text-foreground"
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="h-2 w-2 rounded-full ring-2 ring-white dark:ring-black/40"
-                      style={{
-                        background: s.color,
-                        boxShadow: `0 0 6px ${s.color}`,
-                      }}
-                    />
-                    {series.length > 1 && (
-                      <span className="text-[12px] font-medium text-muted-foreground">
-                        {s.name}
+      <AnimatePresence>
+        {hovered !== null && (
+          <motion.div
+            className="pointer-events-none absolute z-50"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{
+              left: `${cursorX}%`,
+              top: `${BAND_TOP}%`,
+              opacity: 1,
+              scale: 1,
+            }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{
+              left: { type: "spring", stiffness: 450, damping: 32 },
+              top: { type: "spring", stiffness: 450, damping: 32 },
+              opacity: { duration: 0.15 },
+              scale: { duration: 0.15 },
+            }}
+            // Flip via the standalone CSS `translate` property, NOT `transform`:
+            // Motion animates `scale` on this element and rewrites `transform`
+            // every frame, which would wipe a transform-based flip mid-hover —
+            // exactly the bug that pushed the tooltip off the card's right
+            // edge. `translate` composes with Motion's `transform` instead.
+            style={{
+              translate:
+                cursorX > 50
+                  ? "calc(-100% - 12px) -50%"
+                  : "12px -50%",
+            }}
+          >
+            <div className="relative min-w-[130px] rounded-xl border border-black/[0.08] dark:border-white/[0.12] bg-popover/95 px-3.5 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.12),0_2px_6px_rgba(0,0,0,0.06)] backdrop-blur-md transition-shadow">
+              <p className="whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground/80">
+                {dateFormatter(activeDate)}
+              </p>
+              <div className="mt-1 space-y-1">
+                {series.map((s) => {
+                  const val = s.data[Math.min(active, s.data.length - 1)]?.value ?? 0;
+                  return (
+                    <div
+                      key={s.name}
+                      className="flex items-center justify-between gap-3 whitespace-nowrap text-[13px] font-semibold tabular-nums text-foreground"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className="h-2 w-2 rounded-full ring-2 ring-white dark:ring-black/40"
+                          style={{
+                            background: s.color,
+                            boxShadow: `0 0 6px ${s.color}`,
+                          }}
+                        />
+                        {series.length > 1 && (
+                          <span className="text-[12px] font-medium text-muted-foreground">
+                            {s.name}
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-bold tracking-tight">
+                        {valueFormatter(val)}
                       </span>
-                    )}
-                  </div>
-                  <span className="font-bold tracking-tight">
-                    {valueFormatter(val)}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </motion.div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

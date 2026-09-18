@@ -1,0 +1,140 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { OriginButton } from "@/components/ui/origin-button";
+
+type TeamMember = { id: string; full_name: string | null; role?: string | null };
+
+/**
+ * F163 — admin assigns or reassigns this client's owner. Posts to
+ * /api/clients/[id]/assign-owner, which calls reassign_ownership.
+ *
+ * AC2's conflict warning is shown up front, not just after an error: when the
+ * client already has an owner, the amber notice below the picker stays visible for
+ * as long as the form does, the same treatment ClaimButton gives a 409 — so an
+ * admin sees the existing assignment before submitting, not only if they retry
+ * into one (F165's minimal form, reused rather than duplicated).
+ */
+export function AssignOwnerForm({
+  organisationId,
+  currentOwnerId,
+  currentOwnerName,
+  team,
+}: {
+  organisationId: string;
+  currentOwnerId: string | null;
+  currentOwnerName: string | null;
+  team: TeamMember[];
+}) {
+  const router = useRouter();
+  const [ownerId, setOwnerId] = useState(currentOwnerId ?? "");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!ownerId) {
+      setError("Choose a team member or Unassigned.");
+      return;
+    }
+    const targetOwnerId = ownerId === "unassigned" ? null : ownerId;
+    if (targetOwnerId === currentOwnerId) {
+      setError("Choose a different owner or Unassigned to change ownership.");
+      return;
+    }
+    if (!reason.trim()) {
+      setError("A reason is required so the handover can be understood later.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/clients/${organisationId}/assign-owner`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ownerId: targetOwnerId, reason }),
+      });
+      if (response.ok) {
+        setReason("");
+        router.refresh();
+        return;
+      }
+      const body = await response.json();
+      setError(body.error ?? "This client could not be assigned.");
+    } catch {
+      setError("Could not reach the server. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="mt-5 space-y-3 border-t border-rule pt-5" onSubmit={submit}>
+      {currentOwnerId && (
+        <p
+          role="alert"
+          className="rounded-inset border border-hold/25 bg-hold-wash px-3.5 py-3 text-[13px] font-semibold leading-[1.6] text-hold"
+        >
+          Currently owned by {currentOwnerName ?? "a former team member"}. Assigning a
+          new owner moves this client away from them — this is not silent.
+        </p>
+      )}
+
+      <label className="flex flex-col gap-1.5 text-sm">
+        <span className="text-[13px] font-medium text-dim">
+          Assign to
+        </span>
+        <Select value={ownerId} onValueChange={setOwnerId}>
+          <SelectTrigger className="w-full rounded-inset bg-white text-sm">
+            <SelectValue placeholder="Choose a team member or Unassigned" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="unassigned">
+              Unassigned
+            </SelectItem>
+            {team.map((member) => (
+              <SelectItem key={member.id} value={member.id}>
+                {member.full_name ?? (member.role === "admin" ? "Unnamed Admin" : "Unnamed CAM")}
+                {member.role === "admin" ? " (Admin)" : ""}
+                {member.id === currentOwnerId ? " (current owner)" : ""}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </label>
+
+      <label className="flex flex-col gap-1.5 text-sm">
+        <span className="text-[13px] font-medium text-dim">
+          Reason
+        </span>
+        <Input
+          type="text"
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="Why this handover is happening"
+          className="rounded-inset bg-white"
+        />
+      </label>
+
+      <OriginButton type="submit" size="sm" loading={busy} disabled={busy}>
+        {busy ? "Updating…" : ownerId === "unassigned" ? "Unassign client" : currentOwnerId ? "Reassign owner" : "Assign owner"}
+      </OriginButton>
+
+      {error && (
+        <p aria-live="polite" role="alert" className="text-[13px] font-semibold text-stop">
+          {error}
+        </p>
+      )}
+    </form>
+  );
+}

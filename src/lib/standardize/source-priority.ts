@@ -14,6 +14,12 @@
 export const SOURCE_PRIORITY: Record<string, number> = {
   companies_house: 1,
   charity_commission: 2,
+  // The bulk register extract is the same registrar publishing the same
+  // register, so it ranks with the API rather than above or below it — a field
+  // conflict between the two is not a question of authority, it is the same
+  // authority on two different days, and F048 sends a genuine disagreement to a
+  // human either way. Leaving it unranked would send *every* field to review.
+  charity_commission_bulk: 2,
 };
 
 /**

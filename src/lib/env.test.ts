@@ -210,6 +210,46 @@ describe("collectEnvProblems", () => {
     assert.equal(problems.length, 1);
     assert.equal(problems[0].name, "EMAIL_FROM");
   });
+
+  it("requires an Exa key once the news hook provider is exa", () => {
+    const problems = collectEnvProblems({
+      ...validEnv(),
+      NEWS_HOOK_PROVIDER: "exa",
+    });
+
+    assert.equal(problems.length, 1);
+    assert.equal(problems[0].name, "EXA_API_KEY");
+    assert.match(problems[0].problem, /NEWS_HOOK_PROVIDER is exa/);
+  });
+
+  it("accepts the exa provider paired with a key", () => {
+    assert.deepEqual(
+      collectEnvProblems({
+        ...validEnv(),
+        NEWS_HOOK_PROVIDER: "exa",
+        EXA_API_KEY: "exa_test_key",
+      }),
+      [],
+    );
+  });
+
+  it("accepts the news hook disabled without a key", () => {
+    assert.deepEqual(
+      collectEnvProblems({ ...validEnv(), NEWS_HOOK_PROVIDER: "none" }),
+      [],
+    );
+  });
+
+  it("rejects an unknown news hook provider", () => {
+    const problems = collectEnvProblems({
+      ...validEnv(),
+      NEWS_HOOK_PROVIDER: "gdelt",
+    });
+
+    assert.equal(problems.length, 1);
+    assert.equal(problems[0].name, "NEWS_HOOK_PROVIDER");
+    assert.match(problems[0].problem, /none, exa/);
+  });
 });
 
 describe("formatEnvProblems", () => {

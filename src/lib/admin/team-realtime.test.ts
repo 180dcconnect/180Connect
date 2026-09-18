@@ -17,9 +17,9 @@ function teamUser(overrides: Partial<TeamUser> = {}): TeamUser {
     full_name: "Alice",
     role: "cam",
     is_active: true,
-    deactivated_at: null,
     last_seen_at: null,
     owned_client_count: 2,
+    listed_client_count: 2,
     ...overrides,
   };
 }
@@ -37,6 +37,23 @@ function pendingInvite(overrides: Partial<PendingInvite> = {}): PendingInvite {
 const emptyState: TeamPanelState = { teamUsers: [], pendingInvites: [] };
 
 describe("applyRealtimeUserChange", () => {
+  it("drops a member whose account was redacted (an UPDATE carrying deleted_at)", () => {
+    const state: TeamPanelState = { teamUsers: [teamUser()], pendingInvites: [] };
+    const next = applyRealtimeUserChange(state, {
+      eventType: "UPDATE",
+      old: {},
+      new: {
+        id: "u1",
+        email: "redacted+u1@invalid",
+        full_name: "Former member",
+        is_active: false,
+        deleted_at: "2026-09-13T10:00:00.000Z",
+      },
+    });
+
+    assert.deepEqual(next.teamUsers, []);
+  });
+
   it("adds a new pending invite (INSERT, invited_at set, not yet accepted)", () => {
     const next = applyRealtimeUserChange(emptyState, {
       eventType: "INSERT",
@@ -70,7 +87,6 @@ describe("applyRealtimeUserChange", () => {
         full_name: "Bea",
         role: "cam",
         is_active: true,
-        deactivated_at: null,
         invited_at: "2026-08-01T00:00:00.000Z",
         invite_accepted_at: "2026-08-05T09:00:00.000Z",
       },
@@ -83,11 +99,12 @@ describe("applyRealtimeUserChange", () => {
         email: "b@180dc.org",
         full_name: "Bea",
         owned_client_count: 0,
+        listed_client_count: 0,
       }),
     ]);
   });
 
-  it("applies a role/suspension change to an existing team member, preserving owned_client_count", () => {
+  it("applies a role/suspension change to an existing team member, preserving the client counts", () => {
     const state: TeamPanelState = {
       teamUsers: [teamUser()],
       pendingInvites: [],
@@ -102,12 +119,11 @@ describe("applyRealtimeUserChange", () => {
         full_name: "Alice",
         role: "admin",
         is_active: false,
-        deactivated_at: null,
       },
     });
 
     assert.deepEqual(next.teamUsers, [
-      teamUser({ role: "admin", is_active: false, owned_client_count: 2 }),
+      teamUser({ role: "admin", is_active: false, owned_client_count: 2, listed_client_count: 2 }),
     ]);
   });
 

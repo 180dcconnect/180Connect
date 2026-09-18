@@ -3,9 +3,11 @@ import { describe, it } from "node:test";
 
 import {
   dayKeyOf,
+  formatCadence,
   formatDayLabel,
   formatDuration,
   formatRelativeTime,
+  formatShortDate,
   groupByDay,
   humaniseToken,
 } from "./display-format.ts";
@@ -102,5 +104,37 @@ describe("groupByDay", () => {
 describe("dayKeyOf", () => {
   it("keys on the local calendar date, zero-padded", () => {
     assert.equal(dayKeyOf(new Date(2026, 0, 5)), "2026-01-05");
+  });
+});
+
+describe("formatShortDate", () => {
+  it("formats date strings deterministically without locale drift", () => {
+    assert.equal(formatShortDate("2023-09-12"), "12 Sep 2023");
+    assert.equal(formatShortDate("2024-01-05"), "5 Jan 2024");
+    assert.equal(formatShortDate("2022-12-31"), "31 Dec 2022");
+  });
+
+  it("handles Date objects and timestamps", () => {
+    assert.equal(formatShortDate(new Date("2023-09-12T00:00:00.000Z")), "12 Sep 2023");
+  });
+
+  it("falls back gracefully on empty or null values", () => {
+    assert.equal(formatShortDate(null), "—");
+    assert.equal(formatShortDate(undefined), "—");
+    assert.equal(formatShortDate(""), "—");
+  });
+});
+
+describe("formatCadence", () => {
+  it("names minute, day and week cadences in plain words", () => {
+    assert.equal(formatCadence(5 * 60 * 1000), "every 5 minutes");
+    assert.equal(formatCadence(15 * 60 * 1000), "every 15 minutes");
+    assert.equal(formatCadence(24 * 60 * 60 * 1000), "every day");
+    assert.equal(formatCadence(7 * 24 * 60 * 60 * 1000), "every week");
+  });
+
+  it("keeps singular units singular", () => {
+    assert.equal(formatCadence(60 * 1000), "every 1 minute");
+    assert.equal(formatCadence(60 * 60 * 1000), "every 1 hour");
   });
 });

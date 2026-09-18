@@ -9,6 +9,7 @@
 // charity's own homepage is where the mission lives and is nobody's authority on its
 // registered address.
 
+import { normalizeCity } from "../city.ts";
 import type { WebsiteExtraction } from "./extract-organisation.ts";
 import type { RegistryMatch } from "./registry-lookup.ts";
 import { organisationTypeFrom } from "./registry-lookup.ts";
@@ -17,7 +18,7 @@ import { organisationTypeFrom } from "./registry-lookup.ts";
 export type ImportDraftFields = {
   legal_name: string | null;
   mission_statement: string | null;
-  organisation_type: "charity" | "company" | "both" | null;
+  organisation_type: "charity" | "cio" | "cic" | "social_enterprise" | "ngo" | "company" | "both" | "other" | null;
   address_line_1: string | null;
   city: string | null;
   postcode: string | null;
@@ -81,11 +82,13 @@ export function buildImportDraft(
     charity?.organisation.address_line_1,
     extraction.addressLine1,
   );
-  const city = preferred(
-    company?.organisation.city,
-    charity?.organisation.city,
-    extraction.city,
-  );
+  const city = normalizeCity(
+    preferred(
+      company?.organisation.city,
+      charity?.organisation.city,
+      extraction.city,
+    ) ?? "",
+  ) || null;
   const postcode = preferred(
     company?.organisation.postcode,
     charity?.organisation.postcode,

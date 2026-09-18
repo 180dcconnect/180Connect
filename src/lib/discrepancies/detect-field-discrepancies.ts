@@ -31,6 +31,7 @@
 
 import type { createClient } from "../supabase/server.ts";
 import { reportError } from "../error-logging.ts";
+import { containsRedactionPlaceholder } from "../ingestion/personal-data.ts";
 import { standardizeCharityCommissionRecord } from "../standardize/charity-commission.ts";
 import { standardizeCompaniesHouseRecord } from "../standardize/companies-house.ts";
 import { resolveBySourcePriority } from "../standardize/source-priority.ts";
@@ -57,6 +58,13 @@ export type FieldDiscrepancy = {
  * Compares the fields both sides actually provide. A field is only flagged when
  * both the existing and incoming values are non-empty and differ — filling in a
  * field the existing record left blank is not a conflict, it's an improvement.
+ *
+ * A value F247 redacted counts as blank on either side. It is not a value the
+ * two sources disagree about — it is what we stored instead of one — and treating
+ * it as one would queue a conflict for every organisation whose register entry
+ * carried a personal email, on every subsequent confirmed match, with a
+ * resolution ("keep `[redacted:personal-email]`" or "restore the address we are
+ * required not to hold") that no admin should be offered.
  */
 export function findFieldDiscrepancies(
   incoming: Pick<StandardOrganisation, DiscrepancyField>,
@@ -68,6 +76,12 @@ export function findFieldDiscrepancies(
     const existingValue = existing[fieldName].trim();
     const incomingValue = incoming[fieldName].trim();
     if (existingValue === "" || incomingValue === "") continue;
+    if (
+      containsRedactionPlaceholder(existingValue) ||
+      containsRedactionPlaceholder(incomingValue)
+    ) {
+      continue;
+    }
     if (existingValue === incomingValue) continue;
     discrepancies.push({ fieldName, existingValue, incomingValue });
   }
@@ -87,6 +101,29 @@ export type EntityMatchCandidateForDetection = {
 export type RawSourceRecordForDetection = {
   recordSource: string;
   rawPayload: unknown;
+};
+
+/**
+ * An admin's per-field winners, chosen on the duplicates screen while
+ * confirming the pair is one charity. Keys are the six MVP fields; a field
+ * present here is decided by the admin, so detection must leave it pending
+ * (never auto-settle it) for the caller to resolve with that choice.
+ */
+export type ChoiceOverrides = Partial<Record<DiscrepancyField, "existing" | "incoming">>;
+
+/** One disagreeing field, read out for an admin to pick a winner — no writes. */
+export type MergePreviewRow = {
+  fieldName: DiscrepancyField;
+  existingValue: string;
+  existingSource: string;
+  incomingValue: string;
+  incomingSource: string;
+  /**
+   * Which side source priority would pick, or null when the rules decline
+   * (same source both sides, unranked source, unknown provenance). The dialog
+   * defaults to the existing value either way; this only labels the hint.
+   */
+  suggested: "existing" | "incoming" | null;
 };
 
 /**
@@ -122,6 +159,112 @@ export interface DiscrepancyDetectionStore {
 }
 
 /**
+ * Everything below needs the same three reads: the candidate, the incoming
+ * raw record mapped through its source's standardize function, and the
+ * organisation's current values with the source that created it. Shared by
+ * detection (which writes) and the merge preview (which only reads), so the
+ * dialog offers exactly what detection would flag — never a different list.
+ * Returns null for a data problem, having reported it, like detection does.
+ */
+async function loadComparison(
+  entityMatchCandidateId: string,
+  store: DiscrepancyDetectionStore,
+): Promise<{
+  incoming: StandardOrganisation;
+  existing: Pick<StandardOrganisation, DiscrepancyField>;
+  existingSource: string;
+  incomingSource: string;
+  rawSourceRecordId: string;
+  candidateOrganisationId: string;
+} | null> {
+  const candidate = await store.loadEntityMatchCandidate(entityMatchCandidateId);
+  if (!candidate) {
+    await reportError(new Error("Entity match candidate not found for discrepancy detection"), {
+      operation: "discrepancies.detect",
+      entityMatchCandidateId,
+    });
+    return null;
+  }
+
+  const rawRecord = await store.loadRawSourceRecord(candidate.rawSourceRecordId);
+  if (!rawRecord) {
+    await reportError(new Error("Raw source record not found for discrepancy detection"), {
+      operation: "discrepancies.detect",
+      entityMatchCandidateId,
+      rawSourceRecordId: candidate.rawSourceRecordId,
+    });
+    return null;
+  }
+
+  const standardize = STANDARDIZE_BY_SOURCE[rawRecord.recordSource];
+  if (!standardize) {
+    // Sources like find_that_charity are reserved in the record_source enum but have
+    // no standardize mapper yet (see write-organisations.ts) — nothing to compare.
+    await reportError(new Error(`No standardize mapper for source: ${rawRecord.recordSource}`), {
+      operation: "discrepancies.detect",
+      entityMatchCandidateId,
+      recordSource: rawRecord.recordSource,
+    });
+    return null;
+  }
+
+  let incoming: StandardOrganisation;
+  try {
+    incoming = standardize(rawRecord.rawPayload as never);
+  } catch (error) {
+    await reportError(error instanceof Error ? error : new Error(String(error)), {
+      operation: "discrepancies.detect.standardize",
+      entityMatchCandidateId,
+      rawSourceRecordId: candidate.rawSourceRecordId,
+    });
+    return null;
+  }
+
+  const existing = await store.loadOrganisationForComparison(candidate.candidateOrganisationId);
+  if (!existing) {
+    await reportError(new Error("Organisation not found for discrepancy detection"), {
+      operation: "discrepancies.detect",
+      entityMatchCandidateId,
+      organisationId: candidate.candidateOrganisationId,
+    });
+    return null;
+  }
+
+  return {
+    incoming,
+    existing: existing.organisation,
+    existingSource: existing.source,
+    incomingSource: rawRecord.recordSource,
+    rawSourceRecordId: candidate.rawSourceRecordId,
+    candidateOrganisationId: candidate.candidateOrganisationId,
+  };
+}
+
+/**
+ * Dry run of the conflict check for the duplicates screen's merge dialog:
+ * the fields that disagree, both values, and which side source priority would
+ * pick — without writing anything. An admin picks the winners from these rows;
+ * confirming then runs detectAndFlagDiscrepancies with those picks as
+ * overrides, so the two lists cannot drift apart.
+ */
+export async function previewFieldDiscrepancies(
+  entityMatchCandidateId: string,
+  store: DiscrepancyDetectionStore,
+): Promise<MergePreviewRow[]> {
+  const comparison = await loadComparison(entityMatchCandidateId, store);
+  if (!comparison) return [];
+
+  return findFieldDiscrepancies(comparison.incoming, comparison.existing).map((discrepancy) => ({
+    fieldName: discrepancy.fieldName,
+    existingValue: discrepancy.existingValue,
+    existingSource: comparison.existingSource,
+    incomingValue: discrepancy.incomingValue,
+    incomingSource: comparison.incomingSource,
+    suggested: resolveBySourcePriority(comparison.existingSource, comparison.incomingSource),
+  }));
+}
+
+/**
  * Runs after decide_duplicate_flag confirms entityMatchCandidateId is a real
  * match: maps the incoming raw record with the right source's standardize
  * function, compares it against the existing organisation's current values, and
@@ -134,83 +277,48 @@ export interface DiscrepancyDetectionStore {
  * admin, `autoResolved` is conflicts source priority settled on its own. A caller
  * that shows the admin "3 conflicts flagged" must not count the second kind —
  * there is nothing for them to do about those.
+ *
+ * `overrides` carries an admin's per-field winners from the duplicates
+ * screen's merge dialog. A field present here is left pending however the
+ * priority rules would have settled it — the caller resolves it with the
+ * admin's choice straight after, so a human's explicit pick always beats a
+ * silent rule, and a resolve that fails still leaves the conflict in the
+ * discrepancies queue rather than losing the decision.
  */
 export async function detectAndFlagDiscrepancies(
   entityMatchCandidateId: string,
   store: DiscrepancyDetectionStore,
+  overrides: ChoiceOverrides = {},
 ): Promise<{ flagged: number; autoResolved: number }> {
-  const candidate = await store.loadEntityMatchCandidate(entityMatchCandidateId);
-  if (!candidate) {
-    await reportError(new Error("Entity match candidate not found for discrepancy detection"), {
-      operation: "discrepancies.detect",
-      entityMatchCandidateId,
-    });
-    return { flagged: 0, autoResolved: 0 };
-  }
+  const comparison = await loadComparison(entityMatchCandidateId, store);
+  if (!comparison) return { flagged: 0, autoResolved: 0 };
 
-  const rawRecord = await store.loadRawSourceRecord(candidate.rawSourceRecordId);
-  if (!rawRecord) {
-    await reportError(new Error("Raw source record not found for discrepancy detection"), {
-      operation: "discrepancies.detect",
-      entityMatchCandidateId,
-      rawSourceRecordId: candidate.rawSourceRecordId,
-    });
-    return { flagged: 0, autoResolved: 0 };
-  }
-
-  const standardize = STANDARDIZE_BY_SOURCE[rawRecord.recordSource];
-  if (!standardize) {
-    // Sources like find_that_charity are reserved in the record_source enum but have
-    // no standardize mapper yet (see write-organisations.ts) — nothing to compare.
-    await reportError(new Error(`No standardize mapper for source: ${rawRecord.recordSource}`), {
-      operation: "discrepancies.detect",
-      entityMatchCandidateId,
-      recordSource: rawRecord.recordSource,
-    });
-    return { flagged: 0, autoResolved: 0 };
-  }
-
-  let incoming: StandardOrganisation;
-  try {
-    incoming = standardize(rawRecord.rawPayload as never);
-  } catch (error) {
-    await reportError(error instanceof Error ? error : new Error(String(error)), {
-      operation: "discrepancies.detect.standardize",
-      entityMatchCandidateId,
-      rawSourceRecordId: candidate.rawSourceRecordId,
-    });
-    return { flagged: 0, autoResolved: 0 };
-  }
-
-  const existing = await store.loadOrganisationForComparison(candidate.candidateOrganisationId);
-  if (!existing) {
-    await reportError(new Error("Organisation not found for discrepancy detection"), {
-      operation: "discrepancies.detect",
-      entityMatchCandidateId,
-      organisationId: candidate.candidateOrganisationId,
-    });
-    return { flagged: 0, autoResolved: 0 };
-  }
-
-  const discrepancies = findFieldDiscrepancies(incoming, existing.organisation);
+  const discrepancies = findFieldDiscrepancies(comparison.incoming, comparison.existing);
 
   // One decision for the whole record: source priority compares the two sources,
   // and both sides' sources are the same for every field of this comparison.
-  const autoResolvedChoice = resolveBySourcePriority(existing.source, rawRecord.recordSource);
+  const autoResolvedChoice = resolveBySourcePriority(
+    comparison.existingSource,
+    comparison.incomingSource,
+  );
 
   let flagged = 0;
   let autoResolved = 0;
   for (const discrepancy of discrepancies) {
+    // An explicit pick stays pending for the caller to resolve — never
+    // auto-settled, even when the rules would have picked the same side, so
+    // the audit trail says a person chose it.
+    const choice = overrides[discrepancy.fieldName] !== undefined ? null : autoResolvedChoice;
     const result = await store.recordDiscrepancy({
-      organisationId: candidate.candidateOrganisationId,
+      organisationId: comparison.candidateOrganisationId,
       fieldName: discrepancy.fieldName,
       existingValue: discrepancy.existingValue,
-      existingSource: existing.source,
+      existingSource: comparison.existingSource,
       incomingValue: discrepancy.incomingValue,
-      incomingSource: rawRecord.recordSource,
-      rawSourceRecordId: candidate.rawSourceRecordId,
+      incomingSource: comparison.incomingSource,
+      rawSourceRecordId: comparison.rawSourceRecordId,
       entityMatchCandidateId,
-      autoResolvedChoice,
+      autoResolvedChoice: choice,
     });
     if ("error" in result) {
       await reportError(new Error(result.error), {
@@ -220,7 +328,7 @@ export async function detectAndFlagDiscrepancies(
       });
       continue;
     }
-    if (autoResolvedChoice) autoResolved++;
+    if (choice) autoResolved++;
     else flagged++;
   }
 

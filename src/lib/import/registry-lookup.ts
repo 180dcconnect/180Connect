@@ -8,7 +8,8 @@
 // Which register is not a fixed choice, and this is the part of F037 the ticket got
 // wrong by assuming charities. 180Connect's clients are charities, non-profits,
 // CICs and sustainability-focused companies, and organisation_type has said
-// 'charity' | 'company' | 'both' | 'other' since the schema was created. A charitable
+// 'charity' | 'cio' | 'cic' | 'social_enterprise' | 'ngo' | 'company' | 'both' |
+// 'other' since F041 expansion. A charitable
 // company appears on both registers and should be looked up on both. A CIC appears
 // only on Companies House. Neither register is the default; what the site prints
 // about itself decides.
@@ -43,6 +44,14 @@ export type RegistryPlan = {
    */
   unsupportedRegister: "scotland" | "northern_ireland" | null;
   unsupportedNumber: string | null;
+  /**
+   * The organisation's own name when a Companies House name search was
+   * deliberately withheld because the page carries positive evidence of being
+   * based outside the United Kingdom (a stated or ccTLD-inferred country other
+   * than GB). The import still proceeds on website-only fields; the CAM is told
+   * why nothing was confirmed.
+   */
+  withheldNameSearch: string | null;
 };
 
 /**
@@ -51,17 +60,26 @@ export type RegistryPlan = {
  * The name fallback is last and narrow on purpose. Companies House name search
  * already refuses to guess between two exact matches; asking it for a name when the
  * page never claimed to be a registered company invites a confident match on a
- * similarly-named business, which is exactly the failure a CAM cannot spot.
+ * similarly-named business, which is exactly the failure a CAM cannot spot. It is
+ * also withheld outright when the page positively identifies itself as non-UK — a
+ * Nigerian company must not match a similarly-named UK one just because both have
+ * websites.
  */
 export function planRegistryLookups(extraction: WebsiteExtraction): RegistryPlan {
   const charity = extraction.charity;
   const supportedCharity = charity?.register === "england_and_wales" ? charity.number : null;
 
+  // A missing country code stays eligible (most UK sites never state their
+  // country); only positive non-UK evidence blocks the search.
+  const outsideUk = extraction.countryCode !== null && extraction.countryCode !== "GB";
+  const nameSearchWithheld = outsideUk && extraction.legalName !== null;
+
   const company: CompanyLookup | null = extraction.companyNumber
     ? { companyNumber: extraction.companyNumber }
-    // Only worth a name search when nothing identified the organisation at all.
+    // Only worth a name search when nothing identified the organisation at all,
+    // and the page gives no reason to believe the answer lives in the UK.
     // With a charity number in hand the charity register is the better question.
-    : !charity && extraction.legalName
+    : !charity && extraction.legalName && !nameSearchWithheld
       ? { registeredName: extraction.legalName }
       : null;
 
@@ -74,6 +92,7 @@ export function planRegistryLookups(extraction: WebsiteExtraction): RegistryPlan
     unsupportedNumber: charity && charity.register !== "england_and_wales"
       ? charity.number
       : null,
+    withheldNameSearch: nameSearchWithheld ? extraction.legalName : null,
   };
 }
 
@@ -121,6 +140,14 @@ export async function resolveRegistry(
       plan.unsupportedRegister === "scotland"
         ? `This looks like a Scottish charity (${plan.unsupportedNumber}). 180Connect does not check the Scottish register yet, so its details have not been confirmed.`
         : `This looks like a Northern Irish charity (${plan.unsupportedNumber}). 180Connect does not check that register yet, so its details have not been confirmed.`,
+    );
+  }
+
+  // Say why nothing was checked, rather than leaving the CAM to assume the
+  // registers were asked and found nothing.
+  if (plan.withheldNameSearch && !plan.company) {
+    notes.push(
+      `This website appears to be based outside the United Kingdom (${extraction.countryCode}), so its details were not checked against the UK registers. Confirm them before submitting.`,
     );
   }
 
@@ -174,12 +201,23 @@ export async function resolveRegistry(
  * Returns null when neither register confirmed anything — an unconfirmed guess at
  * organisation_type is worse than an empty dropdown, because F047 gates eligibility
  * on this value and 'charity' waves a record through checks 'company' does not.
+ * When only Companies House confirmed, preserve its finer type (cic/cio/social_enterprise)
+ * rather than collapsing back to "company".
  */
-export function organisationTypeFrom(matches: RegistryMatch[]): "charity" | "company" | "both" | null {
+export function organisationTypeFrom(
+  matches: RegistryMatch[],
+): "charity" | "cio" | "cic" | "social_enterprise" | "ngo" | "company" | "both" | "other" | null {
   const charity = matches.some((match) => match.source === "charity_commission");
-  const company = matches.some((match) => match.source === "companies_house");
+  const companyMatch = matches.find((match) => match.source === "companies_house");
+  const company = Boolean(companyMatch);
   if (charity && company) return "both";
   if (charity) return "charity";
+  if (companyMatch) {
+    const t = companyMatch.organisation.organisation_type;
+    // trust the mapper's finer type; fall back to "company" if it returned generic
+    if (t === "cic" || t === "cio" || t === "social_enterprise" || t === "ngo" || t === "company") return t;
+    return "company";
+  }
   if (company) return "company";
   return null;
 }

@@ -68,6 +68,21 @@ export type ResetPasswordState = {
 export const RECOVERY_COOKIE_NAME = "180connect-password-recovery";
 
 /**
+ * Reads a deferred invite token out of the submitted form (or the landing
+ * redirect), or null where there is none. Invite links verify at submit time
+ * rather than on open (see `/auth/confirm`), so the token rides the form as
+ * a hidden field and only a present, non-blank value takes the
+ * verify-at-submit branch — recovery submissions carry no such field and keep
+ * the marker-cookie path. Trimming only: `verifyOtp` is the validator, and it
+ * must see the token exactly as issued.
+ */
+export function inviteTokenFromForm(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const token = value.trim();
+  return token ? token : null;
+}
+
+/**
  * How long the marker lives when `PASSWORD_RESET_WINDOW_SECONDS` is unusable.
  * 24 hours, matching the shared Supabase `otp_expiry` (F010) — see
  * `invite-expiry.ts` for why recovery and invite links cannot have different
@@ -97,12 +112,35 @@ export const passwordSchema = z
   });
 
 /**
- * Optional here because whether a name is actually required depends on
- * account state (does this user already have one?) that only the Server
- * Action can see — it re-checks and fills in `fieldErrors.fullName` itself.
- * See `setNewPassword` in `src/app/reset-password/actions.ts`.
+ * C0/C1 control characters, plus invisible formatting characters — zero-width
+ * space and joiners, bidi marks, word joiner, BOM — that survive a `trim()` and
+ * would otherwise let a name run past the length it appears to be.
  */
-export const fullNameSchema = z.string().trim().max(120, "Name is too long.").optional();
+const INVISIBLE_CHARACTERS =
+  /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u2060\ufeff]/g;
+
+/**
+ * Collapses runs of whitespace and strips invisible formatting characters.
+ */
+export function normalizeFullName(value: string): string {
+  return value.replace(INVISIBLE_CHARACTERS, " ").replace(/\s+/g, " ").trim();
+}
+
+export const MAX_FULL_NAME_LENGTH = 120;
+export const REQUIRED_NAME_MESSAGE = "Enter your name.";
+export const NAME_TOO_LONG_MESSAGE = "Name is too long.";
+
+/**
+ * Normalises and bounds the display name input.
+ * Optional in base schema so that existing accounts resetting passwords without
+ * re-submitting a name pass schema validation, while the Server Action strictly
+ * enforces a non-empty name for all new accounts and invite acceptances.
+ */
+export const fullNameSchema = z
+  .string()
+  .transform(normalizeFullName)
+  .pipe(z.string().max(MAX_FULL_NAME_LENGTH, NAME_TOO_LONG_MESSAGE))
+  .optional();
 
 export const newPasswordSchema = z
   .object({
@@ -221,12 +259,20 @@ export function recoveryCookieOptions(): RecoveryCookieOptions {
  * `/forgot-password` and `/login` are the ways out: blocking them would trap
  * someone who abandoned the reset in a redirect loop with no escape but waiting
  * for the cookie to expire.
+ *
+ * `/terms` and `/privacy` are the legal pages the form links to (and previews
+ * in an iframe on hover). They are public, signed-out pages holding no account
+ * data, so letting a mid-recovery session read them gives away nothing — and
+ * confining them instead silently renders the reset page inside its own hover
+ * preview, which is what the redirect returns.
  */
 const RECOVERY_ALLOWED_PREFIXES = [
   "/reset-password",
   "/forgot-password",
   "/login",
   "/auth/",
+  "/terms",
+  "/privacy",
 ];
 
 /** Whether a mid-recovery session is allowed to see `pathname`. */

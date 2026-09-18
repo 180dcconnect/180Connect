@@ -46,6 +46,42 @@ export function formatRelativeTime(when: Date, now: Date): string {
   return formatDayLabel(when, now);
 }
 
+const SHORT_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+/**
+ * "12 Sep 2023" — deterministic across Node.js and browser runtimes.
+ * Prevents hydration mismatches caused by ICU/CLDR "Sep" vs "Sept" in en-GB locale.
+ */
+export function formatShortDate(value: string | Date | number | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "string") {
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+    if (match) {
+      const [, y, m, d] = match;
+      const monthIndex = Number.parseInt(m, 10) - 1;
+      const day = Number.parseInt(d, 10);
+      const month = SHORT_MONTHS[monthIndex] ?? m;
+      return `${day} ${month} ${y}`;
+    }
+  }
+  const date = typeof value === "object" && value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return typeof value === "string" ? value : "—";
+  return `${date.getUTCDate()} ${SHORT_MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
 /** en-GB, spelled out, no seconds. Fixed locale so server and client agree. */
 export function formatExactTime(when: Date): string {
   return when.toLocaleString("en-GB", {
@@ -69,6 +105,24 @@ export function formatDuration(ms: number): string {
   if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
   const hours = Math.floor(minutes / 60);
   return `${hours}h ${minutes % 60}m`;
+}
+
+/**
+ * How often a scheduled job ticks, in the words of the job: "every 5 minutes",
+ * "every day", "every week". Used where a job is still waiting for its first
+ * run — pg_cron records past runs only, so the cadence from the job's
+ * migration is the only honest answer to "when?".
+ */
+export function formatCadence(everyMs: number): string {
+  if (!Number.isFinite(everyMs) || everyMs <= 0) return "on its schedule";
+  const minutes = Math.round(everyMs / MINUTE);
+  if (minutes < 60) return `every ${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.round(everyMs / HOUR);
+  if (hours < 24) return `every ${hours} hour${hours === 1 ? "" : "s"}`;
+  const days = Math.round(everyMs / DAY);
+  if (days === 1) return "every day";
+  if (days === 7) return "every week";
+  return `every ${days} days`;
 }
 
 /** Local-calendar key, not the ISO date: 23:30 on the 3rd is the 3rd. */

@@ -17,7 +17,7 @@ describe("isSessionExpired", () => {
   it("is not expired when last activity is within the timeout window", () => {
     const now = Date.now();
     assert.equal(
-      isSessionExpired(now - 5 * 60 * 1000, now, INACTIVITY_TIMEOUT_MS),
+      isSessionExpired(now - INACTIVITY_TIMEOUT_MS + 60_000, now, INACTIVITY_TIMEOUT_MS),
       false,
     );
   });
@@ -25,7 +25,7 @@ describe("isSessionExpired", () => {
   it("is expired when last activity is beyond the timeout window", () => {
     const now = Date.now();
     assert.equal(
-      isSessionExpired(now - 40 * 60 * 1000, now, INACTIVITY_TIMEOUT_MS),
+      isSessionExpired(now - INACTIVITY_TIMEOUT_MS - 1, now, INACTIVITY_TIMEOUT_MS),
       true,
     );
   });

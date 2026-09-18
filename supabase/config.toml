@@ -395,6 +395,11 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# pg_cron calls this with CRON_SECRET, which the function checks itself; it has
+# no Supabase user JWT to send. See docs/gmail-reply-check.md.
+[functions.gmail-reply-check]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

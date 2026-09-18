@@ -2,7 +2,7 @@
 
 Decisions that are **not resolved in code** and need a human call, plus places where we have knowingly departed from the PRD. Raise these at the next team meeting.
 
-Last updated: 10 August 2026 (D-04 and Q-07 added).
+Last updated: 9 September 2026 (D-05 added).
 
 ---
 
@@ -96,6 +96,40 @@ This is a dead index on their end, not an issue with our key or query:
 
 ---
 
+### D-05 — Open, click and forward tracking (F140–F142) descoped; Gmail cannot report them
+
+**PRD says:** §12.3 allows "optional tracking-pixel/redirect signals only after privacy and deliverability review", labelled as probabilistic. The Gantt already excludes `F140`, `F141` and `F142` from the 240 committed features (PRD §Scheduling), so none of the three was committed scope to begin with.
+
+**We are doing:** Closing all three. That §12.3 review was carried out on 9 September 2026 and the answer is no.
+
+**Why the provider cannot help.** Outreach is sent with Gmail API `users.messages.send` from the shared branch mailbox `clients.sheffield@180dc.org`. That call returns `{id, threadId, labelIds}` and nothing else. Gmail exposes no open events, no click events, no delivery receipt and no engagement webhook at any tier. Reply sync works by polling *our own* mailbox (`src/app/api/cron/gmail-replies/route.ts`), which tells us what arrived for us and nothing about what a recipient did. Bounces surface only as a mailer-daemon message arriving back in the mailbox, which is reply-sync parsing, not a delivery feed.
+
+**Why we are not switching provider to get it.** Resend does offer opens, clicks and webhooks. It cannot be used for outreach:
+
+- Verifying a domain in Resend means adding DKIM and SPF records to it. 180DC HQ has not granted DNS access to 180dc.org, so Resend can never put `clients.sheffield@180dc.org` in the From line. Sending charity outreach from an unrelated verified domain is not a degraded mode of the product.
+- It would not remove the Gmail work anyway. A reply goes wherever `Reply-To` points — the Workspace mailbox — whichever provider sent the original. Reply sync is Gmail work in every scenario. Resend Inbound would need MX records on 180dc.org, i.e. taking over the branch's actual mail routing.
+
+Note that the PRD's stated reason for preferring Gmail (§12.1: stable thread ids) is the weaker of the two arguments — a message we send through any provider carries a `Message-ID` we control, and replies can be matched on `In-Reply-To`/`References` from the Gmail side. **The binding constraint is DNS access, not threading.** Recorded so nobody revisits this on the wrong premise.
+
+**Why not self-host a pixel and a link redirector.** Technically possible — HMAC token, `/api/t/...` routes, `send_events` writes through service_role — and rejected on merit:
+
+- Opens would be measured, not accurate. Apple Mail Privacy Protection prefetches every remote image by default, and Gmail proxies and caches images. At a cap of 100 emails a day (PRD §7.9) there is no volume to average the distortion out, and a directionally wrong number a CAM acts on is worse than no number.
+- Clicks are measurable but not meaningful on their own. The F117 rich-text body does allow a CAM to insert a link (`sanitizeEmailHtml` permits `<a href>` on `http`, `https` and `mailto`), so there is something to instrument — but a click count with no open count behind it has no denominator, and the ratio was the thing anyone wanted. There is no template, CTA or booking link in the product today either, so how often a link even appears is unknown.
+- Link wrapping is a deliverability risk on the one mailbox that matters. Rewriting every href to a young, no-reputation redirector domain, with visible text not matching the destination, is a well-known phishing heuristic. Every CAM sends from the same shared Workspace mailbox (`clients.sheffield@180dc.org`), so one bad classification degrades outreach for the whole branch, not for one person. It would also visibly mangle a URL the CAM typed themselves — these are person-to-person emails, not campaign sends.
+- Forwards (F142) have no reliable method at all — the issue says as much. The nearest honest signal is a reply from an unknown address at the contact's own domain, derivable later from `reply_events` at zero cost.
+
+Each issue's own acceptance criteria anticipate this: F140 AC1 permits open tracking being "explicitly disabled and hidden in the UI rather than showing a metric that's always zero", and F142 AC1 permits descope-and-hide where no reliable method is agreed. Both are satisfied as written — no open-rate or click-rate metric exists anywhere in `src/`, so there is nothing displaying zero and nothing to remove. The outreach screen surfaces `send_events` only to show failures (`src/app/(app)/clients/[id]/outreach/page.tsx` filters `event_type = 'failed'`). F141 has no such clause, so it is closed as a change-control descope against this record.
+
+**Consequence:** Engagement measurement for outreach rests on replies and outcomes — `reply_events` and `outcomes`, both already built and both ground truth rather than inference. `send_event_type` shipped as `('sent','delivered','bounced','opened')` and gained `'failed'` with F129, of which two values had no possible source; `supabase/migrations/20260924110000_trim_send_event_type.sql` recreates the type as `('sent','bounced','failed')`. `sent` is our own act and `failed` is F129's record of a send that never reached Gmail — both written today; `bounced` is unbuilt but observable, by parsing the mailer-daemon message that returns to the mailbox. Done now rather than deferred because nothing writes the table yet, so it is as cheap as it will ever be — and because `delivered` sitting in the enum is an invitation for whoever builds F130 to assume something can supply it.
+
+**Data Model correction needed (owner: Project Leader).** Tab 07 SEND_EVENTS describes `occurred_at` as "Date and time Gmail reported the delivery event" and `metadata` as "Additional event information returned by the Gmail API". Gmail reports neither. The spreadsheet is the source of truth and `docs/data-model/` is generated from it, so this must be fixed in the xlsx (tab 07) and re-exported with `npm run export:data-model` — not hand-edited here. Suggested: drop `delivered` and `opened` from the enum, describe `occurred_at` as the time of the event as observed by the platform, and describe `metadata` as provider or parser detail for the event. `supabase/migrations/20260804200000_create_outreach_events.sql` is already applied and has not been edited — the enum change is a new forward migration, `20260924110000_trim_send_event_type.sql`, which also corrects the table and column comments that carried the same wrong Gmail attribution.
+
+**Revisit if:** HQ grants DNS access to 180dc.org *and* outreach bodies start carrying real links *and* someone wants the number badly enough to accept it being approximate. All three, not any one.
+
+**Owner:** Project Leader. **Decided:** 9 September 2026.
+
+---
+
 ## Blocking decisions
 
 These change what gets built and are needed soon.
@@ -143,7 +177,11 @@ PRD §22 leaves the CAPTCHA provider open. Supabase Auth's built-in CAPTCHA supp
 
 **Owner:** Component Owner F003. **Status:** Decided and implemented for login (F003); password reset (F004) and invites (F008) still need the same widget added.
 
-### Q-06 — Viewer role scope — **RESOLVED 24 Jul 2026**
+### Q-06 — Viewer role scope — **RESOLVED 24 Jul 2026 · REVISED 15 Sep 2026**
+
+**Revision, 15 Sep 2026 (Project Leader).** Viewers are the branch president and vice president and the Global Leadership Team — the people the branch reports to. They now **see every screen an admin sees**: team analytics, approvals, the review queue, the audit log, import runs, team management, AI history and the platform settings. They still **change nothing** — no client edits, no imports, no outreach, no approvals. Every control is shown to them; pressing one that would change something is refused by the server and opens a "You have view-only access" notice instead of hiding the button.
+
+How it is built: pages gate on `getViewingActor` (passes viewers) and writes on `getCurrentActor` (refuses them with reason `view_only`), both in `src/lib/auth/`. The database adds read-only `<table>_select_viewer` policies and lets viewers call five read-only RPCs (`20261004180000_viewer_reads_admin_screens.sql`); every write policy and `app.can_write()` are unchanged. The original decision below still holds — it is the floor this revision builds on.
 
 Raised by F258 (#268), which implemented the `viewer` role. `viewer` had sat in the `USERS.role` enum and throughout PRD §4.3 since the start with no story owning it, so nobody had ever decided what a viewer *is*. Three questions blocked pinning down its read scope. All three were answered by the Project Leader on 24 Jul 2026; all three resolve to **internal-only**, which is why the scope shipped in F258 needed no change.
 

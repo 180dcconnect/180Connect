@@ -31,17 +31,15 @@ export const SUPPRESSION_SELECT = `
 
 export type RpcFailure = { status: number; error: string };
 
-const GENERIC_FAILURE = "The suppression request could not be saved. Refresh and try again.";
+const GENERIC_FAILURE = "The suppression change could not be saved. Refresh the page and try again.";
 
 /**
- * Maps a Postgres error from request_suppression / decide_suppression_request onto
- * something safe to show an admin.
+ * Maps a Postgres error from request_suppression / decide_suppression_request /
+ * lift_suppression onto something safe to show an admin.
  *
- * Every errcode below is one the two RPCs raise deliberately, with a message written
- * to be read by an admin (see 20260806100000_create_suppressions.sql) — no table or
- * constraint names, nothing internal. Passing those through is safe; everything else
- * gets the generic string, same reasoning as rpcFailureResponse in @/lib/offboard
- * (DoD: no stack traces or internals in a user-facing error).
+ * The database messages include internal nouns and row ids, so even the expected
+ * codes are translated here. This function is the UI boundary: an admin gets the
+ * next useful action, never a Postgres sentence.
  */
 export function suppressionRpcFailure(error: {
   code?: string;
@@ -52,14 +50,24 @@ export function suppressionRpcFailure(error: {
   }
   switch (error.code) {
     case "42501":
-      return { status: 403, error: error.message };
+      return { status: 403, error: "Only an admin can make this suppression change." };
     case "23514":
-      return { status: 400, error: error.message };
+      return { status: 400, error: "Enter a reason before saving this suppression change." };
     case "23505":
+      return {
+        status: 409,
+        error: "This client already has a suppression request or active suppression.",
+      };
     case "55000":
-      return { status: 409, error: error.message };
+      return {
+        status: 409,
+        error: "This suppression has already changed. Refresh the page to see its current status.",
+      };
     case "P0002":
-      return { status: 404, error: error.message };
+      return {
+        status: 404,
+        error: "This suppression or client could not be found. Refresh the page and try again.",
+      };
     default:
       return { status: 500, error: GENERIC_FAILURE };
   }

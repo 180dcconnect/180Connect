@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it, mock } from "node:test";
 
 import {
-  DEACTIVATED_ACCOUNT_MESSAGE,
+  SUSPENDED_ACCOUNT_MESSAGE,
   DUPLICATE_INVITE_MESSAGE,
   INVITE_ALREADY_ACCEPTED_MESSAGE,
   INVITE_ALREADY_OPENED_MESSAGE,
@@ -76,7 +76,7 @@ const REDIRECT_TO = "https://180connect.vercel.app/auth/confirm";
 const INVITED_BY = "admin-1";
 
 type LookupBehaviour =
-  | { row: { id: string; deactivatedAt?: string | null } | null }
+  | { row: { id: string; isActive?: boolean } | null }
   | { error: string };
 
 function fakeLookupClient(behaviour: LookupBehaviour): {
@@ -89,9 +89,9 @@ function fakeLookupClient(behaviour: LookupBehaviour): {
     calls.push(email);
     if ("error" in behaviour) throw new Error(behaviour.error);
     if (!behaviour.row) return null;
-    // Defaults to null (not deactivated) so existing fixtures that don't care
-    // about deactivation don't need updating.
-    return { deactivatedAt: null, ...behaviour.row };
+    // Defaults to active so existing fixtures that don't care about suspension
+    // don't need updating.
+    return { isActive: true, ...behaviour.row };
   };
 
   return { lookup, calls };
@@ -246,9 +246,9 @@ describe("sendInvite", () => {
     assert.ok(logs.some((log) => log.includes("user.invite_rejected")));
   });
 
-  it("steers to reactivation for an email belonging to a deactivated account, without sending an invite", async () => {
+  it("steers to reactivation for an email belonging to a suspended account, without sending an invite", async () => {
     const { lookup } = fakeLookupClient({
-      row: { id: "existing-user", deactivatedAt: "2026-01-01T00:00:00Z" },
+      row: { id: "existing-user", isActive: false },
     });
     const { client: admin, calls: adminCalls } = fakeAdminClient({ ok: true });
 
@@ -258,7 +258,7 @@ describe("sendInvite", () => {
 
     assert.equal(result.ok, false);
     if (!result.ok) {
-      assert.equal(result.state.message, DEACTIVATED_ACCOUNT_MESSAGE);
+      assert.equal(result.state.message, SUSPENDED_ACCOUNT_MESSAGE);
     }
     assert.equal(adminCalls.length, 0);
     assert.ok(logs.some((log) => log.includes("user.invite_rejected")));
@@ -508,6 +508,8 @@ describe("sendInvite role assignment", () => {
   });
 });
 
+
+
 describe("inviteEmail", () => {
   const link = "https://180connect.vercel.app/auth/confirm?token_hash=abc&type=invite";
 
@@ -519,6 +521,18 @@ describe("inviteEmail", () => {
     const { text } = inviteEmail({ link, inviterName: "Bashir", role: "cam" });
     assert.match(text, /Bashir/);
     assert.match(text, new RegExp(`${INVITE_EXPIRY_HOURS} hours`));
+  });
+
+  it("says the link stays usable until the password is set, not single-use", () => {
+    // Opening the link no longer consumes it — verification happens when the
+    // password is submitted — so the copy must not promise single-use.
+    for (const body of [
+      inviteEmail({ link, inviterName: "Bashir", role: "cam" }).text,
+      inviteEmail({ link, inviterName: "Bashir", role: "cam" }).html,
+    ]) {
+      assert.doesNotMatch(body, /only be used once/);
+      assert.match(body, /as many times as you need/);
+    }
   });
 
   it("escapes a name that would otherwise inject markup into the HTML body", () => {
@@ -635,6 +649,29 @@ describe("resendInvite", () => {
     assert.ok(logs.some((log) => log.includes("user.invite_resent")));
   });
 
+  it("calls touchInvitedAt to refresh the expiry window on a successful resend", async () => {
+    const { lookup } = fakePendingLookup({
+      row: { email: "ada@180dc.org", accepted: false },
+    });
+    const { client: admin } = fakeAdminClient({ ok: true });
+    const { send } = fakeSender();
+    const touchedIds: string[] = [];
+    const touchInvitedAt = async (userId: string) => {
+      touchedIds.push(userId);
+      return { error: null };
+    };
+
+    const { result } = await silencingLogs(() =>
+      resendInvite(lookup, admin, INVITED_BY, RESEND_USER_ID, REDIRECT_TO, {
+        send,
+        touchInvitedAt,
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(touchedIds, [RESEND_USER_ID]);
+  });
+
   it("reports a mint failure without leaking the cause", async () => {
     const { lookup } = fakePendingLookup({
       row: { email: "ada@180dc.org", accepted: false },
@@ -686,9 +723,12 @@ describe("resendInvite", () => {
   });
 
   it("gives an actionable message when the previous link was opened but never completed", async () => {
-    // GoTrue's real response to a resend for an already-`email_confirmed` user:
-    // the invited person opened the link once (consuming the token, which
-    // confirms the email) but never finished choosing a password.
+    // GoTrue's real response to a resend for an already-`email_confirmed` user.
+    // Before deferred verification shipped, that meant the invited person had
+    // opened the link once (consuming the token, which confirms the email) but
+    // never finished choosing a password — opening no longer confirms
+    // anything, so this now only fires for invites burned that way beforehand.
+    // Either way the escape is the same: cancel the stuck invite, send fresh.
     const { lookup } = fakePendingLookup({
       row: { email: "ada@180dc.org", accepted: false },
     });

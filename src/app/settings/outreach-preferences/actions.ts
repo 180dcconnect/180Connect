@@ -7,42 +7,83 @@ import { recordOnboardingStepAction } from "@/lib/onboarding-actions";
 import { reportError } from "@/lib/error-logging";
 import {
   GEOGRAPHIC_REACH_OPTIONS,
-  INCOME_BAND_OPTIONS,
+  MAX_CITY_LENGTH,
+  MAX_CITIES,
   MAX_SECTOR_LENGTH,
   MAX_SECTORS,
+  DEFAULT_FIRST_FOLLOW_UP_DAYS,
+  DEFAULT_SECOND_FOLLOW_UP_DAYS,
+  MIN_FOLLOW_UP_DAYS,
+  MAX_FIRST_FOLLOW_UP_DAYS,
+  MAX_SECOND_FOLLOW_UP_DAYS,
+  clampFollowUpDays,
+  validateFollowUpOrdering,
   type GeographicReach,
-  type IncomeBand,
 } from "./constants";
+import { bandsForIncomeRange, parseIncomeBound } from "@/lib/income-range";
 
 export type OutreachPreferencesState = {
   status: "idle" | "error" | "success";
   message?: string;
+  /**
+   * The preferences as actually stored, echoed back on success. The read-only
+   * view renders these rather than its own copy of the draft, so what is on
+   * screen after a save is what the parser kept — trimmed, deduplicated and
+   * capped — not what was typed.
+   */
+  saved?: {
+    geographicReach: GeographicReach[];
+    cities: string[];
+    sectors: string[];
+    incomeMin: number | null;
+    incomeMax: number | null;
+    prioritiseGrantRecipients: boolean;
+    firstFollowUpDays: number;
+    secondFollowUpDays: number;
+  };
 };
 
 const GEOGRAPHIC_REACH_SET = new Set<string>(GEOGRAPHIC_REACH_OPTIONS);
-const INCOME_BAND_SET = new Set<string>(INCOME_BAND_OPTIONS);
 
 /**
  * Trusts nothing from the client past its shape: a tampered POST could submit any
  * string for geo/income, so both are filtered against the actual enum rather than
- * cast. Sectors are free text (no enum to check against, see constants.ts) but are
- * still trimmed, deduplicated and length/count-capped so a form bug or a hostile
- * client can't grow the array without bound.
+ * cast. Sectors and cities are free text (no enum to check against, see constants.ts)
+ * but are still trimmed, deduplicated and length/count-capped so a form bug or a
+ * hostile client can't grow the array without bound.
  */
 function parsePreferences(formData: FormData): {
   geographicReach: GeographicReach[];
+  cities: string[];
   sectors: string[];
-  incomeBands: IncomeBand[];
+  incomeMin: number | null;
+  incomeMax: number | null;
+  prioritiseGrantRecipients: boolean;
+  firstFollowUpDays: number;
+  secondFollowUpDays: number;
 } {
   const geographicReach = formData
     .getAll("geographic_reach")
     .filter((value): value is string => typeof value === "string")
     .filter((value) => GEOGRAPHIC_REACH_SET.has(value)) as GeographicReach[];
 
-  const incomeBands = formData
-    .getAll("income_band")
-    .filter((value): value is string => typeof value === "string")
-    .filter((value) => INCOME_BAND_SET.has(value)) as IncomeBand[];
+  // F198: size is a range in pounds. The slider's ends (£0, £5m+) arrive as
+  // "no bound"; parseIncomeBound turns them — and anything malformed — into null.
+  const incomeMin = parseIncomeBound(formData.get("income_min"), "min");
+  const incomeMax = parseIncomeBound(formData.get("income_max"), "max");
+
+  const seenCities = new Set<string>();
+  const cities: string[] = [];
+  for (const raw of formData.getAll("city")) {
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.length > MAX_CITY_LENGTH) continue;
+    const key = trimmed.toLowerCase();
+    if (seenCities.has(key)) continue;
+    seenCities.add(key);
+    cities.push(trimmed);
+    if (cities.length >= MAX_CITIES) break;
+  }
 
   const seenSectors = new Set<string>();
   const sectors: string[] = [];
@@ -57,21 +98,75 @@ function parsePreferences(formData: FormData): {
     if (sectors.length >= MAX_SECTORS) break;
   }
 
-  return { geographicReach, sectors, incomeBands };
+  const rawGrant = formData.get("prioritise_grant_recipients");
+  const prioritiseGrantRecipients = rawGrant === "true" || rawGrant === "on" || rawGrant === "1";
+
+  const firstFollowUpDays = clampFollowUpDays(
+    formData.get("first_follow_up_days"),
+    DEFAULT_FIRST_FOLLOW_UP_DAYS,
+    MIN_FOLLOW_UP_DAYS,
+    MAX_FIRST_FOLLOW_UP_DAYS,
+  );
+  const secondFollowUpDays = clampFollowUpDays(
+    formData.get("second_follow_up_days"),
+    DEFAULT_SECOND_FOLLOW_UP_DAYS,
+    MIN_FOLLOW_UP_DAYS,
+    MAX_SECOND_FOLLOW_UP_DAYS,
+  );
+
+  return {
+    geographicReach,
+    cities,
+    sectors,
+    incomeMin,
+    incomeMax,
+    prioritiseGrantRecipients,
+    firstFollowUpDays,
+    secondFollowUpDays,
+  };
 }
 
 export async function saveOutreachPreferencesAction(
   _previousState: OutreachPreferencesState,
   formData: FormData,
 ): Promise<OutreachPreferencesState> {
-  const authorization = await getCurrentActor(undefined, {
+  // F200 review — permission boundary: the write is confined to the caller's own
+  // row by RLS, but a viewer has no outreach to target and the rail hides the
+  // screen from them, so the action refuses them too rather than letting a direct
+  // POST save preferences nothing consumes. Same permission the page gates on.
+  const authorization = await getCurrentActor("client:edit", {
     route: "/settings/outreach-preferences",
   });
   if (!authorization.ok) {
     return { status: "error", message: actorFailureMessage(authorization.reason) };
   }
 
-  const { geographicReach, sectors, incomeBands } = parsePreferences(formData);
+  const {
+    geographicReach,
+    cities,
+    sectors,
+    incomeMin,
+    incomeMax,
+    prioritiseGrantRecipients,
+    firstFollowUpDays,
+    secondFollowUpDays,
+  } = parsePreferences(formData);
+
+  // Same rule as the outreach_preferences_income_range_ordered constraint,
+  // checked here so the CAM gets a sentence rather than a constraint error.
+  if (incomeMin !== null && incomeMax !== null && incomeMax <= incomeMin) {
+    return {
+      status: "error",
+      message: "The top of the size range must be above the bottom.",
+    };
+  }
+
+  // F202 review: the DB CHECK constraints bound each threshold independently,
+  // so a 20/10 pair (second before first) would save cleanly without this.
+  const orderingError = validateFollowUpOrdering(firstFollowUpDays, secondFollowUpDays);
+  if (orderingError) {
+    return { status: "error", message: orderingError };
+  }
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -80,13 +175,24 @@ export async function saveOutreachPreferencesAction(
       {
         user_id: authorization.actor.id,
         preferred_geographic_reach: geographicReach,
+        preferred_cities: cities,
         preferred_sectors: sectors,
-        preferred_income_bands: incomeBands,
+        preferred_income_min: incomeMin,
+        preferred_income_max: incomeMax,
+        // Kept in step with the range (the bands it overlaps) for anything that
+        // still reads bands — see 20261004160000.
+        preferred_income_bands: bandsForIncomeRange({ min: incomeMin, max: incomeMax }),
+        prioritise_grant_recipients: prioritiseGrantRecipients,
+        first_follow_up_days: firstFollowUpDays,
+        second_follow_up_days: secondFollowUpDays,
       },
       { onConflict: "user_id" },
     );
 
   if (error) {
+    // F197 review: the CAM sees the message, but the failure must also be
+    // recorded (Definition of Done — every failure visible and recorded).
+    await reportError(error, { operation: "outreach_preferences.save" });
     return {
       status: "error",
       message: "Could not save your preferences. Try again.",
@@ -107,5 +213,19 @@ export async function saveOutreachPreferencesAction(
 
   revalidatePath("/settings/outreach-preferences");
   revalidatePath("/dashboard");
-  return { status: "success", message: "Preferences saved." };
+  revalidatePath("/clients");
+  return {
+    status: "success",
+    message: "Preferences saved.",
+    saved: {
+      geographicReach,
+      cities,
+      sectors,
+      incomeMin,
+      incomeMax,
+      prioritiseGrantRecipients,
+      firstFollowUpDays,
+      secondFollowUpDays,
+    },
+  };
 }

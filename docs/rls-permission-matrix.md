@@ -27,6 +27,15 @@ advisors 0028 / 0029 clean; see §7). Base role checks come from `create_users` 
 `SECURITY DEFINER` with `set search_path = ''`; `authenticated` is granted `EXECUTE`
 (policies need it), `anon` is not.
 
+Being `SECURITY DEFINER` is also why **the zero-argument helpers must be called as
+`(select app.is_active_user())` inside a policy**, never bare: Postgres cannot inline a
+SECURITY DEFINER function, so a bare call in a security qualifier runs once per row
+instead of once per statement. It changes no permission — the same rows are admitted
+either way — which is exactly why it is easy to lose. The rule, the measurements and
+which helpers are exempt are in
+[`supabase/MIGRATIONS.md`](../supabase/MIGRATIONS.md) §"Row-Level Security"; the guard
+is `tests.suite_rls_initplan` in `supabase/tests/rls_policies.test.sql`.
+
 ---
 
 ## 1. Roles
@@ -35,7 +44,7 @@ advisors 0028 / 0029 clean; see §7). Base role checks come from `create_users` 
 |---|---|---|
 | `admin` | `authenticated` + `USERS.role = 'admin'` | Full authorised management access |
 | `cam` | `authenticated` + `USERS.role = 'cam'` | Shared read, ownership-scoped write |
-| `viewer` | `authenticated` + `USERS.role = 'viewer'` | Read-only. `app.is_viewer()`; write denial comes from failing `app.can_write()` (F258) |
+| `viewer` | `authenticated` + `USERS.role = 'viewer'` | Leadership (GLT, branch president/VP). Reads everything an admin reads; writes nothing. `app.is_viewer()`; write denial comes from failing `app.can_write()` (F258). See "Viewer read scope" below |
 | service role | `service_role` | Background jobs. **Bypasses RLS entirely.** Server-side only |
 | anonymous | `anon` | **No access to any table.** Public self-sign-up is prohibited (PRD §4.2) |
 
@@ -46,6 +55,25 @@ send messages, or execute background actions".
 
 Policies are always written `to authenticated`, never `to public`. `to public`
 includes `anon`.
+
+**Viewer read scope (revised 15 Sep 2026, open-questions Q-06).** A viewer reads every
+row an admin reads. Where a table's SELECT row below names only admins (or admins
+plus own-row/CAM rules), an additive `<table>_select_viewer` policy —
+`(select app.is_active_user()) and (select app.is_viewer())` — gives viewers the
+admin's read, from `20261004180000_viewer_reads_admin_screens.sql`: `AUDIT_LOG`,
+`BOOKLET_GENERATIONS`, `DATA_HANDLING_RULE_VERSIONS`, `DATA_HANDLING_RULES`,
+`DATA_QUALITY_EVENTS`, `EDIT_SUGGESTIONS`, `ENTITY_MATCH_CANDIDATES`, `FEEDBACK`,
+`FIELD_DISCREPANCIES`, `INGESTION_RUNS`, `MANUAL_ENTRY_RECORDS`, `MODEL_VERSIONS`,
+`ORGANISATION_STATUS_FLAGS`, `OUTREACH_PREFERENCES`, `OWNERSHIP_REQUESTS`,
+`RAW_SOURCE_RECORDS`, `RESTRICTED_EDIT_FIELDS`. The read-only RPCs
+`data_handling_coverage`, `data_handling_filter_summary`,
+`data_handling_observed_fields`, `list_restrictable_edit_fields` and
+`get_clients_last_activity` accept a viewer as they accept an admin. Deliberately
+**not** widened, because no signed-in screen reads them: `LOGIN_ATTEMPT`,
+`AI_GENERATION_RATE_LIMIT`, `PERSONAL_EMAIL_ROLE_PARTS`, `SCORE_SNAPSHOTS`. No write
+policy, write RPC or grant changed. In the application, pages gate on
+`getViewingActor` and writes on `getCurrentActor`, which refuses a viewer with
+reason `view_only` (`src/lib/auth/`).
 
 ---
 
@@ -59,8 +87,9 @@ reviewers do not assume the matrix alone is sufficient.
 | CAM may edit own profile but **not** their own `role` | RLS is row-level; it cannot allow a row UPDATE while forbidding one column | `REVOKE` (§2.1) then column `GRANT` — `grant update (full_name) on public.users to authenticated`. `role`/`is_active` granted to nobody; an admin role change goes through an RPC (F012) | **shipped** in create_users (F233); F012 RPC still to build |
 | CAM claims an **unowned** organisation | Needs a write to `ORGANISATIONS.owner_id`, otherwise off-limits | `claim_organisation(org_id)`, a `SECURITY DEFINER` RPC (F162, `20260806140000_create_claim_organisation_rpc.sql`) locks the row, sets `owner_id` to the caller and writes an `audit_log` row in the same transaction; raises `55000` rather than overriding if someone else already owns it. The UPDATE policy's `owner_id is null` branch is gone — a CAM's direct UPDATE on an unowned row now matches zero rows, same as any other RLS-blocked write | **shipped**, F162 — see §3.2 |
 | "Set pipeline status — CAM (own client) or admin, no reason required" | RLS is row-level; it cannot let a client's owner write one column (`outreach_status`) while a general policy governs the rest of the row, and the write needs an audit row | `set_outreach_status(org_id, status)`, a `SECURITY DEFINER` RPC (F145, `20260807100000_redefine_outreach_status_pipeline.sql`) locks the row, checks the caller owns it or is admin, and writes an `audit_log` row (`status_changed`) in the same transaction. `outreach_status` is off the general `organisations` UPDATE grant entirely — see §3.2 | **shipped**, F145 — see §3.2 |
+| "Set pipeline status on several clients at once" (F064) | Nothing in RLS makes a multi-row write atomic *and* audited; the app doing it row by row is N transactions, so it can half-apply | `set_outreach_status_bulk(org_ids[], status)`, a `SECURITY DEFINER` RPC (F064, `20260826000000_create_bulk_outreach_status_rpc.sql`) locks every target row in id order, requires the caller own **all** of them or be admin, writes one `status_changed` audit row per real transition, and caps a batch at 500. Same rule as `set_outreach_status` — bulk is a convenience, never a wider permission | **shipped**, F064 — see §3.2 |
 | "Override pipeline stage — **reason required**" | Postgres cannot require a justification string as a condition of an UPDATE | `SECURITY DEFINER` RPC `override_outreach_status(org_id, status, reason)`. `reason` is `not null` and lands in the audit log. Distinct from `set_outreach_status` above — this is the admin escape hatch, not the ordinary path | to build (F224) |
-| "Reassign ownership: admin only" | Same column-level problem | `reassign_ownership(org_ids, new_owner_id, reason, from_user_id)` (F257, `20260802100000_create_reassign_ownership_rpc.sql`, unified `20260804170000`) is the only write path — the org UPDATE policy's admin branch could set any `owner_id` directly with no audit row until `20260810110000_close_admin_owner_id_direct_write.sql` revoked `owner_id` from the table's UPDATE grant entirely (same column-level-REVOKE mechanism as `outreach_status`, §3.2). F163's admin assign-owner form (`/clients/[id]`, `assign-owner-form.tsx`) calls it with a single organisation id and no `from_user_id`. The **offboarding** case is also covered: `deactivate_user` (F014) reassigns every organisation the departing user owns, with a required reason and one `ownership_reassigned` audit row per organisation, in the same transaction that closes the account, delegating to `reassign_ownership` so the departing user's **open actions travel with their clients**. See §3.2, §3.11 |
+| "Reassign ownership: admin only" | Same column-level problem | `reassign_ownership(org_ids, new_owner_id, reason, from_user_id)` (F257, `20260802100000_create_reassign_ownership_rpc.sql`, unified `20260804170000`) is the only write path — the org UPDATE policy's admin branch could set any `owner_id` directly with no audit row until `20260810110000_close_admin_owner_id_direct_write.sql` revoked `owner_id` from the table's UPDATE grant entirely (same column-level-REVOKE mechanism as `outreach_status`, §3.2). F163's admin assign-owner form (`/clients/[id]`, `assign-owner-form.tsx`) calls it with a single organisation id and no `from_user_id`. The **offboarding** case is also covered: `suspend_user` (optionally) and `delete_user` (always, when the user owns clients) reassign every organisation the departing user owns, with a required reason and one `ownership_reassigned` audit row per organisation, in the same transaction that suspends or deletes the account, delegating to `reassign_ownership` via `app.transfer_user_work` so the departing user's **open actions travel with their clients**. See §3.2, §3.11 |
 | Audit entries are immutable | RLS controls who writes, not whether a row can later change | `AUDIT_LOG` gets **no** UPDATE or DELETE policy for any role. Append-only by omission | needs the table (§6) |
 
 **Rule that follows:** where a capability needs a *condition*, a *reason string*, a
@@ -137,7 +166,7 @@ a table ever needs a column granted for one purpose but protected for another.
 | `USERS` | SELECT | all | all (team directory, F011) | all |
 | `USERS` | INSERT | — (invite is service-role RPC, F008) | — | — |
 | `USERS` | UPDATE | all rows | own row, granted columns only | own row, granted columns only |
-| `USERS` | DELETE | — (deactivate, never delete) | — | — |
+| `USERS` | DELETE | — (`delete_user` RPC only: hard delete, or redaction when the account has history) | — | — |
 
 `role` is writable only through `public.set_user_role(user_id, role)` (F012) — a
 SECURITY DEFINER RPC that self-checks `app.is_admin()`, refuses a self-change, and
@@ -154,7 +183,7 @@ suspended user keeps a working token, and a logged-in-looking shell, until it ex
 Measured on GoTrue v2.193.1: with the session row gone, `GET /auth/v1/user` goes
 `200 → 403` and a refresh returns `400`. This replaces an application-side
 `auth.admin.signOut(userId)` call that could never work — that parameter is a JWT, not
-a user id, and GoTrue has no by-user-id logout endpoint. `deactivate_user` revokes the
+a user id, and GoTrue has no by-user-id logout endpoint. `suspend_user` (which ends in `set_user_active`) and `delete_user` revoke the
 same way.
 
 Which addresses may hold an account at all is decided one layer lower, by
@@ -170,16 +199,37 @@ authoritative — widening it alone changes a form message and admits nobody. Th
 table is in `app`, unreachable through PostgREST, with RLS on and no policies.
 Recipe in [`auth/invite-email.md`](auth/invite-email.md).
 
-`deactivated_at` (F014) is written only by `public.deactivate_user(user_id, reason,
-reassign_to, release_clients)` and cleared only by `set_user_active(..., true)`. It is a
-**marker, not a gate**: `is_active` alone decides whether anyone may log in or read a
-row, and no policy or helper consults `deactivated_at`. It exists so the UI can tell a
-suspension from an offboarding, which are otherwise the same `is_active = false`. The
-constraint `users_deactivated_at_matches_inactive` makes the contradictory combination
-(active *and* carrying a deactivation timestamp) unwritable by anyone, including a
-future RPC. `deactivate_user` additionally refuses to close an account while it still
-owns organisations unless given a destination, and moves them in the same transaction —
-see §3.2.
+**Suspend and delete** (20261002094000, replacing F014's deactivation). There are two
+ways to remove someone's access, and they genuinely differ:
+
+- `public.suspend_user(user_id, reason, reassign_to, release_clients)` — reversible. It
+  is `set_user_active(user_id, false)` plus an *optional* handover of the user's clients
+  and open actions (to an active CAM/admin, or the unowned pool) in the same
+  transaction. A reason is required only when work moves. Handing a suspended user's
+  work on later is allowed.
+- `public.delete_user(user_id, reason, reassign_to, release_clients)` — irreversible.
+  Refuses while the user owns clients unless given a destination (`owns_active_clients`).
+  Then: an account with **no history** is physically deleted from `auth.users`
+  (cascading to `public.users` and the user's own settings tables); an account **with
+  history** is redacted (data-lifecycle-policy §5.3 Level 2, Annex A.1) — `email` →
+  `redacted+<id>@invalid`, `full_name` → `Former member`, `deleted_at` stamped, the
+  `auth.users` copy, identities and MFA factors scrubbed — and the row kept so every note,
+  approval and audit row keeps its author. "History" means any row in any table whose
+  foreign key to `users` is not `ON DELETE CASCADE`, read from `pg_constraint`, so a table
+  added later is covered without editing the function. Writes `user_deleted`, identified
+  by id only.
+
+`deleted_at` is written only by `delete_user` and never cleared. Like the old marker it
+is **not a gate** — `is_active` alone decides access — but it is enforced:
+`users_deleted_at_implies_inactive` makes a deleted-yet-active row unwritable, and
+`set_user_active` / `set_user_role` refuse a deleted account (`user_deleted`). Every team
+list filters `deleted_at is null`; the F188 tag placeholder is marked deleted for the
+same reason. Both handovers delegate to `reassign_ownership` / `reassign_actions` via
+`app.transfer_user_work` — see §3.2.
+
+`deactivate_user` and `users.deactivated_at` were removed. Previously deactivated
+accounts are ordinary suspended accounts; historical `user_deactivated` audit rows are
+kept and still rendered.
 
 `last_seen_at` — "last active", not last login — is written only by
 `public.touch_last_seen()` (20260816230000), a SECURITY DEFINER RPC that updates only
@@ -187,6 +237,16 @@ see §3.2.
 so a client cannot forge or backdate it. `getCurrentActor()` calls it, throttled to once
 per 5 minutes per user, on every signed-in page and every admin API request — not just at
 login. Not audited: presence isn't an ownership/status/role/approval change.
+
+`email_notification_types` (F179, #175) is an ordinary granted column — `own row,
+granted columns only` already covers it, same as `notification_frequency` (F201/
+F178). No RPC: choosing which notification types to also receive by email changes
+no ownership/status/role/approval state, so a self-scoped column grant plus the
+existing `users_update_self_or_admin` policy is enough (`docs/audit-log-pattern.md`
+§1 reasoning). Defaults to `{client_reply_received}` — the *one* reply type this
+feature emails (the owning CAM's F174 token, §3.19) — so F179 AC3's "sent by
+email by default... unless the CAM has explicitly opted out" is the column
+default itself, not application logic that could drift from it.
 
 ### 3.2 Canonical organisation data — shared read, admin write
 
@@ -201,6 +261,35 @@ canonical fields" — `authenticated` is one shared Postgres role — so closing
 canonical-edit RPC or column-guard trigger (F224). The narrower unowned-org hole (a CAM
 editing a row they do not own) *is* closed: the `WITH CHECK` uses
 `coalesce(owner_id = auth.uid(), false)`, so a null owner no longer slips through.
+
+**The sanctioned route around the gap (F077, #79; decided by F078/F079, #80/#81).**
+~~Until the gap itself closes (F020's restricted-editing enforcement), a CAM who owns a
+row can still write these columns directly through the policy above.~~ **The gap is now
+closed — F020 (#23)**: a BEFORE UPDATE column-guard trigger
+(`20260822160100_restrict_organisation_sensitive_columns.sql`) refuses any non-admin
+write that changes a column listed active in `RESTRICTED_EDIT_FIELDS`
+(`20260822160000_create_restricted_edit_fields.sql`), raising 42501 with a pointer to
+the suggestion flow. The restricted set is configuration, not code: an admin adds or
+retires fields at runtime through `add_restricted_edit_field` /
+`deactivate_restricted_edit_field` (both audited, `/settings/restricted-fields`), and both
+enforcement points — the trigger and the suggestion RPC — follow the table. What F077
+added is the legitimate path for corrections: `suggest_organisation_edit(org_id,
+field_name, new_value)` (`20260822140000_create_edit_suggestions.sql`, rewritten by
+F020 to validate against the config table) lets an active CAM propose a change, snapshots
+the current value server-side into `EDIT_SUGGESTIONS`, and writes nothing to
+`organisations`. Submission audits nothing (flagging is not a decision).
+`decide_edit_suggestion(suggestion_id, approve, reason)`
+(`20260822150500_create_decide_edit_suggestion_rpc.sql`, apply-back rewritten by F020 in
+`20260822160200` as guarded dynamic SQL so admin-added fields are applied too) is the
+decision half, admin only and audited both ways: approval re-checks that the live value
+still matches the submission snapshot (refusing on drift rather than silently
+overwriting whatever moved in the meantime) and then applies the proposed value;
+rejection touches nothing and records the optional reason for the CAM. At most one
+pending suggestion exists per field per client: a CAM re-suggesting supersedes their
+own, another CAM's pending proposal blocks the field. SELECT on the suggestions table
+follows the same split: admins see everything, any active CAM sees pending rows, authors
+see their own history, viewers see nothing. Background jobs (no JWT) bypass the trigger
+by design; admins keep the §3.2 write path in full.
 
 **Claiming an unowned client (F162).** Until `20260806140000`, a CAM claimed an unowned
 organisation the same way they edit one they own — directly through this UPDATE policy,
@@ -255,9 +344,34 @@ defaults to `not_contacted` (F146) via the column default. `override_outreach_st
 (§2, reason-required admin override) is a separate, not-yet-built RPC for a different
 case — this one is the everyday CAM/admin path.
 
+**Bulk pipeline status (F064).** `set_outreach_status_bulk(org_ids[], status)`
+(`20260826000000_create_bulk_outreach_status_rpc.sql`) is the same write over many rows
+in one transaction, and it grants nothing the single-row RPC does not: owner or admin,
+checked across the whole batch. Two properties are the point of it existing rather than
+the app looping over `set_outreach_status`. It is **atomic** — one client in the
+selection the caller does not own raises `42501` and *no* row moves, rather than the
+batch part-applying and leaving a CAM unable to tell which half took. And it is
+**bounded** — 500 rows per call, because the risk this feature carries is a mis-clicked
+status on a large selection, not a slow query. Audit behaviour is unchanged: one
+`status_changed` row per real transition, no-ops skipped, `detail.trigger = 'bulk_update'`
+distinguishing them from single edits without inventing a second action token. The list
+UI disables the checkbox on rows the actor could not change one at a time, so the
+permission exception is a backstop against a crafted request rather than the normal path.
+
+**Hard No files a suppression request (F153).** Moving a client to `hard_no` — through
+either status RPC or any other update — also files a **pending** suppression request for
+that organisation (`20260904090000_hard_no_files_suppression_request.sql`, a BEFORE UPDATE
+trigger firing inside the same transaction, with its own `suppression_requested` audit row).
+Pending, not active: the F251 rule that admins decide suppressions is untouched, so a Hard
+No does not by itself block outreach — an admin activating the request (F248) does. The
+trigger skips `is_seed` rows (fixture cycling must not litter staging with requests),
+organisations that already have an open suppression (the partial unique index would reject
+the second row anyway), and writes with no attributable actor; Soft No deliberately fires
+nothing (F152 AC2 keeps it outside DNC).
+
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `ORGANISATIONS` | all roles | admin | admin any row; CAM may edit one they own (WITH CHECK pins `owner_id` to self) — claiming an **unowned** row is RPC-only, see below. `outreach_status` is excluded from this grant entirely — RPC-only (`set_outreach_status`), see above | admin |
+| `ORGANISATIONS` | all roles | admin | admin any row; CAM may edit one they own (WITH CHECK pins `owner_id` to self) — claiming an **unowned** row is RPC-only, see below. `outreach_status` is excluded from this grant entirely — RPC-only (`set_outreach_status` for one client, `set_outreach_status_bulk` for many), see above | admin |
 | `ORGANISATION_IDENTIFIERS` | all roles | admin | admin | admin |
 | `CONTACTS` | all roles | admin, cam | admin, cam | admin |
 | `FINANCIAL_PERIODS` | all roles | admin | admin | admin |
@@ -265,6 +379,34 @@ case — this one is the everyday CAM/admin path.
 | `ENRICHMENT_RESULTS` | all roles | — (service role) | — | admin |
 | `TAGS` | all roles | admin, cam | admin, own | admin |
 | `ORG_TAGS` | all roles | admin, cam | admin, own | admin, own |
+| `CLIENT_BOOKLETS` | all roles | admin, cam (`can_contact_organisation`) | — (immutable, see below) | admin |
+| `OUTREACH_CYCLES` | all roles | admin | admin | admin |
+
+**`CLIENT_BOOKLETS` (F085 #349, versioned by F086 #350)** is the one row here whose
+write predicate isn't plain `can_write()`: it reuses `app.can_contact_organisation()`,
+the same ownership-scoped predicate §3.4's `OUTREACH_MESSAGES` uses, rather than the
+simple admin-or-CAM check the rest of this table's writable rows use. That matches the
+`/api/clients/[id]/booklet` route's own `client:contact` permission gate — a CAM
+saves a booklet only for a client they own or that's unowned, same as they may only
+contact one. **Append-only, not one row per organisation**: F085's original design
+upserted a single row per organisation; F086 AC2 ("the prior saved version remains
+retrievable") requires the opposite, so
+`20260828000000_version_client_booklets.sql` drops the `organisation_id` uniqueness
+and the UPDATE policy/grant entirely — every generation, including a regenerate, is a
+new INSERT, and no role can UPDATE an existing row. "The current booklet" is the most
+recent row per organisation (`order by generated_at desc`), same convention as
+`ENRICHMENT_RESULTS`. **Not yet in the Data Model spreadsheet** — flagged in both
+migrations' own headers for Bashir to add to tab 04/02, reflecting this append-only
+shape rather than F085's original single-row one.
+
+**`OUTREACH_CYCLES` (`20261004200000_create_outreach_cycles.sql`)** holds the named
+date ranges Team analytics compares ("Spring 26"). Shared read — a cycle is a name
+and two dates, no personal data, and the analytics pickers serve every active role —
+with all three writes admin-only, matching the `platform-settings:manage` gate on
+`/settings/cycles`. The non-overlap rule lives in the app, not the schema: the
+settings action refuses a colliding save in plain words, so no exclusion constraint
+(and no extension) was needed. **Not yet in the Data Model spreadsheet** — flagged
+in the migration's own header, same standing as `CLIENT_BOOKLETS` above.
 
 ### 3.3 Notes — shared read, author write
 
@@ -275,22 +417,81 @@ F019 (read-only shared client visibility) requires every CAM to read every note.
 |---|---|---|---|---|
 | `NOTES` | all roles | admin, cam (`author_id = auth.uid()`) | admin, own | admin, own |
 
+The UI side of F019 (shipped with #22): `/clients/[id]` renders every note to
+every active role, but the edit/delete controls come from
+`buildNoteList`'s server-side `canManage` (author-or-admin — the same predicate
+as `notes_update_own`/`notes_delete_own`), so a non-author never sees a control
+the policy would refuse. The PATCH/DELETE routes re-check before writing and
+return "you can only [edit/delete] your own notes" rather than a silent
+zero-row write. `suite_shared_visibility` (pgTAP) asserts both halves: another
+CAM's notes are readable, and an UPDATE/DELETE against them leaves the row
+unchanged.
+
+**F065 (bulk add comment) changes nothing in this row and adds no RPC.** It inserts N
+rows in one statement as the signed-in user, so `notes_insert_author` above is what
+authorises it — one transaction, and therefore the same all-or-nothing guarantee
+F064's `set_outreach_status_bulk` needed a `SECURITY DEFINER` function for. The
+contrast is worth stating because the two features look symmetrical and are not:
+F064 needed the RPC because direct writes to `organisations.outreach_status` are
+revoked (§3.2), so there was no policy to authorise it. Here there is one, and a
+definer function would have *bypassed* it to re-implement it. The permission path
+is asserted in `supabase/tests/rls_policies.test.sql` — a CAM may note another
+CAM's client (`suite_core`), a viewer may not note anything (`suite_viewer`).
+
 ### 3.4 Outreach — ownership-scoped
 
 The F018 contact-permission rule lives here. Read is shared (relationship history,
 F019); **send** is restricted.
 
+F019's UI side (#22): on `/clients/[id]` a CAM who does not own the client
+sees the compose action rendered disabled up front, with the owner-naming
+conflict warning, rather than clickable-then-refused — `checkOwnershipConflict`
+drives both the render and the preflight that remains the enforcement.
+
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
 | `OUTREACH_MESSAGES` | all roles | admin: any not suppressed. cam: `sent_by_user_id = auth.uid()` **and** org is unowned or owned by self **and** not suppressed | admin, own drafts (`send_status = 'draft'`) | admin, own drafts |
 | `AI_GENERATIONS` | all roles | — (service role) | — | admin |
+| `MODEL_PRICING` | all roles | — (direct SQL only, no RPC yet — F213) | — | — |
 | `SEND_EVENTS` | all roles | — (service role, Gmail webhook) | — | — |
 | `REPLY_EVENTS` | all roles | — (service role) | — | — |
-| `OUTCOMES` | all roles | admin, cam (`recorded_by_user_id = auth.uid()`) | admin, own | admin |
+| `OUTCOMES` | all roles | admin. cam: withdrawn — every value is system-managed, written/withdrawn only by `set_outreach_status` / `set_outreach_status_bulk` / `advance_outreach_pipeline_on_send` (F143/F144) | admin | admin |
+| `BOOKLET_GENERATIONS` | admin, cam (`app.can_contact_organisation(organisation_id)`); viewer: all, read-only (`booklet_generations_select_viewer`, 20261004180000) | admin, cam (`app.can_contact_organisation(organisation_id)` **and** `generated_by = auth.uid()`); append-only audit of booklet prompt/output (F082 AC5 / F112, `20260822130000`) | — | — |
+
+`BOOKLET_GENERATIONS` lives here rather than in a new section because it is the
+booklet-side sibling of `AI_GENERATIONS`: the same "what exactly did the model
+produce" audit question. It cannot be a row in that table — `AI_GENERATIONS`
+hangs off `outreach_messages`, and a booklet generation has no outreach message.
+Read scope follows the booklet feature's own gate (client:contact ≈
+`app.can_contact_organisation`), which excludes viewers; the table holds full
+prompt/output text, so it is deliberately tighter than shared read. Append-only
+by omission of UPDATE/DELETE grants, same mechanism as `AUDIT_LOG`.
 
 The CAM INSERT check on `OUTREACH_MESSAGES` is the database-layer expression of
 "Send to an organisation owned by another CAM: Admin yes, CAM no". This is the
 policy the acceptance criteria's "misuse attempt" test must target.
+
+F018 (#21, `20260915000000`) extends that rule from INSERT-time to the whole
+send lifecycle. The three send-path SECURITY DEFINER RPCs —
+`claim_outreach_send`, `schedule_outreach_send`, `mark_outreach_sent` —
+re-check authorisation inside their definer bodies under the same predicate:
+**admin, or the client's owner, or (only while the client is unowned) the
+draft's author.** Previously a draft's author could claim/schedule/record a
+send regardless of who owned the client, so a draft generated before a client
+was reassigned stayed sendable by its original author — including via direct
+API call. The predicate is coalesced: with an unowned client,
+`org_owner_id = actor` is NULL, and an uncoalesced NULL would make
+`IF NOT (...)` silently allow. Ownership is the sanctioned route to contacting
+a client another CAM works on (PM decision, Bashir, Aug 2026) — there is
+deliberately no per-CAM grant table; request ownership instead. The app layer
+enforces the same rule at the actions themselves (`assertContactPermission` in
+`src/lib/outreach/contact-permission.ts`, called by `sendReviewedEmail` /
+`scheduleReviewedEmail`) so the refusal carries the owner-naming message, and
+an admin sending on another CAM's client is asked to confirm a last-resort
+override dialog naming the owner first. Scheduled sends are checked at
+schedule time only: a schedule permitted when queued is delivered even if
+ownership changes before it fires (grandfathered, same PM decision) — the
+service-role worker never had an `auth.uid()` to check against.
 
 Both INSERT policies additionally require `app.can_contact_organisation(organisation_id)`
 (F050, #52) — a suppressed org (F251 §3.14) blocks every insert, admin included. Fixed
@@ -300,13 +501,88 @@ the bug.
 
 A sent message is immutable: the UPDATE predicate requires `send_status = 'draft'`.
 
+**Send-failure lifecycle RPCs (F129, `20260903090000`).** Two `SECURITY DEFINER`
+RPCs complete the failure half of this section — neither is reachable as a
+direct table write (RLS pins every non-draft row shut):
+
+- `mark_outreach_send_failed(message_id, reason)` — **service_role only**
+  (EXECUTE granted to service_role alone; the definer body re-checks that
+  `auth.uid()` is null). The cron worker records a due delivery that did not
+  leave: scheduled→failed, one `SEND_EVENTS` `'failed'` row carrying the
+  transport's reason, one `audit_log` row — same transaction. Conditional on
+  still-scheduled so a raced cancel wins. No authenticated role can execute it:
+  a CAM must not be able to stamp someone else's queued email failed.
+- `reopen_outreach_draft(message_id)` — **authenticated**, sender or admin
+  re-checked inside the definer body (`app.is_active_user()` + ownership line,
+  same rule as sending). failed→draft so the retry flows through the ordinary
+  reviewed send path with its audited gates; writes `outreach_send_reopened`
+  to `AUDIT_LOG`. Anyone else raises 42501.
+
+**Delivery recordal and the automatic pipeline advance (F157,
+`20260909090000`).** Recording that an email actually left is audited on both
+send paths, and the client's pipeline status moves in the SAME transaction as
+the recordal — never as a separate step that could fail independently (F157
+AC3):
+
+- `mark_outreach_sent(message_id, provider ids, recipient)` —
+  **authenticated** (active user; the client's owner, admin, or the draft's
+  sender). Draft→sent plus the `outreach_email_sent` audit row, **plus** the
+  pipeline advance: `not_contacted → initial_outreach_sent`, any later send →
+  `follow_up_sent`, each with its own `status_changed` audit row shaped for
+  the timeline. Locks both the message and the organisation row up front, so
+  two near-simultaneous sends serialize and the second lands on
+  `follow_up_sent`, never a second "initial".
+- `mark_scheduled_outreach_delivered(message_id, provider ids, claim_token)` —
+  **service_role only** (same `auth.uid() is null` line as
+  `mark_outreach_send_failed`; EXECUTE revoked from every non-service role).
+  The cron worker's replacement for its former raw UPDATE: claim-pinned
+  scheduled→sent flip, the `SEND_EVENTS` `'sent'` row, the system-attributed
+  `outreach_email_sent` audit entry, and the same pipeline advance — one
+  transaction. Pinned to the claiming run's exact token so a raced cancel or
+  re-claim wins with `false` (ambiguous: the email may be out, never retried).
+
+The advance rule itself lives once, in the internal definer helper
+`advance_outreach_pipeline_on_send(org_id, actor)`, called only by those two
+RPCs (EXECUTE revoked from every role). Manual status changes remain
+`set_outreach_status` / `set_outreach_status_bulk` (§3.2) — a send advances the
+pipeline automatically; a human corrects it through the ordinary RPCs.
+
+**Last-activity read for recommendations (F160, `20260910100000`).**
+`get_clients_last_activity(uuid[])` is a read-only aggregation: per requested
+client, the newest sent email, received reply and audited status change — the
+clock F160 measures silence against. Owner-scoped unless admin, matching the
+Needs Attention panel it feeds; ids the caller cannot access are dropped
+silently rather than erroring. EXECUTE granted to `authenticated` only.
+
+**Sector income distribution for the Financials peer strip (`20260923123000`).**
+`get_sector_income_distribution(text, uuid, numeric)` is a read-only
+aggregation: for one sector, the peer count, the five-number summary
+(min/p25/median/p75/max) of each peer client's latest filed income, and how many
+of those file less than a supplied figure. It exists because picking one income
+per peer is a max-per-group that PostgREST cannot express (no `DISTINCT ON`),
+and the app-side reduction it replaces pulled ~1,750 rows per page view to
+produce six numbers.
+
+**The one RPC on this record that is `SECURITY INVOKER`, deliberately.** Both
+tables it reads — `ORGANISATIONS` and `FINANCIAL_PERIODS` — are shared-read for
+every active user (§3.2, §4.3 "View canonical organisations"; §3.6's
+`FINANCIAL_PERIODS` row is "all roles"). There is nothing here a caller could
+not already `select` for itself, so the function is given no elevated rights:
+RLS applies normally, and a deactivated user's read collapses to zero rows
+through the same policies as everything else instead of through a hand-written
+guard in a definer body that could drift from them. `app.is_active_user()` is
+still checked in the body so a deactivated caller gets an explicit `42501`
+rather than a silently empty result. `search_path` is pinned regardless — an
+invoker function still resolves against the caller's `search_path` otherwise.
+EXECUTE revoked from `public`/`anon`, granted to `authenticated` only.
+
 ### 3.5 Raw ingestion and data quality — admin only
 
 §4.3 "View raw source records: Yes/technical admin, CAM no".
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `INGESTION_RUNS` | admin | admin (trigger refresh) | — | — |
+| `INGESTION_RUNS` | admin, cam | admin (trigger refresh) | — | — |
 | `RAW_SOURCE_RECORDS` | admin | — (service role) | — | admin |
 | `DATA_QUALITY_EVENTS` | admin | — (service role) | admin (resolve) | — |
 | `ORGANISATION_STATUS_FLAGS` | admin | — (service role, RPC only) | — (RPC only: acknowledge) | — |
@@ -316,6 +592,13 @@ A sent message is immutable: the UPDATE predicate requires `send_status = 'draft
 `RAW_SOURCE_RECORDS` holds unfiltered third-party payloads. It is the
 "sensitive data check" in the testing notes: a CAM `select *` must return **zero rows**,
 not an error.
+
+`INGESTION_RUNS` is the exception to the section's admin-only rule. CAMs reach the
+Data imports group (they run Companies House and Charity Commission imports under
+`client:edit`), so they read the run history: source, outcome, counts, error message
+— no organisation data and no payload. The run detail page, which reads
+`RAW_SOURCE_RECORDS`, stays admin-only (migration
+`20261002100000_ingestion_runs_select_for_cams`).
 
 F043 exposes provenance without weakening that boundary. Active authenticated users
 may execute `get_organisation_sources(organisation_id)`, which returns only the source
@@ -351,10 +634,37 @@ rather than renaming the column.
 | `AGENT_PROMPTS` | admin | admin | admin | — |
 | `AGENT_RUNS` | admin | — (service role) | — | — |
 | `LATEST_SCORES` | all roles | — (service role) | — | — |
+| `SCORE_SNAPSHOTS` | admin | — (service role, via send RPCs) | — | — |
 | `EMAIL_PERFORMANCE_LIBRARY` | admin, cam | — (service role) | — | admin |
 
 `LATEST_SCORES` is read-all: CAMs work the prioritised queue. The weights that
 produce the scores are not readable by CAMs — knowing the weights makes them gameable.
+
+F097 (#96, 20260911120000): `SCORE_SNAPSHOTS` joins the same family as
+MODEL_VERSIONS on the read side — SELECT for admins only, because a snapshot row
+is exactly "these factors under that weights generation", i.e. gameable knowledge
+by construction. Writes carry no grant at all: rows are inserted only inside the
+SECURITY DEFINER send RPCs' transactions (mark_outreach_sent /
+mark_scheduled_outreach_delivered) via the internal insert_score_snapshot helper,
+so a snapshot always commits with its send and can never be written directly.
+
+Deviation recorded 24 Aug 2026 (F058/F059, #482): `MODEL_VERSIONS` is implemented
+**read-only for admins, with no INSERT/UPDATE/DELETE grant to any Postgres role**
+— writes stay service-role. The register's admin-writable cells assumed versions
+would be created through the app; in practice a version is seeded by its own
+migration (SCOUT v1 with EQUAL_WEIGHTS) and changed only by a future migration
+adding v2, so an interactive write path would be an unaudited way to rewrite what
+produced every stored score. If model management ever becomes a product surface,
+grant the verbs back here and behind an audited admin RPC.
+
+Update 26 Aug 2026 (F096, #95): model management became a product surface, and
+the predicted shape held — `public.set_scout_weights(jsonb)`
+(`20260903120000_create_set_scout_weights_rpc.sql`), a SECURITY DEFINER RPC that
+re-checks `app.is_admin()` itself, retires the active SCOUT generation and inserts
+the next one, and writes an `audit_log` row (`scout_weights_changed`) in the same
+transaction. **No table verbs were granted**: MODEL_VERSIONS stays SELECT-admin,
+INSERT/UPDATE/DELETE stay service-role-only, so the RPC remains the only door.
+Same accepted advisor exception as `set_user_role` (§7).
 
 ### 3.7 Analytics
 
@@ -388,10 +698,20 @@ viewers both read every row; only the CAM path is scoped.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `AUDIT_LOG` | admin | — (service role / `SECURITY DEFINER` RPC only) | **none** | **none** |
+| `AUDIT_LOG` | admin; **plus** any active user, but only `status_changed`/`ownership_reassigned` rows targeting `organisations` (F075, 20260820110000) | — (service role / `SECURITY DEFINER` RPC only) | **none** | **none** |
 
 No UPDATE or DELETE policy is written for any role, including admin. An audit trail
 an admin can edit is not an audit trail.
+
+**F075's carve-out** (`audit_log_select_client_timeline`) is additive, not a
+replacement for `audit_log_select_admin` above — every other `action` token
+(`role_changed`, `user_suspended`, `invite_*`, etc.) stays admin-only. It exists
+because the client communication timeline needs a CAM/viewer to read the
+handover and status-change entries for a client they can already see everywhere
+else on that client's page (`notes`/`outreach_messages`/`reply_events` are
+already shared-read, §3.3/§3.4) — and because RLS gates `postgres_changes`
+delivery exactly like a SELECT, so without this, F075's realtime subscription
+would silently never receive these two event types for a non-admin.
 
 ### 3.9 Views
 
@@ -399,6 +719,18 @@ an admin can edit is not an audit trail.
 unless created `with (security_invoker = on)`. Every view over an RLS-protected
 table must be created `with (security_invoker = on)`, or it silently launders data
 around the policies. This is a required check in the schema change approval record.
+
+**`training_examples` (F098, #97, 20260912120000)** — the ML-ready training
+dataset: one row per scored outreach attempt (SCORE_SNAPSHOTS), its latest
+OUTCOMES label joined by message id, AI_GENERATIONS-derived metadata and timing.
+Created `with (security_invoker = on)` per the rule above — and that is the whole
+access story: SCORE_SNAPSHOTS grants SELECT to admins only, so an admin querying
+the view sees rows and any other active user sees empty, with no new policy to
+maintain or forget. Its column set is a tested ALLOWLIST (`training_examples.test.sql`)
+of ids, 0–1 factors, enum tokens, derived facts and timestamps — no email content,
+recipient addresses, reply text or CAM notes can appear without a test edit. Bulk
+export goes through `npm run export:training-dataset`, which reads only this view
+and refuses production via the seed config guard.
 
 ### 3.10 Login throttle
 
@@ -426,6 +758,19 @@ The throttle reads no user table, so an unknown address is counted, blocked and 
 exactly like a real one — it cannot be used to enumerate accounts. See §4 on why the
 user-facing message stays uniform.
 
+### 3.10a AI generation throttle
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `AI_GENERATION_RATE_LIMIT` | admin | — (`SECURITY DEFINER` RPC only) | — (RPC only) | **none** |
+
+This is the per-user fixed-window counter shared by booklet, Stage 1, and Stage 2
+Gemini generation. The application derives the user id only after the normal
+permission gate, then calls `consume_ai_generation_allowance` with `service_role`.
+The RPC is not executable by `anon` or `authenticated`, so an end user cannot reset,
+forge, or consume another user's allowance through PostgREST. Admin SELECT supports
+abuse investigation; no request payload, prompt, generated content, or API key is stored.
+
 ### 3.11 Actions — shared read, assignee write, admin assignment
 
 Backs F168–F172 (`supabase/migrations/20260801100000_create_actions.sql`). Read is
@@ -435,7 +780,7 @@ outgoing one's open actions *before* the handover, not only after.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `ACTIONS` | all roles | admin: any. cam: `created_by_user_id = auth.uid()` **and** `assignee_user_id = auth.uid()` **and** org is unowned or owned by self | admin any row; cam where `assignee_user_id = auth.uid()` — **work columns only** | admin any row; cam own-created **and** own-assigned **and** `status = 'open'` |
+| `ACTIONS` | all roles | admin: any. cam: `created_by_user_id = auth.uid()` **and** `assignee_user_id = auth.uid()` **and** org is unowned or owned by self | admin any row; cam where `assignee_user_id = auth.uid()` — **`title`/`description`/`due_date`/`remind_at` only** (`status`/`completed_at` RPC-only, F171 below) | admin any row; cam own-created **and** own-assigned **and** `status = 'open'` |
 
 `assignee_user_id` carries **no UPDATE grant for any role, admins included**, and neither
 do `organisation_id` or `is_seed`. `authenticated` is one shared Postgres role, so column
@@ -476,6 +821,40 @@ admin to work out which of fifty clients was the problem.
 A CAM assigning work to *another* CAM is F169 and stays admin-only — that is what the
 `assignee_user_id = auth.uid()` predicate on INSERT enforces. Viewers create nothing
 (§4.3), enforced by `app.is_cam()`.
+
+**Completion RPC** (F171 Mark Action Complete, #167,
+`supabase/migrations/20260914090000_create_complete_action_rpc.sql`):
+`status`/`completed_at` carried a plain `authenticated` UPDATE grant until this
+migration — completing an action was an ordinary, un-audited write, same as
+editing its title. F171 AC2 ("keeps a record of it for audit purposes, F221")
+and AC3 ("shows who completed it") cannot be met by a policy: a policy cannot
+also insert into `AUDIT_LOG` (no INSERT grant to `authenticated` at all, §3.8),
+and cannot capture "the person who ran this UPDATE" as a stored column. So this
+migration revokes direct UPDATE on `status`/`completed_at` and reopens
+completion only through `complete_action(action_id)` — `SECURITY DEFINER`,
+self-checks the caller is the action's own assignee **or** an admin (the same
+combined reach `actions_update_admin`/`actions_update_assignee` already had
+directly, so nothing regresses), requires the action be `open`, sets
+`completed_at`/`completed_by_user_id` and writes `audit_log`
+(`action_completed`) in the same transaction. `completed_by_user_id` is a new
+column rather than an assumption that the assignee always did it — since an
+admin can complete someone else's action too, "who" genuinely isn't always
+`assignee_user_id`.
+
+**Team task management RPCs**
+(`supabase/migrations/20261017040000_team_tasks_tracker.sql`) add the admin
+paths used by the Team tasks tracker. `update_team_task(...)` edits the work
+fields and may reassign the task; `set_team_task_status(...)` completes,
+cancels or restores it. Both are `SECURITY DEFINER`, self-check active-admin
+access, lock the row, reject a stale `updated_at`, and write ownership or
+status changes to `audit_log` in the same transaction. Viewers retain the
+shared read and receive no write path. The existing `complete_action(...)`
+remains the CAM path for completing their own task.
+
+`ACTIONS.priority` is a checked `smallint` translated at the application edge:
+1 High, 2 Normal, 3 Low. Existing rows and old writers receive Normal from the
+column default. It carries no direct UPDATE grant; team-page edits reach it
+through `update_team_task(...)` alongside the audited assignee check.
 
 Deletion requires the CAM to have **raised** the action and to **still hold** it, and it
 must still be open. A completed or cancelled action is handover history and only an admin
@@ -530,16 +909,17 @@ which is the wrong test for a row a user writes about themselves.
 
 ---
 
-### 3.13 Outreach preferences — own row only
+### 3.13 Outreach preferences — own row or admin read
 
-Backs F195 (`supabase/migrations/20260805110000_create_outreach_preferences.sql`). Same
+Backs F195 (`supabase/migrations/20260805110000_create_outreach_preferences.sql`) and
+F187 (`supabase/migrations/20260819100000_allow_admin_read_outreach_preferences.sql`). Same
 shape as §3.12: a user's own settings, not ownership/status/role/approval state, so it
 is governed by RLS alone — no SECURITY DEFINER RPC, no `audit_log` row
 (`docs/audit-log-pattern.md` §1).
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| `OUTREACH_PREFERENCES` | own row (`user_id = auth.uid()`) | own row | own row | — (no grant) |
+| `OUTREACH_PREFERENCES` | own row (`user_id = auth.uid()`) OR admin (`app.is_admin()`) | own row | own row | — (no grant) |
 
 One row per user (`unique (user_id)`), upserted by the settings form's server action.
 No DELETE grant to any role: clearing preferences is an UPDATE back to empty arrays,
@@ -547,9 +927,8 @@ not a row removal — this keeps "no preferences set" a single always-present st
 (empty arrays) instead of a row that may or may not exist, which is one fewer case for
 F094 (#93, not yet built) to handle when it reads this table.
 
-No admin read: nothing in #191 needs one, and F187 (admin views a CAM's settings, P3)
-can add it with a stated reason when it is actually built — same call already made for
-`USER_ONBOARDING_STEPS` (§3.12).
+Admin read added for F187 (admin views a CAM's settings, P3) via `outreach_preferences_select_admin`
+so an admin can understand how a CAM's queue is configured without notifying or restricting the CAM.
 
 Both policies AND in `app.is_active_user()`. No `app.can_write()` — that helper gates
 *client data* and excludes viewers (F258); this table is a user's own settings and is
@@ -571,7 +950,7 @@ which self-approves (no admin ever waits on their own request).
 No INSERT/UPDATE policy, by the same reasoning as `AUDIT_LOG` (§3.8) and
 `set_user_role` (§6): "reason required" plus a role-gated state transition is the RLS
 recipe's RPC case (MIGRATIONS.md step 4), not something a policy can express. All
-writes go through two `SECURITY DEFINER` RPCs, each self-checking the caller and each
+writes go through three `SECURITY DEFINER` RPCs, each self-checking the caller and each
 writing an `audit_log` row in the same transaction:
 
 - `request_suppression(organisation_id, reason)` — caller must satisfy
@@ -584,6 +963,11 @@ writing an `audit_log` row in the same transaction:
   `pending` row to `active` or `rejected`, records `decided_by`/`decided_at`, and
   writes `suppression_approved` or `suppression_rejected` to `audit_log`. Rejects a
   target that is not currently `pending`.
+- `lift_suppression(suppression_id, reason)` — admin only (F185, #181). Moves an
+  `active` row to `lifted`, records `decided_by`/`decided_at` and `decision_note = reason`
+  (mandatory written reason), and writes `suppression_lifted` to `audit_log`. Rejects a
+  target that is not currently `active` or a blank reason. Lifting unblocks outreach
+  and restores visibility on standard client lists.
 
 SELECT is open to every active user (not gated to admin/owner) because the working
 list needs to hide a suppressed organisation for everyone, not just the CAM who owns
@@ -604,11 +988,8 @@ contact-level story can extend this table rather than starting over. Built ahead
 F248 (#243, "a suppression list exists") with the Project Leader's agreement, since
 this table already satisfies that — see the migration header for the full note.
 
-`status` is `pending | active | rejected | lifted`. `lifted` is reserved now, not
-used by any RPC in this migration — F251's own AC commits to an admin being able to
-remove a suppression, and F185 (#181) is that RPC. Adding an enum value later is a
-one-way door in Postgres (`create_organisations.sql` precedent), so it is reserved
-up front rather than negotiated later.
+`status` is `pending | active | rejected | lifted`. `lifted` is implemented by F185
+(#181) via `lift_suppression` RPC (`20260818130000_create_lift_suppression_rpc.sql`).
 
 ### 3.15 Entity match candidates — service-role write, admin decides
 
@@ -708,7 +1089,671 @@ per-field tracking — a later manual edit through the org edit UI is misattribu
 the original import source. Closing that properly is F044 (Field-Level Source
 Tracking, #45)'s job, not this table's.
 
+### 3.17 Ownership requests — RPC-only, admin decides, narrow read
+
+Backs #408 Request Client Ownership (admin-approved handover),
+`supabase/migrations/20260818120000_create_ownership_requests.sql`. The escalation
+half of F165's conflict warning (§3.11's `claim_organisation` 55000): the warning
+says a CAM cannot take a client another CAM owns, and this is the only sanctioned
+next step. Decided by the Project Leader 18 Aug 2026 (on #406): **a CAM never
+overrides another CAM's ownership.** Worst case they ask, and an admin hands it over.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `OWNERSHIP_REQUESTS` | admin, the requester, or the client's current owner | — (RPC only) | — (RPC only) | — (no grant) |
+
+SELECT is deliberately narrower than `SUPPRESSIONS` (§3.14, all active users). A
+suppression is a fact about a charity the whole team needs in order to hide it; a
+request is a conversation between one CAM, one owner, and the admins. The current
+owner is included on purpose — someone asking for their client is something they
+should learn when it is asked, not when it moves.
+
+Both writes are `SECURITY DEFINER` RPCs that self-check the caller and write
+`audit_log` in the same transaction (docs/audit-log-pattern.md):
+
+- `request_client_ownership(organisation_id, reason)` — CAM only (`app.is_cam()` +
+  `app.is_active_user()`; an admin is refused, since they hold `reassign_ownership`
+  and would be requesting from themselves). Requires a reason, refuses an unowned
+  client ("claim it instead"), a client the caller already owns, and a second pending
+  request from the same CAM for the same client. Inserts `pending` and audits
+  `ownership_requested`. **It moves no ownership and grants no access** — the
+  requester's reach over the client is exactly what it was before they asked.
+- `decide_ownership_request(request_id, approve, note)` — admin only. Refuses an
+  already-decided request. On approval it delegates the move to `reassign_ownership`
+  (§3.11) rather than touching `organisations.owner_id`, so the handover is audited as
+  a normal `ownership_assigned` transition and the outgoing owner's open actions travel
+  with the client; `owner_id` still has exactly the two write paths §3.2 lists. Audits
+  `ownership_request_approved` / `ownership_request_rejected`.
+
+**What this does not do:** nothing here relaxes `claim_organisation` (a CAM claiming an
+owned client still raises 55000) or re-opens the direct `owner_id` write closed by
+`20260810110000`. A pending request is inert; the admin's decision is the only thing
+with an effect.
+
 ---
+
+### 3.18 Field sources — service-role write, admin read
+
+Backs F044 Field-Level Source Tracking (#45),
+`supabase/migrations/20260820100000_create_field_sources.sql`. New table — like
+`FIELD_DISCREPANCIES` (§3.16), not previously reserved in the Data Model. Real
+per-field provenance for `ORGANISATIONS`, closing the gap §3.16 and open-gap note
+10 both flagged: `FIELD_DISCREPANCIES.existing_source` only ever approximated
+which source "owns" a field's current value.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `FIELD_SOURCES` | all active roles (widened 20260923114000, was admin only) | — (`service_role` only) | — (`service_role` only, via same RPC) | — (no grant) |
+
+SELECT was admin-only until 20260923114000 — same reasoning as §3.16 originally
+— which source produced a field's value is not CAM-visible data. The widening
+above reverses that call with sign-off; §3.16 (FIELD_DISCREPANCIES) keeps its
+admin-only read — conflict review is still an admin queue. There is one write path, `record_field_source`
+(`p_organisation_id, p_field_name, p_value, p_source, p_raw_source_record_id`):
+flips any existing `is_current = true` row for that `organisation_id +
+field_name` to `false`, then inserts the new one as current. Granted to
+`service_role` only, not `authenticated` — mirrors `record_client_criteria_outcome`
+(§3.5) and `LOGIN_ATTEMPT`'s RPCs (§3.10): every caller either holds the
+service-role key server-side (`write-organisations.ts`, the ingestion pipeline) or
+is a nested call from inside `record_field_discrepancy` /
+`resolve_field_discrepancy` (§3.16), which already self-check `app.is_admin()`
+before reaching it.
+
+Only two writers exist as of this migration, both wired in: the ingestion
+pipeline on initial import, and F048's two RPCs when a conflict resolution
+overwrites a field. No CAM/admin hand-edit path exists yet (checked before
+writing this migration — no Server Action, route, or RPC updates `organisations`
+outside those two), so there is nothing else to wire up today; a future hand-edit
+feature is responsible for calling `record_field_source` itself.
+
+`get_field_sources(organisation_id)` — the read path, `authenticated`, self-checks
+`app.is_active_user()` and returns every row for the organisation, current and
+superseded, newest-first per field, with `recorded_by` resolved to a name —
+satisfies AC1 (current source per field) and AC2 (conflicting values and their
+sources both visible) from a single query.
+
+**20260923114000 — widened, and the admin-only read call reversed.** Three
+write paths still recorded no provenance after F044 landed: admin direct edits,
+approved edit suggestions, and approved manual entries (the last left
+hand-created records with an empty provenance story — the gap the provenance
+audit cron watches for). The migration closes all three and changes this
+table's visibility, signed off 2 Sep 2026:
+
+- **SELECT is now every active signed-in role** (`field_sources_select`,
+  `using (app.is_active_user())`). This deliberately reverses the original
+  "which source said what is not CAM-visible data" call: the point of the
+  feature is that a CAM sees which register supplied a value and who corrected
+  it. No INSERT/UPDATE/DELETE grant exists — writes remain RPC-only.
+- **`organisation_type` joined the tracked set** (check constraint,
+  `record_field_source`'s validation, and the UI's label map all widened
+  together). Mission and pipeline stage are surfaced on the profile but stay
+  out of this table: mission's history is ENRICHMENT_RESULTS itself
+  (append-only), stage's is audit_log's `status_changed` rows.
+- **New column `recorded_by`** (null-able FK to USERS): the person behind a
+  manual attribution. Null = the pipeline wrote it — honest, not unknown.
+- **New write path `apply_admin_field_edits(organisation_id, changes, reason)`**
+  — admin direct edits moved off their direct UPDATE. SECURITY DEFINER,
+  self-checks `app.is_admin()`, applies the columns, records provenance
+  (`source='manual'`, `recorded_by`=the admin) for tracked fields, and writes
+  one audit_log row (`fields_direct_edited`) in the same transaction. Grantee:
+  authenticated; the body decides.
+- **`decide_edit_suggestion` (fix-forward rewrite)** — approval additionally
+  records provenance (`source='manual'`, `recorded_by`=the deciding admin), so
+  an approved correction stops presenting as the old register's value.
+- **`approve_manual_entry` (fix-forward rewrite)** — on create_new, every
+  populated tracked field is attributed (`source='manual'`,
+  `recorded_by`=the submitting CAM, who typed the values). link_existing
+  writes none: the linked record keeps whichever source produced its fields.
+
+Data Model tab 03 governs this table's columns; the tab had not been updated
+with `organisation_type`/`recorded_by` at the time of writing — raised for the
+spreadsheet rather than edited here.
+
+**MVP field scope**: the same six fields as `FIELD_DISCREPANCIES` (`legal_name`,
+`website`, `contact_email`, `address_line_1`, `city`, `postcode`) — kept identical
+on purpose so a field tracked for conflicts but not for provenance (or the
+reverse) can't silently diverge between the two tables. F044's own issue
+illustrates AC1 with `"mission" from CharityBase`, but `mission_statement` lives
+on `ENRICHMENT_RESULTS` (LLM-derived), not an `ORGANISATIONS` column any source
+mapper writes — out of scope here, flagged rather than silently unmet. See the
+migration header for the full reasoning.
+
+### 3.19 Notifications — own-row only, RPC-only writes
+
+Backs F173 In-App Notifications (#169),
+`supabase/migrations/20260822130000_create_notifications.sql` +
+`20260822090100_create_notification_rpcs.sql`. New table — not previously
+reserved in the Data Model. General per-user notification feed: any future
+producer (replies, reminders, team activity) inserts rows via RPC instead of
+gaining table-level INSERT.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `NOTIFICATIONS` | own rows (`recipient_user_id = auth.uid()`) | — (RPC only) | own rows, `read_at` column only (via grant + trigger guard) | — (no grant; cron prune only) |
+
+SELECT is strictly own-row — wrong-recipient prevention is the RLS policy
+itself, and a non-recipient's query returns 0 rows (§4), never an error. UPDATE
+is doubly constrained: the *grant* covers only the `read_at` column and the
+policy only matches own rows, so no client can ever edit title/body/recipient;
+a `BEFORE UPDATE` trigger additionally pins every other column and makes the
+transition one-way (`null → timestamp`, never back).
+
+There are no direct INSERT/DELETE grants for anyone. All four write paths are
+SECURITY DEFINER RPCs that self-check inside their bodies:
+
+- `create_notification(...)` — `authenticated` + `service_role`; caller must be
+  an active user (or hold the service-role key server-side). Silently skips
+  unknown/deactivated recipients, self-notifications, and sub-minute duplicate
+  retries.
+- `mark_notification_read(id)` / `mark_all_notifications_read()` —
+  `authenticated`, self-check `app.is_active_user()` + own-row scoping inside.
+  A non-recipient's call returns `false`/`0`, deliberately indistinguishable
+  from "already read" so no existence oracle leaks other users' notification ids.
+- `prune_notifications()` — granted to **no** interactive role; runs only as
+  its daily pg_cron job (`notifications_prune_daily`, postgres). Retention:
+  read > 90 days, unread > 1 year. Safe because the durable record of every
+  underlying event stays in AUDIT_LOG forever.
+
+No audit_log entries are written by any of these (§1 of audit-log-pattern:
+none change ownership/status/role/approval state of a business entity — same
+documented reasoning as `feedback`). The table is in the `supabase_realtime`
+publication for live bell-panel delivery; publication membership grants nothing
+on its own — delivery is still filtered by the SELECT policy per subscriber
+(same mechanism as §3.8 / F075).
+
+**Producer: ownership change**
+(`20261004090000_notify_former_owner_on_reassignment.sql`). An `AFTER UPDATE OF
+owner_id` trigger on `organisations`, `notify_on_owner_change`, calls
+`create_notification` for the *former* owner with type
+`client_ownership_changed`, linking to `/clients/<id>`. It sits on the table
+rather than inside `reassign_ownership` so every audited door that moves
+`owner_id` (assign form, bulk assign, offboarding, request approval, the inbox
+banner's admin take-over) produces it. Claims of unowned clients tell nobody;
+`create_notification` skips deactivated former owners (offboarding) and
+self-moves. EXECUTE is revoked from every interactive role.
+
+**Producer: reply notifications** (F133 #128/#510 + F174 #170). The producer
+is F133's `notify_on_reply_event` AFTER INSERT trigger on `reply_events`
+(`supabase/migrations/20260912170300_notify_on_gmail_reply.sql`) — it runs in
+the same transaction as `capture_gmail_reply` (F131) inserting the reply row,
+notifying the client's *current* `owner_id` (looked up fresh, not the owner at
+whenever Gmail sync queued the job), or every active admin when the client is
+unowned / its owner is inactive. `notification_type` is
+`'client_reply_received'` (owner) / `'unowned_client_reply_received'` (admin
+fallback); `link_path` is the client's communication timeline — `/clients/<id>`
+with a `#timeline-heading` anchor, not a generic notifications list (F174 AC2).
+F174 deliberately adds no second producer — that would double-notify the same
+reply. This table carries no priority column — AC3's "high-priority by default"
+is decided app-side, by `notificationPriority()` in `src/lib/notifications.ts`
+mapping both F133 reply types to `'high'`, not by a new column every producer
+would otherwise have to fill in.
+
+**Producer: reminder notifications** (F175, #171,
+`src/lib/outreach/reminder-sweep.ts` +
+`supabase/migrations/20260916000000_schedule_reminder_notifications_cron.sql`).
+A daily pg_cron job (`reminder_notifications_daily`, same shape as F183's
+`stall_detection_daily`) recomputes F160's team-wide follow-up recommendations
+and calls `create_notification` (service_role — an already-granted caller,
+no new grant needed) for each client's owner when one becomes due.
+`notification_type = 'follow_up_due'`; `link_path` is the client profile
+(AC2). The audit_log row this sweep writes per notification
+(`reminder_notification_sent`, `target_table: organisations`) is *not* a
+business-entity change either — it exists purely so the next sweep can tell
+"already notified for this exact staleness episode" from "the CAM has since
+acted and this is a new one" (AC3), the same self-referential comparison
+`stall_swept` already uses to decide whether the stalled set changed.
+
+---
+
+**Producer: team activity digests** (F176, #172,
+`src/lib/team-activity-sweep.ts` +
+`supabase/migrations/20260916010000_schedule_team_activity_digest_cron.sql`).
+An hourly pg_cron job (`team_activity_digest_hourly`, same shape as F183's
+`stall_detection_daily`) reads new `AUDIT_LOG` rows since its own last run —
+the same action allowlist `get_recent_team_activity` already exposes to the
+dashboard (§3.7-adjacent; F029) — and calls `create_notification`
+(service_role — an already-granted caller, no new grant needed) **once per
+active user**, summarising every teammate's action since their last digest,
+never one notification per event (AC2, this ticket's own answer to its
+"Noise control rules" blocker: batched, not a per-type on/off switch, since
+F178 preferences are not a dependency here). `notification_type =
+'team_activity_digest'`; `link_path` is `/dashboard`, where the same events
+render individually in the existing Team Activity feed. The sweep's own
+watermark (`team_activity_digest_swept`, `target_table` null) is not a
+business-entity change either — same reasoning as F175's
+`reminder_notification_sent` marker.
+
+**Email delivery: replies only** (F179, #175,
+`supabase/migrations/20260920090000_add_email_notification_types.sql` +
+`src/lib/gmail/reply-sync.ts` + `src/lib/notification-email.ts`). Postgres
+cannot send email, so the email half is entirely application-side — and it
+deliberately adds **no** second notification producer. F174's trigger above is
+the one in-app producer; F179 emails *in addition to* that row (AC1), never a
+second row. After `capture_gmail_reply` returns the new `reply_events` id,
+`syncGmailReplies` looks up the client's *current* active owner (the same
+lookup F174's trigger does) and consults that owner's `email_notification_types`
+(own-row column, §3.1). Only `'client_reply_received'` — F174's owner token —
+is emailable in this ticket, and it is the column default (AC3), so a CAM who
+never opens the settings page still gets reply emails unless they explicitly
+uncheck it there. Unowned/inactive-owner replies fall to the admin fallback
+notifications (`'unowned_client_reply_received'`), which stay in-app only.
+
+**Deliberately not `sendBranchOutreach`.** That function's own header says it
+is "the only transport entry point for client outreach (F124)" and sits
+behind the approval/scheduling pipeline (`OUTREACH_MESSAGES`, human-reviewed
+before send). A platform notification email to a CAM is not outreach to a
+client and must never be reachable through — or mistakable for — that path;
+`src/lib/notification-email.ts` calls the lower `sendGmailMessage` transport
+directly (F241, with its own `180Connect <...>` display name; `sendGmailMessage`
+still enforces its F223 sender-match defence-in-depth against the configured
+branch mailbox) and touches no outreach table at all. This is also this
+ticket's own testing note ("verify no outreach email can be sent without human
+approval"): satisfied by construction, since the notification-email path has no
+code route into `OUTREACH_MESSAGES` or the approval RPCs to begin with.
+
+---
+
+### 3.20 Saved filter views — own rows only
+
+Backs F066 (`supabase/migrations/20260821090000_create_saved_views.sql`). Same shape as
+§3.12 and §3.13: the user's own view state, not ownership/status/role/approval state, so
+it is governed by RLS alone — no SECURITY DEFINER RPC, no `audit_log` row
+(`docs/audit-log-pattern.md` §1).
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `SAVED_VIEWS` | own rows (`user_id = auth.uid()`) | own rows | own rows | own rows |
+
+A saved view holds no client data: it is a set of `/clients` search params
+(`q`, `city`, `country`, `status`, `type`, `owner` — arrays for the multi-selects)
+stored as `jsonb` under a name, and selecting
+one rebuilds a query string. Nothing in it is readable to anyone but its author, and
+nothing in it grants access to a client the author's role does not already allow — the
+params are re-applied to a list the RLS on `ORGANISATIONS` (§3.2) has already filtered,
+so a stale `owner=<someone>` view shows exactly what that CAM could see by typing the
+filter by hand.
+
+DELETE **is** granted here, unlike §3.13. AC3 asks for deletion by name, and this is a
+many-row table where "no longer need this one" has no UPDATE-to-empty equivalent. UPDATE
+is granted with no F066 write path behind it yet (saving is an INSERT; the AC has no
+rename), so a later rename/overwrite story needs no migration; both policies confine the
+row to the caller in `using` **and** `with check`, so a row cannot be moved onto another
+`user_id`.
+
+No admin read, delete included: nothing in #68 needs one, and an admin who could delete
+someone's shortcuts would hold a purely destructive power over another user's workspace
+with no story asking for it. F187 (admin views a CAM's settings, P3) can add a read with
+a stated reason when it is actually built — same call already made for
+`USER_ONBOARDING_STEPS` (§3.12) and `OUTREACH_PREFERENCES` (§3.13).
+
+All four policies AND in `app.is_active_user()`. None uses `app.can_write()` — that
+helper gates *client data* and excludes viewers (F258); a bookmark over a list the viewer
+can already read is harmless for any active role to keep.
+
+**What RLS does not check here**: the *keys* inside `filters`. Postgres constrains the
+column to a JSON object under 4 KB (`saved_views_filters_is_object`) and nothing more.
+The key whitelist lives in `src/app/(app)/clients/saved-view-filters.ts` and is applied on both
+write and read, so an unexpected key is ignored rather than rendered — a row that somehow
+carries one produces a view missing that filter, never a filter the CAM cannot see. This
+is the §2 pattern ("what RLS cannot do"), not an oversight.
+
+---
+
+
+### 3.21 Attachments — shared read, RPC-recorded write, private bucket
+
+Backs F080 View Client Attachments (#83), F081 Upload Client Attachment
+(#84), and F219 Link Attachment to Timeline (#214),
+`supabase/migrations/20260823090000_create_attachments.sql` (schema and
+read half) plus `20260824000000_add_attachment_upload.sql` (upload half — split
+out because the create migration had already run on staging/production by the
+time F081 landed, and an applied migration file must never be edited in
+place). Also the schema-level resolution of F217/F218, neither of which is
+defined anywhere in the PRD's own feature table or this codebase — see the
+migration header for the full reasoning, the "storage location" answer
+(Supabase Storage, PRD §7's architecture table), and the explicit caveat that
+the size/type limits below are a provisional default, not the sign-off PRD
+§14 names as still owed.
+
+F219 adds `timeline_context_type` and `timeline_context_id` in
+`20260921090000_link_attachments_to_timeline.sql`. Existing and new manual
+uploads default to a client-level `File shared` event. A CAM/admin can use
+`link_attachment_to_timeline(attachment_id, organisation_id, context_type,
+context_id)` to associate the file with a note, sent email, reply, or supported
+audit event. The `SECURITY DEFINER` RPC re-checks `app.can_write()`, verifies
+the attachment belongs to the supplied client, and verifies the target event
+belongs to that same client. No role receives direct UPDATE permission.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `ATTACHMENTS` | all active roles | — (RPC only) | — (no grant) | — (no grant) |
+
+SELECT is shared, same shape as `NOTES` (§3.3) — a client's attachment list is
+relationship context every active role sees, not something narrowed to an
+owner or an admin.
+
+**Upload is two steps, not one RPC call**: a Postgres function cannot receive
+a multipart file body. The browser uploads the bytes directly to Storage
+(client-side, so the loading state reflects the real transfer rather than a
+proxy through this app's server), then `record_attachment(organisation_id,
+filename, storage_path, content_type, size_bytes)` writes the metadata row —
+`SECURITY DEFINER`, self-checks `app.can_write()`, confirms the organisation
+exists, confirms `storage_path` is actually under that organisation's prefix
+(so a caller cannot attribute someone else's upload to the wrong client), and
+confirms the Storage object exists before recording it. No `audit_log` entry:
+attaching a file changes no ownership/status/role/approval state
+(`docs/audit-log-pattern.md` §1), same reasoning as `NOTES`.
+
+**PDF text extraction (F220):** extraction metadata and `extracted_text` remain
+on the same RLS-protected `ATTACHMENTS` row, so every active role that can read
+the file can read its searchable text. Authenticated users receive no direct
+UPDATE grant. `record_attachment_text_extraction(...)` is the sole write path;
+it is `SECURITY DEFINER`, checks `app.can_write()`, accepts only the documented
+terminal states, and refuses a successful state without non-empty text. This
+write changes no ownership, pipeline status, role, or approval state, so it is
+outside the audit-log trigger list in `docs/audit-log-pattern.md` §1.
+
+**Storage**: a private bucket, `client-attachments` (never public — nothing
+about a client's files is meant to be reachable by an unauthenticated guess at
+a path), with a real, Storage-enforced `file_size_limit` (25 MB) and
+`allowed_mime_types` allowlist (office documents + common images) — this is
+what actually stops an over-limit or wrong-type upload, not application code.
+Two policies on `storage.objects`: SELECT mirrors `attachments_select_active`
+(any active user, needed for `createSignedUrl` to succeed on open/download);
+INSERT requires `app.can_write()`. No UPDATE/DELETE policy for either —
+replacing an uploaded file stays `service_role`-only.
+
+**Delete** removes the row and the bytes together. `delete_attachment(
+attachment_id, organisation_id)` is `SECURITY DEFINER`, self-checks
+`app.can_write()`, verifies the row belongs to the organisation in the URL (a
+mismatched pair is "not found", never an existence oracle), deletes the row —
+draft links cascade with it — and returns the `storage_path`. The colocated
+server action then removes that object through the service-role Storage API,
+since Postgres cannot call Storage and a SQL delete of the `storage.objects`
+row would orphan the bytes on disk. No direct DELETE grant on either side, and
+no `audit_log` entry: deleting a file changes no ownership/status/role/
+approval state (`docs/audit-log-pattern.md` §1), same reasoning as
+`record_attachment` and `NOTES`.
+
+**Known limitation, not a gap**: a failure between the Storage upload
+succeeding and `record_attachment` running leaves an orphaned object with no
+metadata row — it simply never appears in anyone's list. Neither ticket's AC
+asks for a sweep to reclaim it, so none exists.
+
+---|
+| `ATTACHMENTS` | all active roles | — (no grant; F081) | — (no grant) | — (no grant) |
+
+SELECT is shared, same shape as `NOTES` (§3.3) and `CLIENT_EDIT_SUGGESTIONS`
+(§3.2) — a client's attachment list is relationship context every active role
+sees, not something narrowed to an owner or an admin.
+
+**Deliberately no write path.** F080 is a view; F081 (Upload Client Attachment,
+P3, not yet built) owns deciding how a row and its bytes get created, including
+the size/type/security limits PRD §7.11/§11.3 asks for. Until F081 ships, this
+table has no INSERT grant and no RPC that could produce a row, so every client's
+attachment list is correctly empty rather than a placeholder.
+
+**Storage**: a private bucket, `client-attachments` (not public — nothing about a
+client's files is meant to be reachable by an unauthenticated guess at a path).
+`storage.objects` carries one SELECT policy, `bucket_id = 'client-attachments'
+and app.is_active_user()`, mirroring `attachments_select_active` — this is what
+lets an active user's `createSignedUrl` call succeed (AC2's open/download), since
+Storage checks RLS on `storage.objects` the same way a table read does. No
+INSERT/UPDATE/DELETE policy there either: object writes stay `service_role`-only
+until F081 adds one.
+### 3.22 Restricted edit fields — admin-configured enforcement, CAM read
+
+Backs F020 Restricted Editing (#23),
+`supabase/migrations/20260822160000_create_restricted_edit_fields.sql`. New
+table — not previously reserved in the Data Model. Holds the set of
+`ORGANISATIONS` columns a CAM may not write directly; both enforcement points
+read it live (the column-guard trigger of §3.2 and
+`suggest_organisation_edit`), so a change here re-scopes restricted editing
+with no migration and no deploy.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `RESTRICTED_EDIT_FIELDS` | admins: all rows · CAMs: active rows only · viewers: all rows, read-only (`restricted_edit_fields_select_viewer`, 20261004180000) | — (RPC only) | — (RPC only) | — (never; soft-disable via `active = false`) |
+
+No direct INSERT/UPDATE/DELETE grant to anyone. Both writes are SECURITY
+DEFINER RPCs that self-check `app.is_admin()` and audit in-transaction
+(`restricted_field_added` / `restricted_field_removed`,
+docs/audit-log-pattern.md §1 — changing this table changes who can write
+client records, which is approval-state territory):
+
+- `add_restricted_edit_field(field_name, reason)` — validates the column is a
+  real `text` column of `organisations` outside the protected system set;
+  re-adding a retired row reactivates it instead of duplicating.
+- `deactivate_restricted_edit_field(field_name)` — soft-disable only. Rows are
+  never deleted: `EDIT_SUGGESTIONS.field_name` is a foreign key to this table,
+  and the record of what was restricted when is part of the trail.
+
+The trigger depends on this table's CAM SELECT policy exposing **active**
+rows — it reads the config through RLS as the calling user. If that policy
+ever narrows below active-rows-for-CAMs, direct-write enforcement silently
+weakens to whatever remains visible (pgTAP suite_restricted_editing guards
+the current contract).
+
+
+---
+
+### 3.17 Saved filter views — own rows only
+
+Backs F066 (`supabase/migrations/20260817090000_create_saved_views.sql`). Same shape as
+§3.12 and §3.13: the user's own view state, not ownership/status/role/approval state, so
+it is governed by RLS alone — no SECURITY DEFINER RPC, no `audit_log` row
+(`docs/audit-log-pattern.md` §1).
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `SAVED_VIEWS` | own rows (`user_id = auth.uid()`) | own rows | own rows | own rows |
+
+A saved view holds no client data: it is a set of `/clients` search params
+(`q`, `city`, `status`, `source`, `owner`) stored as `jsonb` under a name, and selecting
+one rebuilds a query string. Nothing in it is readable to anyone but its author, and
+nothing in it grants access to a client the author's role does not already allow — the
+params are re-applied to a list the RLS on `ORGANISATIONS` (§3.2) has already filtered,
+so a stale `owner=<someone>` view shows exactly what that CAM could see by typing the
+filter by hand.
+
+DELETE **is** granted here, unlike §3.13. AC3 asks for deletion by name, and this is a
+many-row table where "no longer need this one" has no UPDATE-to-empty equivalent. UPDATE
+is granted with no F066 write path behind it yet (saving is an INSERT; the AC has no
+rename), so a later rename/overwrite story needs no migration; both policies confine the
+row to the caller in `using` **and** `with check`, so a row cannot be moved onto another
+`user_id`.
+
+No admin read, delete included: nothing in #68 needs one, and an admin who could delete
+someone's shortcuts would hold a purely destructive power over another user's workspace
+with no story asking for it. F187 (admin views a CAM's settings, P3) can add a read with
+a stated reason when it is actually built — same call already made for
+`USER_ONBOARDING_STEPS` (§3.12) and `OUTREACH_PREFERENCES` (§3.13).
+
+All four policies AND in `app.is_active_user()`. None uses `app.can_write()` — that
+helper gates *client data* and excludes viewers (F258); a bookmark over a list the viewer
+can already read is harmless for any active role to keep.
+
+**What RLS does not check here**: the *keys* inside `filters`. Postgres constrains the
+column to a JSON object under 4 KB (`saved_views_filters_is_object`) and nothing more.
+The key whitelist lives in `src/app/(app)/clients/saved-view-filters.ts` and is applied on both
+write and read, so an unexpected key is ignored rather than rendered — a row that somehow
+carries one produces a view missing that filter, never a filter the CAM cannot see. This
+is the §2 pattern ("what RLS cannot do"), not an oversight.
+
+---
+
+### 3.23 Tags and tag assignments — shared read, CAM/admin write (app: `tags:manage`)
+
+Backs the Tags cluster (F188 create, F189 edit/rename, F191 assign,
+F192 remove): `supabase/migrations/20260821120000_create_tags_table.sql`,
+`20260822130200_create_org_tags_table.sql`,
+`20260822130100_grant_tags_update_admin_only.sql`,
+`20260826110000_grant_org_tags_delete.sql`. Tags are shared platform-wide
+labels, not personal to their creator (F188 AC2) — creation is attributed via
+`created_by_user_id` / `added_by_user_id` but never restricts use.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `TAGS` | any active user | admins + CAMs (`app.can_write()`, attribution required) · **colour only:** via `set_tag_colour` RPC for admins + CAMs | admin only (`app.is_admin()`) — colour is not writable by UPDATE, even for admins | — (never; F190 owns deletion) |
+| `ORG_TAGS` | any active user | admins + CAMs (`app.can_write()`, attribution required) | — | admins + CAMs (`app.can_write()`), any assignment |
+
+At the application layer every tag mutation gates on the dedicated
+**`tags:manage`** permission (`src/lib/auth/permissions.ts`) — held by CAMs
+and admins, not viewers. It deliberately replaces an earlier borrow of
+`client:edit`: the shared taxonomy is a curation concern, not a client-data
+write, and granting client-edit rights should never by itself confer the
+right to reshape labels every CAM shares. The DB population (`can_write()` =
+admin or CAM) matches the app-level population exactly, so neither layer can
+drift ahead of the other without a migration or a permissions diff noticing.
+
+Renaming a tag is admin-only at both layers (F189's own "could be admin-only"
+note resolved conservatively): RLS allows only `app.is_admin()`, and the app
+checks `role === "admin"` explicitly so a CAM gets a clear message rather
+than a silent RLS refusal. Assign/remove stay CAM-level — organising a client
+with existing labels is ordinary client work; reshaping the label set is not.
+
+**Colour is the one deliberate split** (F194): any CAM or admin may set or
+clear a tag's colour, but only through the `set_tag_colour` SECURITY DEFINER
+RPC (`20260829000000_tag_colour_check_and_set_colour_rpc.sql`), never a
+direct UPDATE — which stays admin-only even for admins, so the constraint and
+the RPC's format check are the only write paths to that column. The column
+detour exists because Postgres RLS sees rows, not columns: widening the
+UPDATE policy to `can_write()` would also have opened renames to CAMs at the
+DB layer. The RPC re-checks `is_active_user()` + `can_write()` in its body,
+raises `22023` for non-hex input before touching the table, and writes only
+`colour`. The `TAGS.colour` CHECK (`tags_colour_hex_format`) pins the format
+invariant (`#rrggbb` or null); palette *membership* is an application rule in
+`src/lib/tags/tag-colours.ts`, so the curated palette can evolve without a
+migration. No audit row: tags are not ownership, status, role or approval
+state (`docs/audit-log-pattern.md` §1). The fixed placeholder user
+(`20260821120100_create_deleted_user_placeholder_for_tags.sql`) exists so
+`created_by_user_id` can stay NOT NULL-able after a creator is hard-deleted;
+it is excluded from `/admin/users`.
+
+**Deletion is RPC-only, admin-only** (F190): the TAGS row above shows no
+DELETE path because there is deliberately none at the table level — no DELETE
+grant or policy on `TAGS` exists, so direct deletes fail on the missing GRANT
+regardless of role. The only deletion path is the `delete_unused_tag(uuid)`
+SECURITY DEFINER RPC (`20260830000000_create_delete_unused_tag_rpc.sql`),
+which re-checks `is_active_user()` + `is_admin()` in its body (DEFINER bypasses
+RLS), refuses tags that still have `ORG_TAGS` assignments — reporting their
+count rather than silently cascading them away — and takes an EXCLUSIVE lock
+on `ORG_TAGS` across the check-and-delete transaction, closing the race where
+an assignment committed between a separate count and delete would vanish to
+the `ON DELETE CASCADE`. No audit row: same §1 reasoning as colour.
+
+---
+
+### 3.24 Outreach daily send limit — RPC-only write, shared read
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `OUTREACH_DAILY_SEND_LIMIT` | any active user | — (seeded once by migration) | — (`SECURITY DEFINER` RPC only) | **none** |
+
+F128's branch-wide daily cap on outreach sends, distinct from §3.10a's per-user AI
+throttle and from F227's per-CAM `EMAIL_SEND_RATE_LIMIT` env var: every CAM sends
+from the same one branch mailbox, so a per-CAM limit alone never bounds the
+mailbox's total volume. A singleton row (`id` pinned `true`), the same shape as
+`DATA_HANDLING_RULE_VERSIONS`.
+
+SELECT is open to any active user, not admin-only — unlike §3.10a — because the
+send path itself (`sendReviewedEmail`, running as the sending CAM, and the
+scheduled worker, running as `service_role`) must read the current limit on every
+send to enforce it. The value carries no sensitive information; hiding it from a
+CAM would only mean a less informative block message.
+
+The only write path is `set_outreach_daily_send_limit`
+(`20260913100000_create_outreach_daily_send_limit.sql`), which re-checks
+`app.is_admin()` in its body (`SECURITY DEFINER` bypasses RLS) and writes the
+`audit_log` row (`outreach_daily_send_limit_changed`) in the same transaction —
+docs/audit-log-pattern.md. No-op writes (same value) are skipped, same as
+`set_data_handling_rule_active`.
+
+---
+
+### 3.25 Inbox thread state — own rows only, nothing shared
+
+Backs the mailbox's three per-viewer controls — star, read/unread, trash —
+`supabase/migrations/20260924090000_create_inbox_thread_state.sql` (+ the
+paired daily prune, `20260924090100`). New table; add
+**INBOX_THREAD_STATE** to the Data Model.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `INBOX_THREAD_STATE` | own rows (`user_id = auth.uid()`) | own rows | own rows | own rows |
+
+The one table in this register where **admin has no branch at all**, on any
+verb. Every other own-row table here (`§3.19` notifications, `§3.20` saved
+views) grants an admin read for support or oversight; there is nothing to
+oversee in which threads a CAM has starred in their own mailbox, and reading
+it would be surveillance of how someone works rather than of what they did.
+The record of what actually happened — every email, every reply, every status
+change — is in `OUTREACH_MESSAGES`, `REPLY_EVENTS` and `AUDIT_LOG`, all of
+which an admin can already read.
+
+Direct grants rather than RPCs, which is the exception to `§3`'s usual shape
+and is deliberate. The RPC rule (`MIGRATIONS.md` step 4) exists for writes
+that must be conditional, single-column, or reason-carrying. None applies: a
+row is entirely its owner's, every column on it is theirs to set, and there is
+no state transition anyone else can observe. A `SECURITY DEFINER` wrapper here
+would add a function to maintain and nothing to enforce.
+
+**No audit log entries** (`§1` of `docs/audit-log-pattern.md`): none of these
+writes changes ownership, status, role or approval state of a business entity.
+Same documented reasoning as `feedback` and `notifications`.
+
+**Two database-enforced bounds**, because the database ceiling is 500 MB and
+this table is written by ordinary UI clicks:
+
+- `enforce_inbox_trash_cap()`, a `BEFORE INSERT OR UPDATE` trigger — at most
+  **200** trashed threads per user, oldest untrashed on the way in. It also
+  derives `trashed_at` rather than accepting it from the client, so nobody can
+  backdate a row past the cap's ordering or forward-date one out of the purge
+  below.
+- `prune_inbox_thread_state()`, granted to **no** interactive role and run only
+  by its daily job (`inbox_thread_state_prune_daily`, 03:40 UTC) — deletes
+  trash older than **30 days** (matching Gmail's own window) and any row that
+  has drifted back to carrying no state at all (unstarred, no read override,
+  not trashed), which would otherwise cost 200 bytes to say the same thing as
+  having no row.
+
+A row is ~200 bytes with both indexes, so trash is bounded at ~40 KB per user.
+
+`read_state` is a three-valued enum (`'read'`, `'unread'`, NULL) rather than a
+boolean. Both directions are overrides of a value the server derives from
+whether the newest event is an unanswered reply: a thread the server calls
+unread that the CAM has read must stay read, and one they marked unread on
+purpose must not be flipped back on the next load. NULL means "no override".
+
+### 3.26 Charity register coverage — shared read, service-only refresh
+
+Backs the four coverage cards on the Charity Commission screen
+(`20261018130000_create_charity_register_coverage.sql`). The table always has
+exactly four rows: one persisted reading for filed years, register profile,
+geographic reach, and company number. This replaces four whole-client-list scans
+on every page view with one four-row read.
+
+| Table | SELECT | INSERT | UPDATE | DELETE |
+|---|---|---|---|---|
+| `CHARITY_REGISTER_COVERAGE` | any active user | **none** | **none** | **none** |
+
+CAMs, admins and viewers all read the complete figures because all three roles
+can read the Charity Commission screen. A deactivated user reads no rows. No
+interactive role writes derived counts directly: the three refresh RPCs are
+`SECURITY INVOKER`, granted only to `service_role`, and use a timestamp lease so
+two page views cannot overwrite one another's work.
+
+Relevant changes to `ORGANISATIONS`, `FINANCIAL_PERIODS`, and
+`ORGANISATION_IDENTIFIERS` mark the affected reading stale through statement-level
+triggers. The page still serves the last calculated figures immediately and asks
+the after-response worker to recalculate them. If a write races that worker, the
+worker leaves the row stale and the next visit recalculates it again; it never
+declares a reading fresh across a change it did not include.
+
+**No audit log entries** (`§1` of `docs/audit-log-pattern.md`): these rows are
+derived operational state. Refreshing or invalidating them changes no ownership,
+status, role, approval state, or user-authored business record.
+
 
 ## 4. Denial behaviour and feedback
 
@@ -761,7 +1806,7 @@ RLS, so a suite written against it proves nothing.
 | 10 | log entry created | Test 3 produces exactly one `AUDIT_LOG` row |
 | 11 | bypass attempt | Direct PostgREST call with `anon` key against every table → 0 rows / `42501` |
 | 12 | coverage gate | No table in `public` has `rowsecurity = false` or zero policies |
-| 13 | concurrency | Two admins race each other — one calls `set_user_role` to demote the other while the second removes them via `set_user_active` or `deactivate_user` — and the platform is left with exactly one active admin, never zero |
+| 13 | concurrency | Two admins race each other — one calls `set_user_role` to demote the other while the second removes them via `set_user_active` / `suspend_user` or `delete_user` — and the platform is left with exactly one active admin, never zero |
 
 Test 11 is the acceptance criterion "even if the application-layer permission check
 were bypassed". It must be run against the API, not through the app's own client.
@@ -785,13 +1830,15 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
 1. **`AUDIT_LOG` is not in the Data Model.** Section 3.8 assumes it. The model has
    `ERROR_LOG` (application errors, F226), which is a different thing. PRD §4.2
    requires role changes and deactivations to be audited, and F221 depends on it.
-2. **No suggestion table.** §4.3 grants CAMs "suggest organisation field correction"
-   and F077 is a P1 story, but no table holds a suggestion. Without one the CAM path
-   to changing canonical data does not exist, and 3.2 has no row for it.
-3. ~~**No suppression table.**~~ **RESOLVED — F251 (#82)**, 5 Aug 2026. §3.14 has
-   the table and RPCs. "Lift suppression: Admin, reason required" is now split into
-   *request* (CAM or admin, reason required) and *decide* (admin only) — see §3.14
-   for why. Lifting an active suppression is F185 (#181), not built yet.
+2. ~~**No suggestion table.**~~ **RESOLVED — F077 (#79)**. `EDIT_SUGGESTIONS` and
+   `suggest_organisation_edit` (20260822140000) hold the suggestion; §3.2's
+   "sanctioned route" paragraph documents the flow. The decide side is F078/F079.
+   The remaining piece — blocking the direct owned-row write on restricted fields —
+   is done: **RESOLVED — F020 (#23)**, the column-guard trigger of
+   20260822160100 plus the configurable `RESTRICTED_EDIT_FIELDS` allowlist.
+3. ~~**No suppression table.**~~ **RESOLVED — F251 (#82) & F185 (#181)**. §3.14 has
+   the table and RPCs (`request_suppression`, `decide_suppression_request`, `lift_suppression`).
+   "Lift suppression: Admin, mandatory reason required" is implemented by F185 (`lift_suppression`).
 4. ~~**Viewer role has no story.**~~ **RESOLVED — F258 (#268) owns it**, raised
    24 Jul 2026. The story also closed a live escalation this question had been
    hiding: `organisations_update_owner_or_admin` tested ownership and admin but
@@ -835,11 +1882,12 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    [`scripts/verify-last-admin-guard.mts`](../scripts/verify-last-admin-guard.mts),
    which opens genuinely concurrent connections — see §5 row 13.
 
-   **Three RPCs, not two.** `role` and `is_active` are writable only through
-   `set_user_role`, `set_user_active` and — since F014 — `deactivate_user`, which sets
-   `is_active = false` on its own path. A guard on the first two would have left the
-   same race open through the third (B deactivates A while A demotes B), so all three
-   take the lock. Any future RPC that writes either column has to call the guard too;
+   **Every writer, not two.** `role` and `is_active` are writable only through
+   `set_user_role`, `set_user_active` (and `suspend_user`, which calls it) and
+   `delete_user`, which sets `is_active = false` on its own path. A guard on the first
+   two would have left the same race open through the last (B deletes A while A demotes
+   B), so all of them take the lock. (F014's `deactivate_user` was the original third
+   writer; `delete_user` replaced it in 20261002094000.) Any future RPC that writes either column has to call the guard too;
    that is the whole reason the lock lives in one shared function rather than inline.
 8. ~~**`revokeUserSessions` cannot work as written — sessions are never actually
    revoked.**~~ **Resolved on the F013 branch, 30 Jul 2026** —
@@ -876,13 +1924,17 @@ Raise at the Wednesday call. Each needs a schema change approval record (SOP §7
    likely an `is_active`/`merged_into_organisation_id` column on `ORGANISATIONS`,
    following the same RPC-gated pattern as `SUPPRESSIONS` — raised rather than added
    unilaterally, since it changes the core entity every other table hangs off.
-10. **`FIELD_DISCREPANCIES.existing_source` is import-provenance, not per-field
-    tracking.** F048 (§3.16) approximates which source "owns" an organisation's
-    current field value as whichever `raw_source_records` row originally created it.
-    A later manual edit through the org edit UI is not distinguished from that
-    original import, so a discrepancy raised after such an edit will misattribute the
-    existing value's source. Properly closing this is F044 (Field-Level Source
-    Tracking, #45) — unbuilt and unassigned as of this writing — not F048's job.
+10. ~~`FIELD_DISCREPANCIES.existing_source` is import-provenance, not per-field
+    tracking.`~~ **Closed by F044 (§3.18, `20260820100000_create_field_sources.sql`).**
+    `FIELD_SOURCES` now records the real source behind every write to a tracked
+    field, updated whenever `record_field_discrepancy` / `resolve_field_discrepancy`
+    (F048) overwrite one. `FIELD_DISCREPANCIES.existing_source` itself is
+    unchanged — it still stores its original import-provenance approximation at
+    the moment a conflict was flagged — but a client's *current* per-field
+    provenance no longer depends on it; `get_field_sources` is the accurate
+    source of truth. Residual gap: no CAM/admin hand-edit UI exists yet (F036 or
+    similar), so a manual correction still can't be attributed until that
+    feature calls `record_field_source` itself.
 
 ---
 
@@ -913,8 +1965,8 @@ MIGRATIONS.md forbids ("never make an untracked manual change to a live database
 body is sound (admin self-check, no self-change, writes `audit_log`), so this is a
 process problem rather than a security one: nothing recreates it on `db reset`, and it
 cannot reach production through the release process. It needs capturing as a migration
-by whoever owns F013/F014. Note also that `users.deactivated_at` is now in the Data
-Model but exists in neither the database nor a migration.
+by whoever owns F013/F014. (`users.deactivated_at`, noted here at the time as missing from the database, was
+later added by F014 and then removed by 20261002094000.)
 # F036 manual entry access
 
 `MANUAL_ENTRY_RECORDS` is readable by its creating CAM/admin and by admins.

@@ -9,7 +9,10 @@
 # public by design — RLS is the only thing standing behind it.
 #
 # Every table must return either an empty array or a permission error. A single
-# non-empty array is a data leak.
+# non-empty array is a data leak. Privileged RPCs must also be absent from the
+# anon role's PostgREST OpenAPI document; checking only whether an RPC call is
+# refused is insufficient because a callable function can reject inside its
+# body and return the same HTTP status as a database privilege refusal.
 #
 # Usage:
 #   scripts/verify-anon-lockout.sh <supabase-url> <anon-key>
@@ -36,6 +39,17 @@ TABLES=(
   outreach_messages ai_generations send_events reply_events outcomes
   api_health_logs ingestion_summary cost_tracking error_log
   cam_activity_summary pipeline_metrics sector_performance audit_log
+)
+
+# SECURITY DEFINER functions that are not anonymous APIs. PostgREST builds its
+# OpenAPI paths for the database role represented by the supplied JWT, so their
+# presence here proves anon still has EXECUTE even when the function body would
+# subsequently reject auth.uid() = null.
+PRIVATE_RPCS=(
+  check_allowed_email_domain
+  check_manual_entry_contact_email
+  schedule_outreach_send
+  suggest_organisation_edit
 )
 
 leaked=()
@@ -73,11 +87,29 @@ for table in "${TABLES[@]}"; do
   esac
 done
 
+openapi_response="$(curl -sS -w '\n%{http_code}' \
+  "${URL}/rest/v1/" \
+  -H "apikey: ${KEY}" \
+  -H "Authorization: Bearer ${KEY}")"
+
+openapi_status="$(tail -n1 <<<"$openapi_response")"
+openapi_body="$(sed '$d' <<<"$openapi_response")"
+
+if [[ "$openapi_status" != "200" ]]; then
+  leaked+=("PostgREST OpenAPI document (unexpected HTTP ${openapi_status})")
+else
+  for rpc in "${PRIVATE_RPCS[@]}"; do
+    if grep -Fq "\"/rpc/${rpc}\"" <<<"$openapi_body"; then
+      leaked+=("rpc/${rpc} (exposed to anon)")
+    fi
+  done
+fi
+
 if ((${#leaked[@]} > 0)); then
-  echo "FAIL: the anon key reached data on ${#leaked[@]} table(s):" >&2
+  echo "FAIL: found ${#leaked[@]} anonymous data or RPC exposure(s):" >&2
   printf '  - %s\n' "${leaked[@]}" >&2
   echo >&2
-  echo "The anon key is public. Any table listed above is readable by anyone." >&2
+  echo "The anon key is public. Tables must return no rows and private RPCs must not be exposed." >&2
   exit 1
 fi
 

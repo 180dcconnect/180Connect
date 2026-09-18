@@ -203,7 +203,13 @@ jobs:
           supabase migration list
 
       - name: Apply migrations
-        run: supabase db push
+        # Production once recorded the data-handling migrations under two
+        # earlier filenames. Their history was reconciled to the repository's
+        # replacement versions before the September 2026 release, which means
+        # several genuinely pending migrations now sort before an applied
+        # history row. --include-all is required for that backlog and remains
+        # safe because verify-migration-order.sh rejects newly stale filenames.
+        run: supabase db push --include-all
 
       - name: Confirm local and remote are in sync
         run: supabase migration list

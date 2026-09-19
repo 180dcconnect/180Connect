@@ -83,6 +83,11 @@ export function RunningImportGauge({
         showTooltip={false}
         stickHeight={12}
         className="mt-3"
+        // This row is never below the fold when it mounts — it is the live
+        // "Import in progress" card, not a scroll-triggered chart — so the
+        // scroll-reveal fade-in has nothing to reveal and only risks getting
+        // stuck invisible (see the prop's own comment).
+        alwaysVisible
       />
     );
   }

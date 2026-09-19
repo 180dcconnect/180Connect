@@ -120,7 +120,14 @@ export function RecentRuns({
 }) {
   const [latest, ...older] = runs;
   const now = useMemo(() => new Date(nowIso), [nowIso]);
-  const latestStalled = latest.job_status === "running" && isStalledRun(latest.started_at, now);
+  // `latest` is undefined when no import has ever run (a fresh production
+  // database). The empty state below renders in that case, but this line runs
+  // first — reading `job_status` off undefined threw and took the whole page
+  // down behind the error boundary.
+  const latestStalled =
+    latest !== undefined &&
+    latest.job_status === "running" &&
+    isStalledRun(latest.started_at, now);
 
   return (
     <section className="overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-xs">

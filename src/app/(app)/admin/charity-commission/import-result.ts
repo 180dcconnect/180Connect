@@ -1,3 +1,7 @@
+// Relative with an explicit extension: this module is run directly by
+// node --test, which resolves neither the path alias nor a bare specifier.
+// (The `@/` imports below survive only because they are type-only.)
+import { failureNote } from "../../../../lib/import-failure-reason.ts";
 import type { RunSummary } from "@/lib/ingestion/type";
 import type { PromoteCounts } from "@/lib/standardize/write-organisations";
 import type {
@@ -28,7 +32,9 @@ export function describePromotion(counts: PromoteCounts): string {
   if (counts.needsReview > 0) parts.push(`${counts.needsReview} flagged for review`);
   if (counts.doesNotMeet > 0) parts.push(`${counts.doesNotMeet} did not meet the client criteria`);
   if (counts.invalidData > 0) parts.push(`${counts.invalidData} had no usable name`);
-  if (counts.failed > 0) parts.push(`${counts.failed} failed to write`);
+  // Named, not counted: "3 failed to write" told the reader nothing they could
+  // act on, and the reason was already in hand by the time this ran.
+  if (counts.failed > 0) parts.push(failureNote(counts.failed, counts.failureReasons));
 
   return parts.length > 0 ? `${parts.join(", ")}.` : "Nothing new to add.";
 }

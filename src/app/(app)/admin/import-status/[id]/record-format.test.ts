@@ -10,6 +10,7 @@ import {
   extractRecordPostcode,
   extractRegistryStatus,
   extractWebsiteUrl,
+  getStatusDetails,
   formatFullAddress,
   type RawSourceRecordRow,
 } from "./record-format.ts";
@@ -98,7 +99,9 @@ describe("bulk charity payload", () => {
     assert.equal(view.name, "Sheffield Arts Collective");
     assert.equal(view.city, null);
     assert.equal(view.postcode, "S1 4GE");
-    assert.equal(view.status.label, "Pending Review");
+    assert.equal(view.status.label, "Waiting to be added");
+    // A staged record is not waiting on a person, so it must not offer a queue.
+    assert.equal(view.status.reviewHref, undefined);
   });
 
   it("never misreads a payload that merely happens to carry a charity key", () => {
@@ -113,5 +116,27 @@ describe("flat payloads", () => {
   it("keeps preferring top-level names", () => {
     assert.equal(extractRecordName({ legal_name: "Flat Ltd" }, "1"), "Flat Ltd");
     assert.equal(extractRecordName({ company_name: "Flat Co" }, "1"), "Flat Co");
+  });
+});
+
+describe("getStatusDetails", () => {
+  it("sends a duplicate and a held record to the screens that decide them", () => {
+    const duplicate = getStatusDetails("matched", "charity_commission_bulk");
+    assert.equal(duplicate.reviewHref, "/admin/duplicates");
+
+    const held = getStatusDetails("rejected", "charity_commission_bulk", { heldForReview: true });
+    assert.equal(held.label, "Held for review");
+    assert.equal(held.reviewHref, "/admin/review");
+  });
+
+  it("keeps a settled rejection settled, with no queue to open", () => {
+    const settled = getStatusDetails("rejected", "charity_commission_bulk");
+    assert.match(settled.label, /did not meet the client criteria/i);
+    assert.equal(settled.reviewHref, undefined);
+  });
+
+  it("does not offer the client review queues for grant records", () => {
+    const grant = getStatusDetails("rejected", "360giving", { heldForReview: true });
+    assert.equal(grant.reviewHref, undefined);
   });
 });

@@ -137,15 +137,18 @@ export function CompaniesFilterBuilder({
   presets,
   sicValues,
   registerSize,
+  initialFilters,
 }: {
   presets: CompaniesPresetSummary[];
   /** Every SIC code in the snapshot with its title and staged count. */
   sicValues: SicValue[];
   registerSize: number;
+  /** The selection to open with, when repeating an earlier run. */
+  initialFilters?: CompanyRegisterFilters;
 }) {
-  const [filters, setFilters] = useState<CompanyRegisterFilters>({
-    statuses: [...DEFAULT_STATUSES],
-  });
+  const [filters, setFilters] = useState<CompanyRegisterFilters>(
+    initialFilters ?? { statuses: [...DEFAULT_STATUSES] },
+  );
   const [count, setCount] = useState<number | null>(registerSize);
   const [counting, setCounting] = useState(false);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });

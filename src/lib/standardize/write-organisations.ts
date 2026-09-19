@@ -135,7 +135,36 @@ export type PromoteCounts = {
   needsReview: number;
   doesNotMeet: number;
   failed: number;
+  /**
+   * Why the `failed` records could not be saved, deduplicated and capped.
+   *
+   * The count on its own was the whole message for a year: Import Status said
+   * "311 failed to save" and the reason — a database error every one of them
+   * hit — was thrown away at the `reportError` call below. Callers persist
+   * these with the run so the screen can say what went wrong long after the
+   * server logs have rolled. Raw database text: it is translated for the
+   * reader by `src/lib/import-failure-reason.ts`, never rendered as it is.
+   */
+  failureReasons: string[];
 };
+
+/** How many distinct failure reasons a run keeps. Beyond this they repeat. */
+const MAX_FAILURE_REASONS = 5;
+
+/**
+ * Count one failure and remember why. Every `counts.failed++` goes through
+ * here, so a new promotion path cannot add a failure that records no reason.
+ */
+function recordFailure(counts: PromoteCounts, reason: unknown): void {
+  counts.failed++;
+  const message =
+    reason instanceof Error ? reason.message : typeof reason === "string" ? reason : String(reason);
+  const trimmed = message.trim();
+  if (!trimmed) return;
+  if (counts.failureReasons.includes(trimmed)) return;
+  if (counts.failureReasons.length >= MAX_FAILURE_REASONS) return;
+  counts.failureReasons.push(trimmed);
+}
 
 function newCounts(read: number): PromoteCounts {
   return {
@@ -147,6 +176,7 @@ function newCounts(read: number): PromoteCounts {
     needsReview: 0,
     doesNotMeet: 0,
     failed: 0,
+    failureReasons: [],
   };
 }
 
@@ -202,7 +232,7 @@ async function flagIfDuplicate(
       rawRecordId: record.id,
     });
     await store.markRecordStatus(record.id, "error");
-    counts.failed++;
+    recordFailure(counts, flagResult.error);
     return { flagged: true, matchedOrganisationId: null };
   }
 
@@ -1404,7 +1434,7 @@ export async function promotePendingCharityCommissionRecords(
         rawRecordId: record.id,
       });
       await store.markRecordStatus(record.id, "error");
-      counts.failed++;
+      recordFailure(counts, result.error);
       continue;
     }
 
@@ -1494,7 +1524,7 @@ export async function promotePendingCompaniesHouseRecords(
         rawRecordId: record.id,
       });
       await store.markRecordStatus(record.id, "error");
-      counts.failed++;
+      recordFailure(counts, error);
       continue;
     }
 
@@ -1535,7 +1565,7 @@ export async function promotePendingCompaniesHouseRecords(
         rawRecordId: record.id,
       });
       await store.markRecordStatus(record.id, "error");
-      counts.failed++;
+      recordFailure(counts, result.error);
       continue;
     }
 
@@ -1596,7 +1626,7 @@ export async function promotePendingFindThatCharityRecords(
         rawRecordId: record.id,
       });
       await store.markRecordStatus(record.id, "error");
-      counts.failed++;
+      recordFailure(counts, error);
       continue;
     }
 
@@ -1633,7 +1663,7 @@ export async function promotePendingFindThatCharityRecords(
         rawRecordId: record.id,
       });
       await store.markRecordStatus(record.id, "error");
-      counts.failed++;
+      recordFailure(counts, result.error);
       continue;
     }
 
@@ -1780,7 +1810,7 @@ export async function promotePendingCharityCommissionBulkRecords(
         rawRecordId: record.id,
       });
       await store.markRecordStatus(record.id, "error");
-      counts.failed++;
+      recordFailure(counts, result.error);
       continue;
     }
 

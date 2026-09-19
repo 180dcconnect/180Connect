@@ -33,7 +33,7 @@
 import { redirect } from "next/navigation";
 
 import { getViewingActor } from "@/lib/auth/actor";
-import { hasPermission } from "@/lib/auth/permissions";
+import { canView, hasPermission } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { reportError } from "@/lib/error-logging";
@@ -44,7 +44,7 @@ import {
 } from "@/lib/cic-statement/backfill";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
-import { parseFilters } from "@/lib/companies-register/filters";
+import { parseFilters, type CompanyRegisterFilters } from "@/lib/companies-register/filters";
 import {
   companiesRegisterMeta,
   sicValues,
@@ -66,7 +66,19 @@ export const maxDuration = 300;
 
 const RUN_WINDOW = 8;
 
-export default async function CompaniesHousePage() {
+/**
+ * `?again=<run id>` — "Run this again" from a run's page on Import status.
+ * The criteria are read from the run row rather than carried in the link, and
+ * the composer opens with them loaded but nothing imported: see the twin note
+ * on the Charity Commission screen.
+ */
+type SearchParams = Promise<{ again?: string }>;
+
+export default async function CompaniesHousePage({
+  searchParams,
+}: {
+  searchParams?: SearchParams;
+}) {
   // `client:edit`, not `user:manage`: the team decided everyone who works the
   // client list can shape and run imports. Viewers still cannot.
   const authorization = await getViewingActor("client:edit");
@@ -82,6 +94,7 @@ export default async function CompaniesHousePage() {
   // the same questions here keeps the controls off the page rather than letting
   // a viewer press one and be refused.
   const canImport = hasPermission(authorization.actor.role, "client:edit");
+  const canInspectRuns = canView(authorization.actor.role, "platform-settings:manage");
   const canRefreshRegister =
     canImport && hasPermission(authorization.actor.role, "platform-settings:manage");
 
@@ -92,7 +105,7 @@ export default async function CompaniesHousePage() {
     supabase
       .from("ingestion_runs")
       .select(
-        "id, api_source, started_at, job_status, records_fetched, records_inserted, records_skipped, records_failed, run_stats",
+        "id, api_source, started_at, job_status, records_fetched, records_inserted, records_skipped, records_failed, run_stats, triggered_by",
       )
       .eq("api_source", "companies_house")
       .order("started_at", { ascending: false })
@@ -134,6 +147,28 @@ export default async function CompaniesHousePage() {
     description: row.description,
     filters: parseFilters(row.filters),
   }));
+
+  // The criteria to reopen the composer with, when arriving from a run.
+  const againRunId = (await searchParams)?.again?.trim();
+  let repeatFilters: CompanyRegisterFilters | null = null;
+  if (againRunId && canImport) {
+    const { data: againRun, error: againError } = await supabase
+      .from("ingestion_runs")
+      .select("id, api_source, run_stats")
+      .eq("id", againRunId)
+      .eq("api_source", "companies_house")
+      .maybeSingle();
+    if (againError) {
+      await reportError(againError, {
+        operation: "admin.companies_house.repeat_run",
+        runId: againRunId,
+      });
+    }
+    const stats = (againRun?.run_stats ?? null) as Record<string, unknown> | null;
+    if (stats && typeof stats.criteria === "object" && stats.criteria !== null) {
+      repeatFilters = parseFilters(stats.criteria);
+    }
+  }
 
   const snapshotDate = meta?.builtOn ?? null;
   const sourceMonth = meta?.sourceMonth ?? null;
@@ -194,6 +229,7 @@ export default async function CompaniesHousePage() {
         <Group>
           <Rise>
             <ImportConsole
+              initialMode={repeatFilters ? "composer" : "home"}
               home={
                 <>
                   {runsResult.error ? (
@@ -212,6 +248,7 @@ export default async function CompaniesHousePage() {
                     <CompaniesRecentRuns
                       runs={runs}
                       nowIso={now.toISOString()}
+                      canInspect={canInspectRuns}
                       action={staged && canImport ? <NewImportButton /> : undefined}
                       secondaryAction={
                         canImport ? (
@@ -252,6 +289,7 @@ export default async function CompaniesHousePage() {
                   presets={presets}
                   sicValues={stagedSics}
                   registerSize={registerSize}
+                  initialFilters={repeatFilters ?? undefined}
                 />
               }
             />

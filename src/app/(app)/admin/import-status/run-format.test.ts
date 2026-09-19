@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   describeRun,
+  runCriteriaSentence,
   formatSource,
   humaniseErrorMessage,
   matchesRunQuery,
@@ -147,12 +148,18 @@ describe("summariseRun", () => {
 });
 
 describe("describeRun", () => {
-  it("keeps every count but highlights only the ones that happened", () => {
+  it("leads with the three a reader came for, and keeps the rest", () => {
     const view = describeRun(run(), NOW);
-    assert.equal(view.counts.length, 5);
+    assert.deepEqual(
+      view.headline.map((count) => count.label),
+      ["Added to the client list", "Already on the list", "Needs a look"],
+    );
+    // Nothing is dropped — the pipeline's own stages move behind the details.
+    assert.ok(view.details.some((count) => count.label === "From the source"));
+    assert.equal(view.counts.length, view.headline.length + view.details.length);
     assert.deepEqual(
       view.highlights.map((count) => count.label),
-      ["Fetched", "Added", "Skipped"],
+      ["Added to the client list", "Already on the list"],
     );
   });
 
@@ -221,6 +228,12 @@ describe("humaniseErrorMessage", () => {
     assert.equal(res?.summary, "Connection timed out with registry service");
   });
 
+  it("replaces the historical object placeholder with an actionable explanation", () => {
+    const res = humaniseErrorMessage("[object Object]");
+    assert.equal(res?.summary, "The import stopped without a readable reason");
+    assert.ok(res?.description.includes("Try the import again"));
+  });
+
   it("returns null for empty error strings", () => {
     assert.equal(humaniseErrorMessage(null), null);
     assert.equal(humaniseErrorMessage(""), null);
@@ -251,12 +264,55 @@ describe("register imports distinguish staging from clients added", () => {
       ...overrides,
     });
 
-  it("never calls staged rows added", () => {
+  it("never calls staged rows added, and leads with the refusal", () => {
     const summary = summariseRun(bulk());
-    assert.match(summary, /Staged 2,231 of 2,231 records/);
-    assert.match(summary, /0 added to the client list/);
-    assert.match(summary, /1,934 failed to save/);
+    assert.match(summary, /Nothing was added to the client list/);
+    assert.match(summary, /all 1,934 records were refused/);
     assert.doesNotMatch(summary, /Added 2,231/);
+  });
+
+  it("says why the records were refused when the run recorded a reason", () => {
+    const summary = summariseRun(
+      bulk({
+        run_stats: {
+          selected: 2231,
+          written: 2231,
+          unchanged: 0,
+          inserted: 0,
+          failed: 1934,
+          failureReasons: ['invalid input value for enum public.outreach_status: "not_started"'],
+        },
+      }),
+    );
+    assert.match(summary, /needs a database update/);
+    // The database's own words never reach the reader's sentence.
+    assert.doesNotMatch(summary, /enum|outreach_status/);
+  });
+
+  it("shows a refusal that saved some records as partly done, not as a clean run", () => {
+    const view = describeRun(
+      bulk({
+        run_stats: {
+          selected: 100,
+          written: 100,
+          unchanged: 0,
+          inserted: 40,
+          failed: 60,
+          failureReasons: ["duplicate key value violates unique constraint"],
+        },
+      }),
+      new Date("2026-09-19T14:00:00Z"),
+    );
+    assert.equal(view.status, "partial");
+    assert.match(view.summary, /40 added to the client list, 60 records refused/);
+    assert.ok(view.humanError);
+    assert.match(view.humanError!.actionHint ?? "", /review queue/);
+  });
+
+  it("admits when an older run kept no reason rather than showing nothing", () => {
+    const view = describeRun(bulk(), new Date("2026-09-19T14:00:00Z"));
+    assert.equal(view.status, "failed");
+    assert.match(view.humanError?.summary ?? "", /did not record why/);
   });
 
   it("reads clients added from the promotion breakdown", () => {
@@ -277,37 +333,65 @@ describe("register imports distinguish staging from clients added", () => {
         },
       }),
     );
-    assert.match(summary, /Staged 66 of 66 records, 60 added to the client list/);
-    assert.match(summary, /1 flagged for review/);
-    assert.match(summary, /2 did not meet the client criteria/);
-    assert.match(summary, /2 matched a client already on the list/);
-    assert.match(summary, /1 could not be used/);
+    assert.match(summary, /60 added to the client list from 66 records in the source/);
+    // Held, duplicate and unusable records are one number: the reader wants to
+    // know whether anything is waiting on them, not how it is filed.
+    assert.match(summary, /4 need a look/);
+    assert.match(summary, /2 did not fit the client criteria/);
+    // The holding table is an implementation step, not an outcome.
+    assert.doesNotMatch(summary, /staged|Staged/);
   });
 
-  it("says staged alone when promotion never ran", () => {
+  it("claims no outcome when the records were never added", () => {
     const summary = summariseRun(
       bulk({ run_stats: { selected: 2231, written: 2231, unchanged: 0 } }),
     );
-    assert.equal(summary, "Staged 2,231 of 2,231 records");
+    assert.equal(summary, "2,231 records from the source are waiting to be added");
   });
 
-  it("keeps the legacy labels for runs without a breakdown", () => {
+  it("says when the total includes records earlier imports left behind", () => {
+    const summary = summariseRun(
+      bulk({
+        records_fetched: 98,
+        records_inserted: 42,
+        run_stats: { selected: 98, written: 42, unchanged: 56, inserted: 821, failed: 0 },
+      }),
+    );
+    assert.match(summary, /821 added to the client list from 98 records in the source/);
+    assert.match(summary, /about 779 of them had been waiting from earlier imports/);
+  });
+
+  it("says nothing about a backlog when there was none", () => {
+    const summary = summariseRun(
+      bulk({
+        records_fetched: 66,
+        run_stats: { selected: 66, written: 60, unchanged: 6, inserted: 60, failed: 0 },
+      }),
+    );
+    assert.doesNotMatch(summary, /waiting from earlier imports/);
+  });
+
+  it("asks a run without a breakdown the same three questions", () => {
     const view = describeRun(run({ api_source: "charitybase" }), NOW);
     assert.deepEqual(
-      view.counts.map((count) => count.label),
-      ["Fetched", "Added", "Skipped", "Failed", "Flagged"],
+      view.headline.map((count) => count.label),
+      ["Added to the client list", "Already on the list", "Needs a look"],
     );
   });
 
-  it("shows staged and clients-added counts for register imports", () => {
+  it("never headlines the holding table, and counts what needs a person", () => {
     const view = describeRun(bulk(), NOW);
-    assert.deepEqual(
-      view.counts.map((count) => count.label),
-      ["Fetched", "Staged", "Clients added", "Skipped", "Failed", "Flagged"],
+    assert.ok(!view.headline.some((count) => /stag/i.test(count.label)));
+    assert.equal(
+      view.headline.find((count) => count.label === "Added to the client list")?.value,
+      0,
     );
-    assert.equal(view.counts.find((count) => count.label === "Staged")?.value, 2231);
-    assert.equal(view.counts.find((count) => count.label === "Clients added")?.value, 0);
-    assert.equal(view.counts.find((count) => count.label === "Failed")?.value, 1934);
+    // 1,934 refused saves are the thing waiting on someone here.
+    assert.equal(view.headline.find((count) => count.label === "Needs a look")?.value, 1934);
+    assert.equal(
+      view.details.find((count) => count.label === "From the source")?.value,
+      2231,
+    );
   });
 });
 
@@ -342,5 +426,51 @@ describe("matchesRunQuery", () => {
 
   it("matches everything on an empty query", () => {
     assert.equal(matchesRunQuery(view, "  "), true);
+  });
+});
+
+describe("counts that can be opened", () => {
+  it("points 'needs a look' at the records that are waiting on someone", () => {
+    const view = describeRun(
+      run({
+        api_source: "charity_commission_bulk",
+        run_stats: { selected: 10, written: 10, unchanged: 0, inserted: 7, flagged: 2, failed: 1 },
+      }),
+      NOW,
+    );
+    const needsLook = view.headline.find((count) => count.label === "Needs a look");
+    assert.deepEqual(needsLook?.statusKeys, ["matched", "rejected_review", "error"]);
+    // Red, because it is the one count that asks the reader for something.
+    assert.equal(needsLook?.tone, "danger");
+  });
+
+  it("gives a count with no records behind it nothing to open", () => {
+    const view = describeRun(run(), NOW);
+    const already = view.headline.find((count) => count.label === "Already on the list");
+    assert.equal(already?.statusKeys, undefined);
+  });
+});
+
+describe("runCriteriaSentence", () => {
+  it("reads back what the run was asked for", () => {
+    const view = describeRun(
+      run({
+        run_stats: {
+          selected: 98,
+          criteriaSentence: "Operating in Cumbria; excluding insolvent charities.",
+        },
+      }),
+      NOW,
+    );
+    assert.equal(
+      view.criteriaSentence,
+      "Operating in Cumbria; excluding insolvent charities.",
+    );
+  });
+
+  it("says nothing for a run that recorded no criteria", () => {
+    assert.equal(runCriteriaSentence(run({ run_stats: { selected: 98 } })), null);
+    assert.equal(runCriteriaSentence(run({ run_stats: null })), null);
+    assert.equal(runCriteriaSentence(run({ run_stats: { criteriaSentence: "  " } })), null);
   });
 });

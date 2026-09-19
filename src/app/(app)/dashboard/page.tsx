@@ -103,8 +103,9 @@ import { countCreatedSince, summariseDataHealth } from "@/lib/dashboard/data-hea
 import { summariseSystemHealth, type SystemHealthInput } from "@/lib/dashboard/system-health";
 import {
   REVIEW_CLIENTS_EMPTY_STATE,
-  guideProgress,
+  guideProgressForRole,
   shouldShowGuide,
+  type OnboardingProgress,
   type OnboardingUser,
 } from "@/lib/onboarding";
 import { FeedbackPrompt } from "@/components/feedback-prompt";
@@ -1370,14 +1371,14 @@ export default async function DashboardPage({
   })();
 
   // F255 — the first-run guide. Read both halves of its state together: whether this
-  // CAM is still eligible for it (users) and how far through they are
+  // user is still eligible for it (users) and how far through they are
   // (user_onboarding_steps). A failure to read either is not worth failing the
-  // dashboard over — the guide simply doesn't render, and the CAM sees the normal
+  // dashboard over — the guide simply doesn't render, and the user sees the normal
   // screen rather than an error about a checklist.
-  let guide: ReturnType<typeof guideProgress> | null = null;
+  let guide: OnboardingProgress | null = null;
   let ownsAnyClient = false;
 
-  if (actor.role === "cam" || actor.role === "admin") {
+  {
     const { profile, steps: completedSteps } = await viewerState;
 
     if (profile.error) {
@@ -1397,10 +1398,25 @@ export default async function DashboardPage({
       if (completedSteps.error) {
         await reportError(completedSteps.error, { operation: "dashboard.onboarding_steps" });
       }
-      // RLS returns this CAM's own rows only, so no user filter is needed here — see
+      // Admin's conditional invite_team needs the workspace size; viewer needs
+      // its own 3-step overview track. Reuse the same active-count the sidebar
+      // uses — a head count rather than rows.
+      let activeUserCount: number | null = null;
+      if (profile.data?.role === "admin") {
+        const { count } = await supabase
+          .from("users")
+          .select("id", { count: "exact", head: true })
+          .eq("is_active", true)
+          .is("deleted_at", null);
+        if (typeof count === "number") activeUserCount = count;
+      }
+      // RLS returns this user's own rows only, so no user filter is needed here — see
       // matrix §3.12.
-      guide = guideProgress(
+      const role = profile.data?.role ?? actor.role;
+      guide = guideProgressForRole(
+        role,
         (completedSteps.data ?? []).map((row: { step_key: string }) => row.step_key),
+        { activeUserCount },
       );
       ownsAnyClient = rows.some((row) => row.owner_id === actor.id);
     }

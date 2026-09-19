@@ -1,460 +1,363 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import {
-  Building2,
-  CheckCircle2,
-  ChevronDown,
-  ExternalLink,
-  Globe,
-  MapPin,
-  Search,
-  ShieldCheck,
-} from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { ArrowRight, Building2, ChevronDown, ExternalLink, Globe, MapPin, ShieldCheck } from "lucide-react";
 
-import { EASE } from "@/components/brand/motion";
+import { SectionCard, Key, Pill } from "@/app/(app)/clients/[id]/section-card";
+import { PageSizeSelect, PagingSummary, useListPager } from "@/components/ui/list-pager";
 import { OrganisationHoverCard } from "@/components/organisation-hover-card";
-import {
-  matchesRecordQuery,
-  type ProcessingStatus,
-  type RawRecordView,
-} from "./record-format";
+import type { RawRecordView, StatusTone } from "./record-format";
+
+/**
+ * The records one import run touched, as a list to read rather than a wall to
+ * scroll.
+ *
+ * The search box and the row of coloured status buttons that used to live here
+ * are gone. Searching and filtering are done from the page's search bar — the
+ * same bar as the client list and the import history — so what a CAM learned on
+ * one screen works on this one, and the chosen filters survive a link, a
+ * refresh and the back button. This component is handed the rows that survived
+ * and renders them.
+ *
+ * Filed Record throughout (`docs/app-design-system.md`): one bordered card, a
+ * pager above the first row because these lists only grow, rows separated by
+ * the soft rule, state carried by `Pill` rather than a palette of its own, and
+ * the detail panel folded with `card-collapse-grid` — nothing inside it opens a
+ * popover, which is the one thing that class forbids.
+ */
+
+/** Four tones, from the token set. A record's state is never a colour of its own. */
+const PILL_TONE: Record<StatusTone, "go" | "hold" | "stop" | "lead" | "neutral"> = {
+  success: "go",
+  warning: "hold",
+  danger: "stop",
+  info: "lead",
+  neutral: "neutral",
+};
+
+function Fact({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <dt className="text-[12.5px] text-dim">{label}</dt>
+      <dd className="mt-0.5 text-[13.5px] leading-[1.5] text-ink">{value}</dd>
+    </div>
+  );
+}
 
 export function RecordFeed({
   records,
-  source,
-  recordsSkipped,
   isGrantSource = false,
+  filtersActive = false,
+  orderNote,
+  listedTotal,
+  runTotal,
+  windowSize,
 }: {
+  /** The records to show — already searched and filtered by the page. */
   records: RawRecordView[];
-  source: string;
-  recordsSkipped: number;
   isGrantSource?: boolean;
+  /** Whether a search or filter is narrowing the list, for the empty state. */
+  filtersActive?: boolean;
+  /**
+   * The order the rows are in, in words. A list that has been re-sorted from
+   * somewhere else on the page — the sort button on the search bar — must say
+   * so where the rows are, or the reader is left to infer the order from the
+   * rows themselves.
+   */
+  orderNote?: string;
+  /** How many records this page read for the run, before searching. */
+  listedTotal: number;
+  /** How many the run holds in total, which may be more than were read. */
+  runTotal: number;
+  /** The cap on how many are read in one visit. */
+  windowSize: number;
 }) {
-  const [activeFilter, setActiveFilter] = useState<"all" | ProcessingStatus>("all");
-  const [searchQuery, setSearchQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const pager = useListPager(records, 10);
 
-  // Counts for each tab
-  const counts = useMemo(() => {
-    return {
-      all: records.length,
-      validated: records.filter((r) => r.processingStatus === "validated").length,
-      matched: records.filter((r) => r.processingStatus === "matched").length,
-      pending: records.filter((r) => r.processingStatus === "pending").length,
-      rejected: records.filter((r) => r.processingStatus === "rejected").length,
-      error: records.filter((r) => r.processingStatus === "error").length,
-    };
-  }, [records]);
-
-  // Filtered records
-  const filteredRecords = useMemo(() => {
-    return records.filter((record) => {
-      if (activeFilter !== "all" && record.processingStatus !== activeFilter) {
-        return false;
-      }
-      return matchesRecordQuery(record, searchQuery);
-    });
-  }, [records, activeFilter, searchQuery]);
+  const thing = isGrantSource ? "grant" : "record";
+  const things = isGrantSource ? "grants" : "records";
+  const capped = runTotal > listedTotal;
 
   return (
-    <div className="space-y-6">
-      {/* Informational banner about Skipped records */}
-      {recordsSkipped > 0 && (
-        <div className="flex items-start gap-3.5 rounded-2xl border border-black/[0.07] bg-white p-4.5 shadow-2xs">
-          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-green-50 text-green-700">
-            <CheckCircle2 className="h-4 w-4" strokeWidth={2.2} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h3 className="text-xs font-bold uppercase tracking-[0.08em] text-foreground/50">
-              Already Up to Date in 180Connect
-            </h3>
-            <p className="mt-0.5 text-xs leading-[1.6] text-foreground/80">
-              <strong className="text-foreground font-bold">{recordsSkipped.toLocaleString()} {isGrantSource ? (recordsSkipped === 1 ? "grant" : "grants") : (recordsSkipped === 1 ? "client" : "clients")}</strong> from {source} were verified and found to be already up to date with no new changes on record.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Filter Tabs & Search Bar */}
-      <div className="space-y-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          {/* Filter Pills */}
-          <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-            <button
-              type="button"
-              onClick={() => setActiveFilter("all")}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
-                activeFilter === "all"
-                  ? "bg-foreground text-background shadow-2xs"
-                  : "bg-white text-foreground/70 ring-1 ring-black/[0.08] hover:bg-black/[0.02]"
-              }`}
-            >
-              {isGrantSource ? "All Grants" : "All Clients"}
-              <span className="opacity-60 tabular-nums">({counts.all})</span>
-            </button>
-
-            {counts.validated > 0 && (
-              <button
-                type="button"
-                onClick={() => setActiveFilter("validated")}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
-                  activeFilter === "validated"
-                    ? "bg-green-800 text-white shadow-2xs"
-                    : "bg-white text-green-900 ring-1 ring-green-600/20 hover:bg-green-50/50"
-                }`}
-              >
-                {isGrantSource ? "Saved Grants" : "Added to CRM"}
-                <span className="opacity-75 tabular-nums">({counts.validated})</span>
-              </button>
-            )}
-
-            {counts.matched > 0 && (
-              <button
-                type="button"
-                onClick={() => setActiveFilter("matched")}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
-                  activeFilter === "matched"
-                    ? isGrantSource
-                      ? "bg-green-800 text-white shadow-2xs"
-                      : "bg-amber-800 text-white shadow-2xs"
-                    : isGrantSource
-                      ? "bg-white text-green-900 ring-1 ring-green-600/20 hover:bg-green-50/50"
-                      : "bg-white text-amber-900 ring-1 ring-amber-600/20 hover:bg-amber-50/50"
-                }`}
-              >
-                {isGrantSource ? "Matched to Clients" : "Needs Review"}
-                <span className="opacity-75 tabular-nums">({counts.matched})</span>
-              </button>
-            )}
-
-            {counts.pending > 0 && (
-              <button
-                type="button"
-                onClick={() => setActiveFilter("pending")}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
-                  activeFilter === "pending"
-                    ? "bg-blue-800 text-white shadow-2xs"
-                    : "bg-white text-blue-900 ring-1 ring-blue-600/20 hover:bg-blue-50/50"
-                }`}
-              >
-                Pending
-                <span className="opacity-75 tabular-nums">({counts.pending})</span>
-              </button>
-            )}
-
-            {counts.rejected > 0 && (
-              <button
-                type="button"
-                onClick={() => setActiveFilter("rejected")}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
-                  activeFilter === "rejected"
-                    ? "bg-foreground/80 text-background shadow-2xs"
-                    : "bg-white text-foreground/70 ring-1 ring-black/[0.08] hover:bg-black/[0.02]"
-                }`}
-              >
-                {isGrantSource ? "Unmatched" : "Excluded"}
-                <span className="opacity-75 tabular-nums">({counts.rejected})</span>
-              </button>
-            )}
-
-            {counts.error > 0 && (
-              <button
-                type="button"
-                onClick={() => setActiveFilter("error")}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
-                  activeFilter === "error"
-                    ? "bg-red-800 text-white shadow-2xs"
-                    : "bg-white text-red-900 ring-1 ring-red-600/20 hover:bg-red-50/50"
-                }`}
-              >
-                Issues
-                <span className="opacity-75 tabular-nums">({counts.error})</span>
-              </button>
-            )}
-          </div>
-
-          {/* Quick Search */}
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/40" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search client or ID…"
-              className="w-full rounded-full border border-black/[0.08] bg-white py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-foreground/40 focus:border-brand focus:outline-hidden focus:ring-1 focus:ring-brand"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Records Feed List */}
-      {filteredRecords.length > 0 ? (
-        <ul className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">
-          {filteredRecords.map((record) => {
-            const isOpen = expandedId === record.id;
-            return (
-              <li
-                key={record.id}
-                className="border-b border-black/[0.06] last:border-b-0 transition-colors"
-              >
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setExpandedId(isOpen ? null : record.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setExpandedId(isOpen ? null : record.id);
-                    }
-                  }}
-                  aria-expanded={isOpen}
-                  className="flex w-full items-start gap-3.5 p-4 text-left hover:bg-black/[0.015] cursor-pointer sm:items-center sm:gap-4 sm:px-5"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold ring-1 ring-inset ${record.status.badgeClass}`}
-                      >
-                        {record.status.label}
-                      </span>
-                      <span className="text-[11px] font-bold text-foreground/50">
-                        {record.recordSource.replace(/_/g, " ")} #{record.sourceRecordId}
-                      </span>
-                      {(record.city ?? record.postcode) && (
-                        <span className="inline-flex items-center gap-1 text-xs text-foreground/60">
-                          <MapPin className="h-3 w-3 opacity-60" />
-                          {record.city ?? record.postcode}
-                        </span>
-                      )}
-                      {record.filingType && (
-                        <span className="inline-flex items-center gap-1 text-xs text-foreground/50 hidden md:inline">
-                          · {record.filingType}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="mt-1.5 flex items-baseline gap-3">
-                      <h4 className="text-base font-bold text-foreground">
-                        {record.matchedOrg ? (
-                          <OrganisationHoverCard
-                            org={record.matchedOrg}
-                            href={`/clients/${record.matchedOrgId}`}
-                            className="underline decoration-black/20 hover:decoration-brand hover:text-brand transition-colors"
-                          >
-                            {record.name}
-                          </OrganisationHoverCard>
-                        ) : (
-                          <span>{record.name}</span>
-                        )}
-                      </h4>
-                    </div>
-                  </div>
-
-                  {/* Actions & Chevron */}
-                  <div className="flex shrink-0 items-center gap-3">
-                    {record.matchedOrgId && (
-                      <Link
-                        href={`/clients/${record.matchedOrgId}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-lead px-3 py-1.5 text-xs font-bold text-white hover:bg-lead-hover transition-colors shadow-2xs"
-                      >
-                        <span>View Client</span>
-                        <ExternalLink className="h-3 w-3" />
-                      </Link>
-                    )}
-
-                    <motion.span
-                      animate={{ rotate: isOpen ? 180 : 0 }}
-                      transition={{ duration: 0.25, ease: EASE }}
-                      className="text-foreground/30"
-                    >
-                      <ChevronDown className="h-4 w-4" strokeWidth={2} />
-                    </motion.span>
-                  </div>
-                </div>
-
-                {/* Expanded Clean Business Profile */}
-                <AnimatePresence initial={false}>
-                  {isOpen && (
-                    <motion.div
-                      key="details"
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.35, ease: EASE }}
-                      className="overflow-hidden border-t border-black/[0.05] bg-black/[0.015] px-4 py-5 sm:px-5"
-                    >
-                      <div className="space-y-4">
-                        {record.grantDetails ? (
-                          <div className="rounded-xl border border-black/[0.06] bg-white p-4 shadow-2xs">
-                            <h5 className="text-xs font-bold uppercase tracking-[0.1em] text-foreground/45 mb-3 flex items-center gap-1.5">
-                              <Building2 className="h-3.5 w-3.5" />
-                              <span>Grant Details &amp; Funding Overview</span>
-                            </h5>
-
-                            <dl className="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
-                              <div>
-                                <dt className="font-bold text-foreground/45">Funder</dt>
-                                <dd className="mt-0.5 font-medium text-foreground">
-                                  {record.grantDetails.funderName ?? "Unknown Funder"}
-                                </dd>
-                              </div>
-
-                              <div>
-                                <dt className="font-bold text-foreground/45">Amount Awarded</dt>
-                                <dd className="mt-0.5 font-medium text-foreground">
-                                  {record.grantDetails.amountFormatted ?? "Undisclosed"}
-                                </dd>
-                              </div>
-
-                              <div>
-                                <dt className="font-bold text-foreground/45">Award Date</dt>
-                                <dd className="mt-0.5 font-medium text-foreground">
-                                  {record.grantDetails.awardDate ?? "Undisclosed"}
-                                </dd>
-                              </div>
-
-                              <div>
-                                <dt className="font-bold text-foreground/45">Grant Programme</dt>
-                                <dd className="mt-0.5 font-medium text-foreground">
-                                  {record.grantDetails.grantProgramme ?? "General Grant"}
-                                </dd>
-                              </div>
-
-                              <div>
-                                <dt className="font-bold text-foreground/45">Recipient Client</dt>
-                                <dd className="mt-0.5 font-medium text-foreground">
-                                  {record.matchedOrg ? record.matchedOrg.legalName : record.name}
-                                </dd>
-                              </div>
-
-                              <div>
-                                <dt className="font-bold text-foreground/45">Official Grant ID</dt>
-                                <dd className="mt-0.5 font-mono font-medium text-foreground">
-                                  #{record.sourceRecordId}
-                                </dd>
-                              </div>
-                            </dl>
-
-                            {record.grantDetails.description && (
-                              <div className="mt-3.5 pt-3.5 border-t border-black/[0.05]">
-                                <p className="font-bold text-foreground/45 text-xs">Grant Description</p>
-                                <p className="mt-1 text-xs leading-[1.6] text-foreground/80">
-                                  {record.grantDetails.description}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          /* Business Summary Card */
-                          <div className="rounded-xl border border-black/[0.06] bg-white p-4 shadow-2xs">
-                            <h5 className="text-xs font-bold uppercase tracking-[0.1em] text-foreground/45 mb-3 flex items-center gap-1.5">
-                              <Building2 className="h-3.5 w-3.5" />
-                              <span>Official Filing Overview</span>
-                            </h5>
-
-                            <dl className="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
-                              <div>
-                                <dt className="font-bold text-foreground/45">Client Type</dt>
-                                <dd className="mt-0.5 font-medium text-foreground">
-                                  {record.filingType ?? "Standard client"}
-                                </dd>
-                              </div>
-
-                              <div>
-                                <dt className="font-bold text-foreground/45">Register Status</dt>
-                                <dd className="mt-0.5 font-medium text-foreground">
-                                  {record.registryStatus ?? "Active on Register"}
-                                </dd>
-                              </div>
-
-                              <div>
-                                <dt className="font-bold text-foreground/45">Official Number</dt>
-                                <dd className="mt-0.5 font-mono font-medium text-foreground">
-                                  #{record.sourceRecordId}
-                                </dd>
-                              </div>
-
-                              {record.fullAddress && (
-                                <div className="sm:col-span-2">
-                                  <dt className="font-bold text-foreground/45">Registered Office</dt>
-                                  <dd className="mt-0.5 text-foreground/85">
-                                    {record.fullAddress}
-                                  </dd>
-                                </div>
-                              )}
-
-                              {record.website && (
-                                <div>
-                                  <dt className="font-bold text-foreground/45">Website</dt>
-                                  <dd className="mt-0.5">
-                                    <a
-                                      href={record.website.startsWith("http") ? record.website : `https://${record.website}`}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="inline-flex items-center gap-1 text-brand hover:underline"
-                                    >
-                                      <Globe className="h-3 w-3" />
-                                      <span className="truncate max-w-[200px]">{record.website}</span>
-                                    </a>
-                                  </dd>
-                                </div>
-                              )}
-                            </dl>
-
-                            {record.missionOrActivities && (
-                              <div className="mt-3.5 pt-3.5 border-t border-black/[0.05]">
-                                <p className="font-bold text-foreground/45 text-xs">Activities &amp; Purpose</p>
-                                <p className="mt-1 text-xs leading-[1.6] text-foreground/80">
-                                  {record.missionOrActivities}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Privacy Redaction Notice (if applicable) */}
-                        {record.redactedFieldCount > 0 && (
-                          <div className="flex items-center gap-2 rounded-xl bg-amber-50/70 border border-amber-200/80 px-3.5 py-2.5 text-xs text-amber-950">
-                            <ShieldCheck className="h-4 w-4 shrink-0 text-amber-700" />
-                            <span>
-                              Personal contact details (private phone/email) were automatically removed before storing to comply with privacy rules.
-                            </span>
-                          </div>
-                        )}
-
-                        {/* Collapsed Technical Details (for developers only) */}
-                        <details className="text-[11px] text-foreground/40">
-                          <summary className="cursor-pointer font-mono hover:underline">
-                            Developer Diagnostics / Raw Data
-                          </summary>
-                          <pre className="mt-2 max-h-48 overflow-auto rounded-lg bg-black/[0.03] p-3 font-mono text-[10px] text-foreground/70 ring-1 ring-black/[0.05]">
-                            {record.rawPayloadJson}
-                          </pre>
-                        </details>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </li>
-            );
-          })}
-        </ul>
+    <SectionCard
+      headingId="run-records-heading"
+      title={isGrantSource ? "Grants in this run" : "Records in this run"}
+      hint={
+        <>
+          {isGrantSource
+            ? "Every grant this run read from 360Giving, and the client it was linked to."
+            : "Every record this run read from the register, and what became of it. Open one to see what was filed."}
+          {capped && (
+            <>
+              {" "}
+              This run holds {runTotal.toLocaleString()} {things} in all; the{" "}
+              {windowSize.toLocaleString()} most recent are listed.
+            </>
+          )}
+        </>
+      }
+      action={
+        pager.showPager ? (
+          <PageSizeSelect pageSize={pager.pageSize} onChange={pager.setPageSize} />
+        ) : undefined
+      }
+    >
+      {records.length === 0 ? (
+        /* Inset, not a second white card: a card inside a card needs a border
+           to be seen, and a border inside a border is noise. */
+        <p className="mt-3.5 rounded-inset bg-paper px-4 py-6 text-center text-[13px] leading-[1.55] text-dim">
+          {filtersActive
+            ? `No ${things} match this search. Clear it from the search bar to see the whole run.`
+            : `This run recorded no ${things}.`}
+        </p>
       ) : (
-        <div className="rounded-2xl border border-black/[0.06] bg-white p-12 text-center shadow-xs">
-          <p className="text-sm font-bold text-foreground">
-            {isGrantSource ? "No grants match this search." : "No clients match this search."}
-          </p>
-          <p className="mt-1 text-xs text-foreground/60">
-            {isGrantSource
-              ? "Try searching by funder name, recipient, grant ID, or selecting a different status filter tab."
-              : "Try searching by client name, charity number, or selecting a different status filter tab."}
-          </p>
-        </div>
+        <>
+          <div className="mt-3.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 pb-1">
+            <PagingSummary summary={pager} onPageChange={pager.setPage} className="min-w-0 flex-1" />
+            {orderNote && <p className="text-[12.5px] text-faint">{orderNote}</p>}
+          </div>
+
+          <ul>
+            {pager.items.map((record) => {
+              const isOpen = expandedId === record.id;
+              const panelId = `record-panel-${record.id}`;
+              const place = record.city ?? record.postcode;
+
+              return (
+                <li key={record.id} className="border-t border-rule-soft">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={isOpen}
+                    aria-controls={panelId}
+                    onClick={() => setExpandedId(isOpen ? null : record.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setExpandedId(isOpen ? null : record.id);
+                      }
+                    }}
+                    className="flex w-full cursor-pointer items-start gap-3 py-3.5 text-left"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+                        <Pill tone={PILL_TONE[record.status.tone]}>{record.status.label}</Pill>
+                        <span className="text-[15px] leading-[1.35] font-semibold text-ink">
+                          {record.matchedOrg ? (
+                            <OrganisationHoverCard
+                              org={record.matchedOrg}
+                              href={`/clients/${record.matchedOrgId}`}
+                              className="text-lead hover:underline"
+                            >
+                              {record.name}
+                            </OrganisationHoverCard>
+                          ) : (
+                            record.name
+                          )}
+                        </span>
+                      </div>
+
+                      <p className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px] text-dim">
+                        <span className="font-mono text-[12px] text-faint">
+                          {record.sourceRecordId}
+                        </span>
+                        {place && (
+                          <span className="inline-flex items-center gap-1">
+                            <MapPin aria-hidden="true" className="size-3 text-faint" />
+                            {place}
+                          </span>
+                        )}
+                        {record.filingType && <span>{record.filingType}</span>}
+                        {record.redactedFieldCount > 0 && (
+                          <span className="inline-flex items-center gap-1">
+                            <ShieldCheck aria-hidden="true" className="size-3 text-faint" />
+                            Personal details removed
+                          </span>
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-2">
+                      {/* A record waiting on a decision offers the decision,
+                          not the client. A possible duplicate was never added
+                          to the client list — it is held in the duplicates
+                          queue until an admin says whether it is the same
+                          organisation — so "Open client" pointed at the client
+                          it might duplicate and left the actual job unnamed.
+                          Records held for review behave the same way, and both
+                          already know where their queue is. */}
+                      {record.status.reviewHref ? (
+                        <Link
+                          href={record.status.reviewHref}
+                          onClick={(event) => event.stopPropagation()}
+                          aria-label={record.status.reviewLabel ?? "Resolve this record"}
+                          title={record.status.reviewLabel ?? "Resolve this record"}
+                          className="inline-flex items-center gap-1 rounded-inset border border-lead bg-lead px-2.5 py-1 text-[13px] font-medium text-white transition-colors hover:bg-lead-mid focus-visible:ring-2 focus-visible:ring-lead/30 focus-visible:outline-none"
+                        >
+                          Resolve
+                          <ArrowRight aria-hidden="true" className="size-3" />
+                        </Link>
+                      ) : (
+                        record.matchedOrgId && (
+                          <Link
+                            href={`/clients/${record.matchedOrgId}`}
+                            onClick={(event) => event.stopPropagation()}
+                            className="inline-flex items-center gap-1 rounded-inset px-2 py-0.5 text-[13px] font-medium text-lead transition-colors hover:bg-lead-wash"
+                          >
+                            Open client
+                            <ExternalLink aria-hidden="true" className="size-3" />
+                          </Link>
+                        )
+                      )}
+                      <ChevronDown
+                        aria-hidden="true"
+                        className={`size-4 text-faint transition-transform duration-200 ${
+                          isOpen ? "rotate-180" : ""
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <div id={panelId} className="card-collapse-grid" data-expanded={isOpen}>
+                    <div>
+                      <div className="mb-3.5 rounded-inset bg-paper px-4 py-3.5">
+                        <p className="text-[13px] leading-[1.55] text-ink">
+                          {record.status.description}
+                        </p>
+                        {record.status.reviewHref && (
+                          <Link
+                            href={record.status.reviewHref}
+                            className="mt-1.5 inline-block text-[13px] font-medium text-lead hover:underline"
+                          >
+                            {record.status.reviewLabel ?? "Open the queue"} →
+                          </Link>
+                        )}
+
+                        <h3 className="mt-4 flex items-center gap-1.5 text-[13px] font-semibold text-ink">
+                          <Building2 aria-hidden="true" className="size-[15px] text-faint" />
+                          {record.grantDetails ? "What the funder published" : "What the register holds"}
+                        </h3>
+
+                        {record.grantDetails ? (
+                          <dl className="mt-2.5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                            <Fact
+                              label="Funder"
+                              value={record.grantDetails.funderName ?? "Not published"}
+                            />
+                            <Fact
+                              label="Amount awarded"
+                              value={record.grantDetails.amountFormatted ?? "Not published"}
+                            />
+                            <Fact
+                              label="Award date"
+                              value={record.grantDetails.awardDate ?? "Not published"}
+                            />
+                            <Fact
+                              label="Programme"
+                              value={record.grantDetails.grantProgramme ?? "Not published"}
+                            />
+                            <Fact
+                              label="Recipient"
+                              value={record.matchedOrg ? record.matchedOrg.legalName : record.name}
+                            />
+                            <Fact
+                              label="Grant reference"
+                              value={
+                                <span className="font-mono text-[12.5px]">
+                                  {record.sourceRecordId}
+                                </span>
+                              }
+                            />
+                          </dl>
+                        ) : (
+                          <dl className="mt-2.5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                            <Fact label="Kind of organisation" value={record.filingType ?? "Not published"} />
+                            <Fact
+                              label="Status on the register"
+                              value={record.registryStatus ?? "Not published"}
+                            />
+                            <Fact
+                              label="Register number"
+                              value={
+                                <span className="font-mono text-[12.5px]">
+                                  {record.sourceRecordId}
+                                </span>
+                              }
+                            />
+                            {record.fullAddress && (
+                              <div className="sm:col-span-2">
+                                <Fact label="Registered address" value={record.fullAddress} />
+                              </div>
+                            )}
+                            {record.website && (
+                              <Fact
+                                label="Website"
+                                value={
+                                  <a
+                                    href={
+                                      record.website.startsWith("http")
+                                        ? record.website
+                                        : `https://${record.website}`
+                                    }
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex max-w-full items-center gap-1 text-lead hover:underline"
+                                  >
+                                    <Globe aria-hidden="true" className="size-3 shrink-0" />
+                                    <span className="truncate">{record.website}</span>
+                                  </a>
+                                }
+                              />
+                            )}
+                          </dl>
+                        )}
+
+                        {(record.grantDetails?.description ?? record.missionOrActivities) && (
+                          <div className="mt-3.5 border-t border-rule-soft pt-3.5">
+                            <p className="text-[12.5px] text-dim">
+                              {record.grantDetails ? "What the grant is for" : "What they do"}
+                            </p>
+                            <p className="mt-0.5 text-[13.5px] leading-[1.55] text-ink">
+                              {record.grantDetails?.description ?? record.missionOrActivities}
+                            </p>
+                          </div>
+                        )}
+
+                        <p className="mt-3.5 border-t border-rule-soft pt-3.5 text-[12.5px] text-dim">
+                          Read from {record.recordSource.replace(/_/g, " ")} on{" "}
+                          {record.receivedExact} ({record.receivedRelative}).
+                        </p>
+                      </div>
+
+                      {record.redactedFieldCount > 0 && (
+                        <p className="mb-3.5 rounded-inset bg-hold-wash px-4 py-3 text-[13px] leading-[1.55] text-ink">
+                          <ShieldCheck
+                            aria-hidden="true"
+                            className="mr-1.5 inline size-[15px] align-[-2px] text-hold"
+                          />
+                          Personal contact details were removed before this{" "}
+                          {thing} was saved, as the data handling rules require.
+                        </p>
+                      )}
+
+                      <details className="mb-4 group">
+                        <summary className="cursor-pointer list-none text-[12.5px] font-medium text-dim hover:text-ink">
+                          <Key>For developers</Key>
+                        </summary>
+                        <pre className="mt-2 max-h-56 overflow-auto rounded-inset bg-paper p-3 font-mono text-[11px] leading-[1.5] text-dim">
+                          {record.rawPayloadJson}
+                        </pre>
+                      </details>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
-    </div>
+    </SectionCard>
   );
 }

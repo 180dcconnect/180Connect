@@ -58,6 +58,7 @@ function promoteCounts(overrides: Partial<PromoteCounts> = {}): PromoteCounts {
     needsReview: 0,
     doesNotMeet: 0,
     failed: 0,
+    failureReasons: [],
     ...overrides,
   };
 }

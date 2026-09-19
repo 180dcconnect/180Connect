@@ -39,6 +39,7 @@
 
 import { redirect } from "next/navigation";
 
+import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { GmailInboxShell } from "@/components/inbox/gmail-inbox-shell";
 import { InboxRealtimeRefresher } from "@/components/inbox/inbox-realtime-refresher";
 import { getCurrentActor } from "@/lib/auth/actor";
@@ -449,6 +450,7 @@ export default async function InboxPage({
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-[#f6f8fc] text-foreground">
+      {actor.role === "viewer" && <RecordOnboardingStep step="view_inbox" />}
       <main className="flex h-full w-full min-h-0 flex-col py-2 pr-2 sm:pr-4">
         <InboxRealtimeRefresher />
         <GmailInboxShell

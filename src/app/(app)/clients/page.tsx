@@ -903,15 +903,21 @@ export default async function ClientsPage({
     href: r.filter ? rowHref(r.filter) : null,
   }));
 
-  // F255 step 2 — "review your assigned clients" is complete when the CAM has looked
-  // at their own list, which is this page filtered to themselves. Recording it here
-  // rather than on the guide's link means the step reflects what they did, not what
-  // they clicked. Anyone else's filtered list, or the unfiltered one, records nothing.
+  // F255 — onboarding step recording: each role's checklist ticks when the
+  // person actually opens the screen that *is* the step. Mounting the recorder
+  // on the screen, not on the guide's link, means the step reflects what they
+  // did, not what they clicked. A CAM's "Claim your clients" is still an
+  // opt-in visit (owner=self or the named self-link), not every visit to /clients.
+  // The viewer track (pipeline → inbox → analytics) ticks on mere arrival —
+  // viewing *is* the job for leadership.
+  const actorRole = authorization.actor.role;
   const reviewingOwnClients = ownerFilter === authorization.actor.id;
+  const isViewer = actorRole === "viewer";
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
         {reviewingOwnClients && <RecordOnboardingStep step="review_clients" />}
+        {isViewer && <RecordOnboardingStep step="view_clients" />}
         <SearchRail
           className="max-w-6xl"
           headingClassName="mb-8"

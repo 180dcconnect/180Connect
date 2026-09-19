@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion, useReducedMotionConfig, type Variants } from "motion/react";
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
-import { ArrowRight, Check, ChevronLeft, History, Mail, Plus, Search, SlidersHorizontal, X } from "lucide-react";
+import { ArrowDownUp, ArrowRight, Check, ChevronLeft, History, Mail, Plus, Search, SlidersHorizontal, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { EASE, stagger } from "@/components/brand/motion";
@@ -56,6 +56,9 @@ const GLASS_OPTIONS = glassItemIndexed(0.025, 0.3);
  * they stay legible.
  */
 export type SearchBarTone = "dark" | "light";
+
+/** Which way a sort runs. The words for it are the field's own — see `sort`. */
+export type SortDirection = "asc" | "desc";
 
 const SEARCH_BAR_TONES: Record<
   SearchBarTone,
@@ -366,6 +369,7 @@ export function BrandSearchBar({
    recentKey,
    busy = false,
    ask,
+   sort,
    openSignal,
    confirmSignal,
    confirm,
@@ -427,6 +431,44 @@ export function BrandSearchBar({
      /** Cap enforced in the field itself, so the limit is felt while typing
       *  rather than reported after submitting. */
      maxLength?: number;
+   };
+   /**
+    * A sort control beside the filter toggle: the same pill, a second job.
+    *
+    * Additive and opt-in, like `ask` — a host that passes nothing renders what
+    * it rendered before, with no second button on the bar. It is its own
+    * button rather than a category inside the filter panel because sorting is
+    * not filtering: a filter decides which rows exist and is staged until the
+    * search is submitted, while a sort only reorders the rows already on
+    * screen. Mixing the two would mean either a sort that waits for a submit
+    * it has no reason to wait for, or a filter panel where one row behaves
+    * differently from all the others.
+    *
+    * Choosing a field or a direction navigates immediately, writing both to
+    * the URL, so an order can be linked, refreshed and gone back to like every
+    * other piece of this page's state.
+    */
+   sort?: {
+     /** The query parameter holding the field, e.g. "sort". */
+     param: string;
+     /** The query parameter holding the direction, e.g. "dir". */
+     directionParam: string;
+     /** The field currently sorted on — one of `options`. */
+     value: string;
+     direction: SortDirection;
+     /**
+      * What can be sorted on. Each field names its own two directions in the
+      * words that fit it: "A to Z" for a name is the same instruction as
+      * "Newest first" for a date, and a bare "Ascending" makes the reader
+      * translate. Defaults cover the case where they genuinely are just up and
+      * down.
+      */
+     options: {
+       label: string;
+       value: string;
+       ascLabel?: string;
+       descLabel?: string;
+     }[];
    };
    /**
     * Reactive open signal: whenever this value changes (after mount), the
@@ -737,6 +779,34 @@ export function BrandSearchBar({
       router.push(`${window.location.pathname}?${params.toString()}`);
     });
   };
+  /**
+   * Whether the open panel is showing the sort view rather than the filters.
+   * One panel, two views: the bar is already the widest thing on the page, and
+   * a second floating sheet beside it would have to solve the same clipping
+   * and stacking problems this one already solves.
+   */
+  const [sorting, setSorting] = useState(false);
+
+  /**
+   * Sorting navigates on the tap, unlike a filter, which is staged until the
+   * search is submitted. A sort has nothing to stage — it cannot be combined
+   * with a second sort, and there is no cost to getting it wrong — so making
+   * the reader press Search afterwards would only be a step that never
+   * changes the answer.
+   */
+  const applySort = (field: string, direction: SortDirection) => {
+    if (!sort) return;
+    const params = new URLSearchParams(window.location.search);
+    params.set(sort.param, field);
+    params.set(sort.directionParam, direction);
+    // The order changed, so row 31 is a different row: page 4 of the old order
+    // is not a place to land.
+    params.delete("page");
+    startTransition(() => {
+      router.replace(`?${params.toString()}`, { scroll: false });
+    });
+  };
+
   const FILTER_PARAMS: Record<string, string> = useMemo(() => paramNames || DEFAULT_PARAMS, [paramNames]);
 
   // F215 — the free-text category's staged value. One input at a time is ever
@@ -968,6 +1038,7 @@ export function BrandSearchBar({
     setOpen(false);
     setConfirming(false);
     setTimeout(() => {
+      setSorting(false);
       setActiveFilter(null);
       setFilterQuery("");
       setExpandedRow(null);
@@ -1374,10 +1445,17 @@ export function BrandSearchBar({
           )}
           <button
             type="button"
-            aria-label={open ? "Close filters" : "Open filters"}
-            aria-expanded={open}
-            aria-controls={open ? listId : undefined}
+            aria-label={open && !sorting ? "Close filters" : "Open filters"}
+            aria-expanded={open && !sorting}
+            aria-controls={open && !sorting ? listId : undefined}
             onClick={() => {
+              // While the sort view is out, this button is the way back to the
+              // filters rather than a second way to shut the panel — pressing
+              // the sliders and having the pill close reads as a mis-tap.
+              if (open && sorting) {
+                setSorting(false);
+                return;
+              }
               if (open) {
                 close();
                 inputRef.current?.blur();
@@ -1387,8 +1465,32 @@ export function BrandSearchBar({
             }}
             className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${T.toggle} transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
           >
-            {open ? <X className="h-5 w-5" /> : <SlidersHorizontal className="h-4 w-4" />}
+            {open && !sorting ? <X className="h-5 w-5" /> : <SlidersHorizontal className="h-4 w-4" />}
           </button>
+
+          {/* Sort, beside the filters and never inside them: what order the rows
+              are in is a different question from which rows there are. */}
+          {sort && sort.options.length > 0 && (
+            <button
+              type="button"
+              aria-label={open && sorting ? "Close sort options" : "Sort"}
+              aria-expanded={open && sorting}
+              aria-controls={open && sorting ? listId : undefined}
+              onClick={() => {
+                if (open && sorting) {
+                  close();
+                  inputRef.current?.blur();
+                  return;
+                }
+                setActiveFilter(null);
+                setSorting(true);
+                setOpen(true);
+              }}
+              className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${T.toggle} transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
+            >
+              {open && sorting ? <X className="h-5 w-5" /> : <ArrowDownUp className="h-4 w-4" />}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1461,6 +1563,94 @@ export function BrandSearchBar({
                       {confirm.confirmLabel ?? submitLabel}
                     </button>
                   </div>
+                </motion.div>
+              ) : sort && sorting ? (
+                /* Sort: the fields, then the two directions the chosen field
+                   runs in, named in that field's own words. Both apply on the
+                   tap — see `applySort` — so the panel is a set of answers
+                   rather than a form. */
+                <motion.div
+                  key="sort"
+                  className="flex h-[280px] flex-col px-4 py-4"
+                  variants={PANEL_STAGGER}
+                  initial="hidden"
+                  animate="show"
+                  exit={{ opacity: 0, transition: { duration: 0.15 } }}
+                  role="group"
+                  aria-label="Sort"
+                >
+                  <motion.p
+                    variants={GLASS_ITEM}
+                    className={`shrink-0 px-3 pb-1.5 text-[13px] ${T.muted60}`}
+                  >
+                    Sort by
+                  </motion.p>
+
+                  <motion.ul
+                    variants={PANEL_STAGGER}
+                    className="min-h-0 flex-1 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+                  >
+                    {sort.options.map((option) => {
+                      const chosen = option.value === sort.value;
+                      return (
+                        <motion.li key={option.value} variants={GLASS_ITEM}>
+                          <button
+                            type="button"
+                            aria-pressed={chosen}
+                            onClick={() => applySort(option.value, sort.direction)}
+                            className={`font-body flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2 text-left text-lg font-medium transition-colors ${
+                              chosen ? T.bright : T.faint
+                            } ${T.hoverRow} ${T.hoverBright} focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
+                          >
+                            <span className="min-w-0 truncate">{option.label}</span>
+                            {chosen && (
+                              <Check
+                                aria-hidden="true"
+                                className={`h-4 w-4 shrink-0 ${T.accentText}`}
+                              />
+                            )}
+                          </button>
+                        </motion.li>
+                      );
+                    })}
+                  </motion.ul>
+
+                  {/* The direction, as the two things it would actually do.
+                      "A to Z" and "Z to A" say which way round the list comes
+                      out; "ascending" makes the reader work it out. */}
+                  {(() => {
+                    const field =
+                      sort.options.find((option) => option.value === sort.value) ??
+                      sort.options[0];
+                    const directions: { key: SortDirection; label: string }[] = [
+                      { key: "asc", label: field.ascLabel ?? "Ascending" },
+                      { key: "desc", label: field.descLabel ?? "Descending" },
+                    ];
+                    return (
+                      <motion.div
+                        variants={GLASS_ITEM}
+                        className={`mt-3 shrink-0 border-t ${T.divider} pt-3`}
+                      >
+                        <div className={`flex items-center gap-1 rounded-xl ${T.fieldBg} p-0.5`}>
+                          {directions.map((direction) => (
+                            <button
+                              key={direction.key}
+                              type="button"
+                              aria-pressed={sort.direction === direction.key}
+                              onClick={() => applySort(field.value, direction.key)}
+                              className={`font-body flex-1 rounded-lg px-2.5 py-1.5 text-xs font-bold transition-colors ${
+                                sort.direction === direction.key
+                                  ? "bg-[#e6f5c0] text-[#1a1a1a] shadow-xs"
+                                  : `${T.faint} ${T.hoverBright}`
+                              }`}
+                            >
+                              {direction.label}
+                            </button>
+                          ))}
+                        </div>
+                      </motion.div>
+                    );
+                  })()}
                 </motion.div>
               ) : panelRows ? (
                 <motion.ul

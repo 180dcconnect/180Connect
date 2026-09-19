@@ -57,10 +57,19 @@ type SearchParams = Promise<{
   trigger?: string;
   activity?: string;
   q?: string;
+  /** Keyset cursor: show runs started strictly before this ISO timestamp. */
+  before?: string;
 }>;
 
-/** How many runs one visit reads. A window, not the whole history. */
-const WINDOW = 100;
+/**
+ * How many runs one page shows.
+ *
+ * A window, not the whole history — and a smaller one than the 100 it was,
+ * because "earlier runs" is now one tap at the foot of the list rather than a
+ * dead end. At roughly a thousand runs a year, a reader looking for something
+ * from three years ago was previously reduced to editing the URL by hand.
+ */
+const WINDOW = 50;
 
 /** Category label → query parameter, for the shared brand search bar. */
 const FILTER_PARAMS = {
@@ -77,7 +86,7 @@ const STATUSES = ["running", "completed", "partial", "failed"] as const;
 /** The two Charity Commission pipelines — unified so filtering either matches both. */
 const CHARITY_COMMISSION_SOURCES = ["charity_commission", "charity_commission_bulk"] as const;
 
-const DATE_OPTIONS = [
+const DATE_PRESETS = [
   { label: "Today", value: "today" },
   { label: "Yesterday", value: "yesterday" },
   { label: "Past 7 days", value: "7d" },
@@ -85,6 +94,31 @@ const DATE_OPTIONS = [
   { label: "This month", value: "this_month" },
   { label: "Last month", value: "last_month" },
 ];
+
+/** How many named months the date filter offers before the reader picks dates. */
+const MONTH_OPTIONS_SHOWN = 18;
+
+/**
+ * The last eighteen months by name, newest first — "August 2026", not "30d".
+ * The presets above answer "what happened this week"; these answer "what
+ * happened that March", which is the question a year-old history gets asked and
+ * the one the page could not take. Anything older than these is reachable
+ * through the two date boxes under the search bar.
+ */
+function monthOptions(now: Date): { label: string; value: string }[] {
+  const options: { label: string; value: string }[] = [];
+  for (let back = 0; back < MONTH_OPTIONS_SHOWN; back += 1) {
+    const month = new Date(now.getFullYear(), now.getMonth() - back, 1);
+    const value = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`;
+    options.push({
+      label: month.toLocaleDateString("en-GB", { month: "long", year: "numeric" }),
+      value,
+    });
+  }
+  // The two nearest months already have their own presets, and offering the
+  // same span twice under two names reads as two different filters.
+  return options.slice(2);
+}
 
 const TRIGGER_OPTIONS = [
   { label: "Manual import", value: "manual" },
@@ -113,6 +147,13 @@ function labelForDateFilter(val: string): string {
     case "last_month":
       return "Last month";
     default:
+      if (/^\d{4}-\d{2}$/.test(val)) {
+        const [y, m] = val.split("-").map(Number);
+        return new Date(y, m - 1, 1).toLocaleDateString("en-GB", {
+          month: "long",
+          year: "numeric",
+        });
+      }
       if (val.includes("..")) {
         const [from, to] = val.split("..");
         if (/^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
@@ -177,6 +218,7 @@ export default async function AdminImportStatusPage({
     trigger: triggerFilter,
     activity: activityFilter,
     q: search,
+    before: cursor,
   } = await searchParams;
 
   const supabase = await createClient();
@@ -238,6 +280,13 @@ export default async function AdminImportStatusPage({
       query = query
         .gte("started_at", startOfLastMonth.toISOString())
         .lt("started_at", startOfThisMonth.toISOString());
+    } else if (/^\d{4}-\d{2}$/.test(dateFilter)) {
+      // A named month — "March 2031" — which is how someone reaches a period
+      // the rolling presets stopped covering years ago.
+      const [y, m] = dateFilter.split("-").map(Number);
+      query = query
+        .gte("started_at", new Date(y, m - 1, 1).toISOString())
+        .lt("started_at", new Date(y, m, 1).toISOString());
     } else if (dateFilter.includes("..")) {
       const [fromStr, toStr] = dateFilter.split("..");
       if (/^\d{4}-\d{2}-\d{2}$/.test(fromStr) && /^\d{4}-\d{2}-\d{2}$/.test(toStr)) {
@@ -388,7 +437,7 @@ export default async function AdminImportStatusPage({
                   label: labelForStatus(status),
                   value: status,
                 })),
-                "Filter by date": DATE_OPTIONS,
+                "Filter by date": [...DATE_PRESETS, ...monthOptions(now)],
                 "Filter by trigger": TRIGGER_OPTIONS,
                 "Filter by activity": ACTIVITY_OPTIONS,
               }}

@@ -39,39 +39,74 @@ export type StatusDetails = {
   tone: StatusTone;
   badgeClass: string;
   description: string;
+  /**
+   * Where the decision this record is waiting on is actually made, when it is
+   * waiting on one. "Pending Review" used to be the label on records nobody
+   * could review, on a page that named no queue — so a reader was told to do
+   * something with no way to do it. A status that asks for a decision now
+   * carries the link to the screen that takes it; a status that asks for
+   * nothing says so instead of implying a chore.
+   */
+  reviewHref?: string;
+  reviewLabel?: string;
 };
 
 const STATUS_MAP: Record<ProcessingStatus, StatusDetails> = {
   validated: {
-    label: "Added to CRM",
+    label: "Added",
     tone: "success",
     badgeClass: "bg-green-50 text-green-800 ring-green-600/20",
-    description: "Successfully added to your active clients in 180Connect",
+    description: "On the client list. Open the client to see it.",
   },
   matched: {
-    label: "Duplicate Candidate",
+    label: "Possible duplicate",
     tone: "warning",
     badgeClass: "bg-amber-50 text-amber-800 ring-amber-600/20",
-    description: "Flagged for admin review as a potential duplicate of an existing client",
+    description:
+      "Held because it looks like a client already on the list. An admin decides whether it is the same one.",
+    reviewHref: "/admin/duplicates",
+    reviewLabel: "Decide it on Possible duplicates",
   },
   pending: {
-    label: "Pending Review",
+    // Not a review, and never was: `pending` means staged from the register and
+    // not yet promoted. Labelling it "Pending Review" sent admins looking for a
+    // queue that does not exist for these records.
+    label: "Waiting to be added",
     tone: "info",
     badgeClass: "bg-blue-50 text-blue-800 ring-blue-600/20",
-    description: "Imported and queued for automatic profile completion",
+    description:
+      "Copied from the source and waiting its turn. The next import run adds it to the client list — nothing to decide.",
   },
   rejected: {
-    label: "Excluded by Criteria",
+    label: "Did not meet the client criteria",
     tone: "neutral",
     badgeClass: "bg-black/[0.04] text-foreground/70 ring-black/[0.08]",
-    description: "Filtered out (e.g. non-qualifying organisation type or outside region)",
+    description:
+      "Outside the branch's client criteria — the wrong kind of organisation, or outside the region — so it was not added.",
   },
   error: {
-    label: "Import Issue",
+    label: "Could not be saved",
     tone: "danger",
     badgeClass: "bg-red-50 text-red-800 ring-red-600/20",
-    description: "Could not be processed due to missing required registry details",
+    description:
+      "The client list refused this record. The reason is at the top of this page, under the run's own heading.",
   },
+};
+
+/**
+ * The other half of `rejected`: a record the criteria could not decide on its
+ * own, which an admin answers on the review queue. Same stored status, two
+ * different things to do about it, so the page has to tell them apart — the
+ * caller says which by passing `heldForReview`.
+ */
+const HELD_FOR_REVIEW: StatusDetails = {
+  label: "Held for review",
+  tone: "warning",
+  badgeClass: "bg-amber-50 text-amber-800 ring-amber-600/20",
+  description:
+    "The criteria could not decide this one, so it is waiting for an admin to say whether it belongs on the client list.",
+  reviewHref: "/admin/review",
+  reviewLabel: "Answer it on Review queue",
 };
 
 const GRANT_STATUS_MAP: Record<ProcessingStatus, StatusDetails> = {
@@ -107,8 +142,15 @@ const GRANT_STATUS_MAP: Record<ProcessingStatus, StatusDetails> = {
   },
 };
 
-export function getStatusDetails(status: ProcessingStatus, source?: string | null): StatusDetails {
+export function getStatusDetails(
+  status: ProcessingStatus,
+  source?: string | null,
+  options?: { heldForReview?: boolean },
+): StatusDetails {
   const map = source === "360giving" ? GRANT_STATUS_MAP : STATUS_MAP;
+  if (status === "rejected" && options?.heldForReview && source !== "360giving") {
+    return HELD_FOR_REVIEW;
+  }
   return (
     map[status] ?? {
       label: humaniseToken(status),
@@ -431,12 +473,24 @@ export type RawRecordView = {
   filingType: string | null;
   registryStatus: string | null;
   processingStatus: ProcessingStatus;
+  /**
+   * What the row is filtered by, as one value. `processing_status` alone cannot
+   * say it: a record held for an admin's decision and one the criteria settled
+   * are both stored `rejected`, and the filter has to offer them separately
+   * because they are different jobs — see `HELD_FOR_REVIEW`.
+   */
+  statusKey: string;
+  /** True when this record is waiting on the review queue. */
+  heldForReview: boolean;
   status: StatusDetails;
   matchedOrgId: string | null;
   matchedOrg: OrganisationPreview | null;
   grantDetails: GrantDetails | null;
   redactedFieldCount: number;
   excludedFields: string[];
+  /** When the record was read, as a sortable number. The two strings below
+   *  are for reading; this is for ordering. */
+  receivedAt: number;
   receivedExact: string;
   receivedRelative: string;
   rawPayloadJson: string;
@@ -446,7 +500,10 @@ export function describeRawRecord(
   row: RawSourceRecordRow,
   orgPreview: OrganisationPreview | null,
   now: Date,
+  /** True when this record is sitting on the review queue — see `getStatusDetails`. */
+  options?: { heldForReview?: boolean },
 ): RawRecordView {
+  const heldForReview = Boolean(options?.heldForReview) && row.processing_status === "rejected";
   const received = new Date(row.received_at);
   const name = orgPreview?.legalName || extractRecordName(row.raw_payload, row.source_record_id);
   const city = orgPreview?.city || extractRecordCity(row.raw_payload);
@@ -479,16 +536,200 @@ export function describeRawRecord(
     filingType,
     registryStatus,
     processingStatus: row.processing_status,
-    status: getStatusDetails(row.processing_status, row.record_source),
+    statusKey: recordStatusKey(row.processing_status, heldForReview),
+    heldForReview,
+    status: getStatusDetails(row.processing_status, row.record_source, options),
     matchedOrgId: row.matched_organisation_id,
     matchedOrg: orgPreview,
     grantDetails,
     redactedFieldCount: excluded.length,
     excludedFields: excluded,
+    receivedAt: received.getTime(),
     receivedExact: formatExactTime(received),
     receivedRelative: formatRelativeTime(received, now),
     rawPayloadJson: jsonStr,
   };
+}
+
+/**
+ * The value a record is filtered on. Held-for-review splits off `rejected`
+ * rather than sharing it, so choosing "did not meet the criteria" never hands
+ * back records that are actually waiting for someone.
+ */
+export function recordStatusKey(
+  status: ProcessingStatus,
+  heldForReview: boolean,
+): string {
+  return heldForReview && status === "rejected" ? "rejected_review" : status;
+}
+
+/** Whether a record is on the client list — the thing "Added" ultimately means. */
+export function isLinkedToClient(view: RawRecordView): boolean {
+  return Boolean(view.matchedOrgId);
+}
+
+/**
+ * The filters the page offers, each as the list of chosen values. Empty (or
+ * absent) means the filter is not applied — never "match nothing", so a link
+ * carrying an unknown value still shows the run rather than an empty page.
+ */
+export type RecordFilters = {
+  /** `statusKey` values — what happened to the record. */
+  status?: string[];
+  /** Town or postcode, exactly as the row shows it. */
+  place?: string[];
+  /** `filingType` values — the kind of organisation. */
+  kind?: string[];
+  /** "linked" (on the client list) or "unlinked". */
+  link?: string[];
+  /** "removed" (personal details were stripped) or "kept". */
+  details?: string[];
+};
+
+function chosen(values: string[] | undefined): Set<string> | null {
+  if (!values || values.length === 0) return null;
+  return new Set(values);
+}
+
+/**
+ * Every chosen filter must hold, and within one filter any chosen value will
+ * do — three towns means three towns, not none.
+ */
+export function matchesRecordFilters(
+  view: RawRecordView,
+  filters: RecordFilters,
+): boolean {
+  const status = chosen(filters.status);
+  if (status && !status.has(view.statusKey)) return false;
+
+  const place = chosen(filters.place);
+  if (place) {
+    const own = view.city ?? view.postcode;
+    if (!own || !place.has(own)) return false;
+  }
+
+  const kind = chosen(filters.kind);
+  if (kind && (!view.filingType || !kind.has(view.filingType))) return false;
+
+  const link = chosen(filters.link);
+  if (link) {
+    const own = isLinkedToClient(view) ? "linked" : "unlinked";
+    if (!link.has(own)) return false;
+  }
+
+  const details = chosen(filters.details);
+  if (details) {
+    const own = view.redactedFieldCount > 0 ? "removed" : "kept";
+    if (!details.has(own)) return false;
+  }
+
+  return true;
+}
+
+/**
+ * The choices a filter can offer, built from the records actually in the run.
+ *
+ * Offering a value nothing has is offering an empty page, and the labels differ
+ * by source (a 360Giving run says "Matched to Client" where a register run says
+ * "Added"), so the options are read off the records rather than listed here.
+ * Sorted by how common they are, then alphabetically, so the usual answer is
+ * first without the order jumping about between runs that tie.
+ */
+export function recordFilterOptions(
+  views: RawRecordView[],
+  pick: (view: RawRecordView) => { label: string; value: string } | null,
+): { label: string; value: string }[] {
+  const counts = new Map<string, { label: string; value: string; count: number }>();
+  for (const view of views) {
+    const option = pick(view);
+    if (!option) continue;
+    const existing = counts.get(option.value);
+    if (existing) existing.count += 1;
+    else counts.set(option.value, { ...option, count: 1 });
+  }
+  return Array.from(counts.values())
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .map(({ label, value }) => ({ label, value }));
+}
+
+/**
+ * What the records can be put in order by, and which way round.
+ *
+ * Four orders, because four are the questions people actually arrive with:
+ * when it came in (the run's own order), who it is, what happened to it, and
+ * where it is. Anything else is reachable by searching for it.
+ */
+export type RecordSortField = "read" | "name" | "outcome" | "place";
+export type SortDirection = "asc" | "desc";
+
+export const RECORD_SORT_FIELDS: RecordSortField[] = ["read", "name", "outcome", "place"];
+
+export function isRecordSortField(value: string): value is RecordSortField {
+  return (RECORD_SORT_FIELDS as string[]).includes(value);
+}
+
+/**
+ * How far through the run a record got, as a number to sort on.
+ *
+ * Read off the status's tone rather than its stored value: the tones already
+ * rank the same way a reader does — on the list, waiting, held, set aside,
+ * broken — and reading them here means a source with its own words for those
+ * states (360Giving) sorts correctly without a second table of its own.
+ */
+const OUTCOME_RANK: Record<StatusTone, number> = {
+  success: 0,
+  info: 1,
+  warning: 2,
+  neutral: 3,
+  danger: 4,
+};
+
+function comparable(view: RawRecordView, field: RecordSortField): string | number {
+  switch (field) {
+    case "name":
+      return view.name.toLowerCase();
+    case "outcome":
+      return OUTCOME_RANK[view.status.tone];
+    case "place":
+      return (view.city ?? view.postcode ?? "").toLowerCase();
+    case "read":
+      return view.receivedAt;
+  }
+}
+
+/**
+ * The records in the chosen order, as a new array — the caller's list is left
+ * alone.
+ *
+ * Two things every order does. A record with no town sorts to the end whichever
+ * way the list runs, because "nothing" is not a place between A and Z and a
+ * column of blanks at the top of an A-to-Z is not what anyone asked for. And
+ * every order falls back to the name, so two records that tie do not swap
+ * places between one render and the next.
+ */
+export function sortRecords(
+  views: RawRecordView[],
+  field: RecordSortField,
+  direction: SortDirection,
+): RawRecordView[] {
+  const sign = direction === "desc" ? -1 : 1;
+
+  return [...views].sort((a, b) => {
+    const left = comparable(a, field);
+    const right = comparable(b, field);
+
+    if (field === "place") {
+      // Empty sorts last in both directions, so the sign is applied to the
+      // comparison but never to the absence.
+      if (left === "" && right !== "") return 1;
+      if (right === "" && left !== "") return -1;
+    }
+
+    if (left < right) return -1 * sign;
+    if (left > right) return 1 * sign;
+
+    return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+  });
 }
 
 export function matchesRecordQuery(view: RawRecordView, query: string): boolean {

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { getViewingActor, getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
 import { reportError } from "@/lib/error-logging";
+import { failureNote } from "@/lib/import-failure-reason";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   describeFilters,
@@ -278,12 +279,24 @@ export async function runCompaniesRegisterImport(
         // `outcome.selected` is measured after the cap, so comparing it to the
         // cap can only ever be false. `available` is the pre-cap match.
         job_status: truncated ? "partial" : "completed",
-        completed_at: new Date().toISOString(),
+        // No `completed_at` yet: promotion runs after this write and is most of
+        // the wall clock. Stamping it here recorded a minute-long import as
+        // under a second, which is what Import Status then showed as its
+        // duration. The finishing update below stamps it when the run is
+        // genuinely over.
         records_fetched: outcome.selected,
         records_inserted: outcome.written,
         records_skipped: outcome.unchanged,
         records_failed: 0,
         run_stats: {
+          // What this run was asked for, so the run can explain itself and
+          // be repeated. Counts alone never could: "2,231 written" says
+          // nothing about which 2,231, and without the criteria a rerun would
+          // be a guess. Stored as the parsed filters plus the sentence the
+          // confirmation dialog showed, so the screen never has to rebuild
+          // that wording from the raw values.
+          criteria: parsed,
+          criteriaSentence: describeFilters(parsed),
           available,
           cap,
           truncated,
@@ -333,6 +346,14 @@ export async function runCompaniesRegisterImport(
       .from("ingestion_runs")
       .update({
         run_stats: {
+          // What this run was asked for, so the run can explain itself and
+          // be repeated. Counts alone never could: "2,231 written" says
+          // nothing about which 2,231, and without the criteria a rerun would
+          // be a guess. Stored as the parsed filters plus the sentence the
+          // confirmation dialog showed, so the screen never has to rebuild
+          // that wording from the raw values.
+          criteria: parsed,
+          criteriaSentence: describeFilters(parsed),
           available,
           cap,
           truncated,
@@ -345,7 +366,21 @@ export async function runCompaniesRegisterImport(
           doesNotMeet: promoted.doesNotMeet,
           invalidData: promoted.invalidData,
           failed: promoted.failed,
+          // Why they failed, not just how many. Without this the run row can
+          // only say "311 failed to save", which is what sent an admin looking
+          // for a developer with nothing for the developer to go on.
+          failureReasons: promoted.failureReasons,
         },
+        // The run ends here, after promotion — see the note on the staging
+        // update above.
+        completed_at: new Date().toISOString(),
+        // A run that saved nothing did not complete, whatever the staging half
+        // did — a green badge over an import that added no clients is the bug
+        // this screen kept reporting. `partial` is the status for "some of it
+        // worked"; nothing working at all is a failure.
+        ...(promoted.failed > 0
+          ? { job_status: promoted.inserted === 0 ? "failed" : "partial" }
+          : {}),
       })
       .eq("id", runId);
 
@@ -391,9 +426,7 @@ export async function runCompaniesRegisterImport(
         : "",
       promoted.flagged > 0 ? `${promoted.flagged.toLocaleString()} matched a client already on the list` : "",
       promoted.invalidData > 0 ? `${promoted.invalidData.toLocaleString()} could not be used` : "",
-      promoted.failed > 0
-        ? `${promoted.failed.toLocaleString()} failed to save — recorded, ask a developer to take a look`
-        : "",
+      promoted.failed > 0 ? failureNote(promoted.failed, promoted.failureReasons) : "",
     ]
       .filter(Boolean)
       .join(", ");

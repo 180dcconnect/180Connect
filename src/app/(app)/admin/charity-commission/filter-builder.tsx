@@ -546,13 +546,9 @@ export type PresetSummary = {
 function ImportProgressGauge({
   total,
   elapsed,
-  footnote,
 }: {
   total: number;
   elapsed: number;
-  /** Extra line under the gauge, or nothing. The dialog says closing is safe;
-      the sticky bar has nothing to close, so it passes none. */
-  footnote?: string;
 }) {
   const estimatedTotal = Math.max(total, 1) * SECONDS_PER_CHARITY;
   const estimatedLeft = Math.max(estimatedTotal - elapsed, 0);
@@ -590,9 +586,6 @@ function ImportProgressGauge({
           />
         </div>
       )}
-      {footnote && (
-        <p className="mt-2 text-xs leading-[1.6] text-foreground/55">{footnote}</p>
-      )}
     </div>
   );
 }
@@ -601,15 +594,23 @@ export function FilterBuilder({
   presets,
   localAuthorities,
   registerSize,
+  initialFilters,
 }: {
   presets: PresetSummary[];
   /** Every local authority in the snapshot, so the list can never go stale. */
   localAuthorities: string[];
   registerSize: number;
+  /**
+   * The selection to open with, when the screen was reached from an earlier
+   * run's "Run this again". The starting selection otherwise — insolvent
+   * charities excluded and nothing else — is the safe default for a blank
+   * screen, not something to impose on a reader who arrived with criteria.
+   */
+  initialFilters?: CharityRegisterFilters;
 }) {
-  const [filters, setFilters] = useState<CharityRegisterFilters>({
-    excludeInsolvent: true,
-  });
+  const [filters, setFilters] = useState<CharityRegisterFilters>(
+    initialFilters ?? { excludeInsolvent: true },
+  );
   const [count, setCount] = useState<number | null>(registerSize);
   const [counting, setCounting] = useState(false);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
@@ -923,13 +924,16 @@ export function FilterBuilder({
     setImportTotal(Math.min(count ?? 0, IMPORT_CAP));
     setElapsed(0);
     setImporting(true);
+    // The confirmation has done its job the moment it is answered, so it closes
+    // here rather than staying open to report on the import. Progress and the
+    // result belong to the pinned bar, which is on screen either way; a second
+    // gauge inside the dialog only covered it up.
+    setConfirming(false);
     startTransition(async () => {
       const result = await runRegisterImport(filters);
       setImportState(result);
       setImporting(false);
       setCounting(false);
-      // The dialog stays open: it now shows the result where the progress was,
-      // rather than closing and leaving the reader to find the banner behind it.
     });
   };
 
@@ -1802,97 +1806,6 @@ export function FilterBuilder({
       {/* ── Import confirmation dialog ── */}
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent className="rounded-2xl sm:max-w-md">
-          {importing ? (
-            <>
-              <DialogHeader>
-                <DialogTitle>Importing…</DialogTitle>
-                <DialogDescription className="leading-[1.65]">
-                  {description}
-                </DialogDescription>
-              </DialogHeader>
-
-              <ImportProgressGauge
-                total={importTotal}
-                elapsed={elapsed}
-                footnote="You can close this — the import keeps running, and the result will be waiting on this page."
-              />
-
-              <DialogFooter className="gap-2 sm:gap-2">
-                <DialogClose asChild>
-                  <button
-                    type="button"
-                    className="rounded-lg px-3 py-2 text-sm font-bold text-foreground/60 transition-colors hover:bg-black/[0.04] hover:text-foreground cursor-pointer"
-                  >
-                    Close
-                  </button>
-                </DialogClose>
-              </DialogFooter>
-            </>
-          ) : importState.kind === "done" ? (
-            <>
-              <DialogHeader>
-                <DialogTitle>Import finished</DialogTitle>
-                <DialogDescription className="leading-[1.65]">
-                  {importState.message}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div>
-                <HorizontalStickGauge
-                  checked={importState.written}
-                  total={Math.max(importState.selected, 1)}
-                  ariaLabel="Import result"
-                  checkedLabel="Written"
-                  remainingLabel="Already held"
-                  showTooltip={false}
-                  stickHeight={12}
-                />
-              </div>
-
-              <DialogFooter className="gap-2 sm:gap-2">
-                {consoleCtx && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setConfirming(false);
-                      consoleCtx.closeComposer();
-                    }}
-                    className="mr-auto text-xs font-bold text-brand underline underline-offset-2 hover:opacity-80 cursor-pointer"
-                  >
-                    View recent imports →
-                  </button>
-                )}
-                <OriginButton
-                  onClick={() => setConfirming(false)}
-                  size="md"
-                  type="button"
-                >
-                  Done
-                </OriginButton>
-              </DialogFooter>
-            </>
-          ) : importState.kind === "error" ? (
-            <>
-              <DialogHeader>
-                <DialogTitle>Import failed</DialogTitle>
-                <DialogDescription className="leading-[1.65]">
-                  {importState.message}
-                </DialogDescription>
-              </DialogHeader>
-
-              <DialogFooter className="gap-2 sm:gap-2">
-                <DialogClose asChild>
-                  <button
-                    type="button"
-                    className="rounded-lg px-3 py-2 text-sm font-bold text-foreground/60 transition-colors hover:bg-black/[0.04] hover:text-foreground cursor-pointer"
-                  >
-                    Close
-                  </button>
-                </DialogClose>
-              </DialogFooter>
-            </>
-          ) : (
-            <>
           <DialogHeader>
             <DialogTitle>
               Import {count?.toLocaleString() ?? ""}{" "}
@@ -1943,16 +1856,9 @@ export function FilterBuilder({
               size="md"
               type="button"
             >
-              <span className="inline-flex items-center gap-1.5">
-                {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2.2} />}
-                {isPending
-                  ? "Importing…"
-                  : `Yes, import ${count !== null && count > 10000 ? "10,000" : (count?.toLocaleString() ?? "")}`}
-              </span>
+              {`Yes, import ${count !== null && count > 10000 ? "10,000" : (count?.toLocaleString() ?? "")}`}
             </OriginButton>
           </DialogFooter>
-            </>
-          )}
         </DialogContent>
       </Dialog>
 

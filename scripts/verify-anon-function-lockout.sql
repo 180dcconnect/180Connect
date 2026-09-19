@@ -18,6 +18,7 @@ begin
     and p.proname in (
       'check_allowed_email_domain',
       'check_manual_entry_contact_email',
+      'restrict_signup_domain',
       'schedule_outreach_send',
       'suggest_organisation_edit'
     )
@@ -25,6 +26,22 @@ begin
 
   if exposed_functions is not null then
     raise exception 'Anonymous role can execute private function(s): %', exposed_functions;
+  end if;
+
+  if has_function_privilege(
+    'authenticated',
+    'public.restrict_signup_domain(jsonb)',
+    'EXECUTE'
+  ) then
+    raise exception 'Signed-in users can execute the before-user-created Auth hook';
+  end if;
+
+  if not has_function_privilege(
+    'supabase_auth_admin',
+    'public.restrict_signup_domain(jsonb)',
+    'EXECUTE'
+  ) then
+    raise exception 'Supabase Auth cannot execute the before-user-created Auth hook';
   end if;
 end
 $verify_anon_function_lockout$;

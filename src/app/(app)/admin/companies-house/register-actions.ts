@@ -347,7 +347,7 @@ export async function runCompaniesRegisterImport(
     // joins them so the row explains the whole import on its own — Import
     // Status reads this row, and without these it can only repeat the staging
     // half ("2,231 written") while the client list tells the other half.
-    await supabase
+    const { error: finalUpdateError } = await supabase
       .from("ingestion_runs")
       .update({
         run_stats: {
@@ -393,6 +393,18 @@ export async function runCompaniesRegisterImport(
               : "completed",
       })
       .eq("id", runId);
+
+    // Promotion already ran and clients may already be on the list, so this
+    // is reported rather than thrown — but left unchecked it is a run stuck
+    // 'running' forever with stale counts, which the status page then reports
+    // as stalled even though the import actually finished.
+    if (finalUpdateError) {
+      await reportError(finalUpdateError, {
+        operation: "admin.companies_register.import.finalize_run",
+        actorUserId: authorization.actor.id,
+        runId,
+      });
+    }
 
     // The criteria in words, not just the count: an import is the awkward thing
     // to undo on this screen, and "2,000 organisations" tells nobody later what

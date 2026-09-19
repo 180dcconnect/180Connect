@@ -150,7 +150,12 @@ export function CompaniesFilterBuilder({
   const [filters, setFilters] = useState<CompanyRegisterFilters>(
     initialFilters ?? { statuses: [...DEFAULT_STATUSES] },
   );
-  const [count, setCount] = useState<number | null>(registerSize);
+  // Restored criteria ("Run this again") almost never select the whole
+  // register, so starting from registerSize would show that wrong number —
+  // in the confirmation, the cap warning, and the progress total — for the
+  // 250ms before the debounced recount below corrects it. Unknown reads
+  // honestly as "—" until the real count for these filters lands.
+  const [count, setCount] = useState<number | null>(initialFilters ? null : registerSize);
   const [counting, setCounting] = useState(false);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
   const [showPreview, setShowPreview] = useState(false);

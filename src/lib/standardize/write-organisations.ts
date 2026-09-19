@@ -292,8 +292,11 @@ async function flagIfDuplicate(
     matchFields: {
       legal_name: org.legal_name,
       postcode: org.postcode,
+      // Namespaced for matching (see namespacedIdentifier); stripped back to
+      // the bare number here, since this is what the duplicates queue shows
+      // an admin, not a second matching comparison.
       ...(registrationNumbers && registrationNumbers.length > 0
-        ? { registrationNumbers: registrationNumbers.join(", ") }
+        ? { registrationNumbers: registrationNumbers.map((n) => n.replace(/^(uk_charity|uk_company):/, "")).join(", ") }
         : {}),
     },
   });
@@ -594,13 +597,18 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
       const identifiers = await fetchAllPages(async (from, to) =>
         supabase
           .from("organisation_identifiers")
-          .select("organisation_id, identifier_value")
+          .select("organisation_id, identifier_type, identifier_value")
           .range(from, to),
       );
       const numbersByOrganisation = new Map<string, string[]>();
       for (const row of identifiers) {
         const numbers = numbersByOrganisation.get(row.organisation_id) ?? [];
-        numbers.push(row.identifier_value);
+        // Namespaced by register (see namespacedIdentifier): a bare uk_company
+        // number and an unrelated charity's bare uk_charity number can coincide,
+        // and findDuplicateMatch/isCertainMatch would otherwise treat that as
+        // the strongest possible signal and, when the name also happened to
+        // agree, silently fold two different organisations into one.
+        numbers.push(namespacedIdentifier(row.identifier_type, row.identifier_value));
         numbersByOrganisation.set(row.organisation_id, numbers);
       }
 
@@ -934,6 +942,23 @@ export type SourceIdentifier = {
 };
 
 /**
+ * A bare registration number carries no register — a uk_company number and
+ * an unrelated charity's uk_charity number are drawn from different
+ * namespaces and can coincide. findDuplicateMatch (and isCertainMatch, which
+ * treats a registration-number match as the strongest possible signal) only
+ * ever compares registrationNumbers as opaque strings, so every array built
+ * for that comparison — both the existing-organisation side and the
+ * candidate side — tags each value with which register it came from. Two
+ * numbers now match only when both the value AND the register agree.
+ */
+export function namespacedIdentifier(
+  identifierType: SourceIdentifier["identifierType"],
+  identifierValue: string,
+): string {
+  return `${identifierType}:${identifierValue}`;
+}
+
+/**
  * Charity Commission: the charity number, not organisation_number.
  *
  * Exported for the pre-import preview (lib/import/charity-preview.ts): the
@@ -998,7 +1023,7 @@ function findThatCharityRegistrationNumbers(
   raw: RawFindThatCharityRecord,
 ): string[] | undefined {
   const match = /^GB-CHC-(.+)$/.exec(raw.id ?? "");
-  return match ? [match[1]] : undefined;
+  return match ? [namespacedIdentifier("uk_charity", match[1])] : undefined;
 }
 
 /**
@@ -1429,8 +1454,8 @@ export async function promotePendingCharityCommissionRecords(
       record.raw_payload as RawCharityCommissionRecord,
     );
     const registrationNumbers = [
-      charityNumber?.identifierValue,
-      companyNumber?.identifierValue,
+      charityNumber ? namespacedIdentifier(charityNumber.identifierType, charityNumber.identifierValue) : undefined,
+      companyNumber ? namespacedIdentifier(companyNumber.identifierType, companyNumber.identifierValue) : undefined,
     ].filter((n): n is string => Boolean(n));
 
     // The API payload is the register *summary* — name, address, income,
@@ -1620,7 +1645,7 @@ export async function promotePendingCompaniesHouseRecords(
           org,
           existingOrganisations,
           "companies_house",
-          companyNumber ? [companyNumber.identifierValue] : undefined,
+          companyNumber ? [namespacedIdentifier(companyNumber.identifierType, companyNumber.identifierValue)] : undefined,
         )
       ).flagged
     ) {
@@ -1655,7 +1680,9 @@ export async function promotePendingCompaniesHouseRecords(
       id: result.id,
       legal_name: org.legal_name,
       postcode: org.postcode ?? "",
-      registrationNumbers: companyNumber ? [companyNumber.identifierValue] : undefined,
+      registrationNumbers: companyNumber
+        ? [namespacedIdentifier(companyNumber.identifierType, companyNumber.identifierValue)]
+        : undefined,
     });
   }
 
@@ -1820,8 +1847,12 @@ export async function promotePendingCharityCommissionBulkRecords(
     const companyIdentifier = charityCommissionBulkCompanyIdentifier(raw);
 
     const registrationNumbers = [
-      charityIdentifier?.identifierValue,
-      companyIdentifier?.identifierValue,
+      charityIdentifier
+        ? namespacedIdentifier(charityIdentifier.identifierType, charityIdentifier.identifierValue)
+        : undefined,
+      companyIdentifier
+        ? namespacedIdentifier(companyIdentifier.identifierType, companyIdentifier.identifierValue)
+        : undefined,
     ].filter((n): n is string => Boolean(n));
 
     // A re-import carrying freshly filed activities must heal the existing

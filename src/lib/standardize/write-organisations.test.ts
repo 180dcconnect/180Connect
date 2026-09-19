@@ -559,7 +559,7 @@ describe("promotePending*Records — registration-number dedup (F042 strongest k
             id: "org-existing",
             legal_name: "Oxfam",
             postcode: "",
-            registrationNumbers: ["5254841"],
+            registrationNumbers: ["uk_charity:5254841"],
           },
         ];
       },
@@ -586,7 +586,7 @@ describe("promotePending*Records — registration-number dedup (F042 strongest k
             id: "org-existing",
             legal_name: "Acme Ltd",
             postcode: "",
-            registrationNumbers: ["01234567"],
+            registrationNumbers: ["uk_company:01234567"],
           },
         ];
       },
@@ -631,7 +631,7 @@ describe("promotePending*Records — registration-number dedup (F042 strongest k
             id: "org-existing",
             legal_name: "Oxfam",
             postcode: "",
-            registrationNumbers: ["202918"],
+            registrationNumbers: ["uk_charity:202918"],
           },
         ];
       },
@@ -2014,7 +2014,7 @@ describe("promotePendingCharityCommissionBulkRecords", () => {
             id: "org-existing",
             legal_name: "Original Company Ltd",
             postcode: "SW1A 1AA",
-            registrationNumbers: ["01336352"],
+            registrationNumbers: ["uk_company:01336352"],
           },
         ];
       },
@@ -2040,7 +2040,7 @@ describe("promotePendingCharityCommissionBulkRecords", () => {
             id: "org-existing",
             legal_name: "Someone Else Entirely",
             postcode: "LS1 1AA",
-            registrationNumbers: ["1000001"],
+            registrationNumbers: ["uk_charity:1000001"],
           },
         ];
       },
@@ -2210,7 +2210,7 @@ describe("promotePendingCompaniesHouseRecords — SIC codes", () => {
             id: "org-existing",
             legal_name: "Acme CIC",
             postcode: "",
-            registrationNumbers: ["01234567"],
+            registrationNumbers: ["uk_company:01234567"],
           },
         ];
       },
@@ -2242,7 +2242,7 @@ describe("duplicate re-import heals a missing mission", () => {
             id: "org-existing",
             legal_name: "Sheffield Example Trust",
             postcode: "S1 2HE",
-            registrationNumbers: ["1000001"],
+            registrationNumbers: ["uk_charity:1000001"],
           },
         ];
       },
@@ -2282,7 +2282,7 @@ describe("duplicate re-import heals a missing mission", () => {
             id: "org-existing",
             legal_name: "Sheffield Example Trust",
             postcode: "S1 2HE",
-            registrationNumbers: ["1000001"],
+            registrationNumbers: ["uk_charity:1000001"],
           },
         ];
       },
@@ -2305,7 +2305,7 @@ describe("duplicate re-import heals a missing mission", () => {
             id: "org-existing",
             legal_name: "Useful Charity",
             postcode: "",
-            registrationNumbers: ["1234567"],
+            registrationNumbers: ["uk_charity:1234567"],
           },
         ];
       },
@@ -2347,7 +2347,7 @@ describe("duplicate re-import heals a missing mission", () => {
             id: "org-existing",
             legal_name: "Useful Charity",
             postcode: "",
-            registrationNumbers: ["1234567"],
+            registrationNumbers: ["uk_charity:1234567"],
           },
         ];
       },

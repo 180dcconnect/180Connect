@@ -109,7 +109,9 @@ export function RecordFeed({
            to be seen, and a border inside a border is noise. */
         <p className="mt-3.5 rounded-inset bg-paper px-4 py-6 text-center text-[13px] leading-[1.55] text-dim">
           {filtersActive
-            ? `No ${things} match this search. Clear it from the search bar to see the whole run.`
+            ? capped
+              ? `No ${things} match this search among the ${windowSize.toLocaleString()} most recent — this run holds ${runTotal.toLocaleString()} in all, so a match further back would not be listed here. Clear the search to see the most recent ${windowSize.toLocaleString()}.`
+              : `No ${things} match this search. Clear it from the search bar to see the whole run.`
             : `This run recorded no ${things}.`}
         </p>
       ) : (

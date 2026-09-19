@@ -35,6 +35,17 @@ const MAX_NAME_LENGTH = 120;
 export const MAX_BULK_RECIPIENTS = 10;
 
 /**
+ * A clean send is finished work, so its drawer gets out of the way. Warnings
+ * stay visible because they contain the recovery path (usually a copyable
+ * invite link); errors stay visible so the admin can correct and retry.
+ */
+export function shouldCloseInviteSheet(
+  status: "idle" | "success" | "warning" | "error",
+): boolean {
+  return status === "success";
+}
+
+/**
  * `null` when the address is safe to submit, otherwise the sentence to show.
  * Ordered cheapest-and-most-specific first, so the admin is told the one thing
  * that is actually wrong rather than a generic "invalid email".

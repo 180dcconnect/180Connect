@@ -13,9 +13,15 @@ export const metadata: Metadata = { title: "Set Password | 180Connect" };
 export default async function ResetPasswordPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; flow?: string; email?: string; token_hash?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    flow?: string;
+    email?: string;
+    name?: string;
+    token_hash?: string;
+  }>;
 }) {
-  const { error, flow, email, token_hash: tokenHash } = await searchParams;
+  const { error, flow, email, name, token_hash: tokenHash } = await searchParams;
   const isInvite = flow === "invite";
 
   let existingFullName: string | null = null;
@@ -64,7 +70,7 @@ export default async function ResetPasswordPage({
           linkError={error ? (isInvite ? INVITE_LINK_ERROR : RESET_LINK_ERROR) : undefined}
           isInvite={isInvite}
           email={email}
-          existingFullName={existingFullName}
+          existingFullName={existingFullName ?? (isInvite ? name : null)}
           // Deferred invite verification: the token this link carried rides
           // the form as a hidden field and is verified when the password is
           // submitted — never rendered, never logged. Recovery never carries
@@ -76,5 +82,4 @@ export default async function ResetPasswordPage({
     </main>
   );
 }
-
 

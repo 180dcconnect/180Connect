@@ -44,7 +44,14 @@ function headline(run: IngestionRunRow): { value: number; label: string } | null
 
 export function ThreeSixtyRecentRuns({ runs, now }: { runs: IngestionRunRow[]; now: Date }) {
   const [latest, ...older] = runs;
-  const latestStalled = latest.job_status === "running" && isStalledRun(latest.started_at, now);
+  // `latest` is undefined when no import has ever run (a fresh production
+  // database). The empty state below renders in that case, but this line runs
+  // first — reading `job_status` off undefined threw and took the whole page
+  // down behind the error boundary.
+  const latestStalled =
+    latest !== undefined &&
+    latest.job_status === "running" &&
+    isStalledRun(latest.started_at, now);
 
   return (
     <section className="overflow-hidden rounded-panel border border-rule bg-white">

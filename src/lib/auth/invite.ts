@@ -462,7 +462,16 @@ async function mintAndSendInvite(
   // minting a new one overwrites it — the old token no longer matches anything
   // verifyOtp can find. Nothing in this repo invalidates it; Supabase does,
   // the same way a second password-reset request invalidates the first.
-  const link = `${redirectTo}?token_hash=${encodeURIComponent(tokenHash)}&type=invite`;
+  // Carry the two display values the setup screen needs before the token is
+  // verified. They are presentation only: the token still decides which
+  // account is updated, and the submitted name is validated again by the
+  // password Server Action. The name is deliberately editable on that screen.
+  const inviteUrl = new URL(redirectTo);
+  inviteUrl.searchParams.set("token_hash", tokenHash);
+  inviteUrl.searchParams.set("type", "invite");
+  inviteUrl.searchParams.set("email", email);
+  if (fullName?.trim()) inviteUrl.searchParams.set("name", fullName.trim());
+  const link = inviteUrl.toString();
   const { subject, text, html } = inviteEmail({
     link,
     inviterName: deps.inviterName ?? "An admin",
@@ -513,7 +522,12 @@ async function mintAndSendInvite(
  */
 export type LookupPendingInvite = (
   userId: string,
-) => Promise<{ email: string; accepted: boolean; role: InviteRole } | null>;
+) => Promise<{
+  email: string;
+  accepted: boolean;
+  role: InviteRole;
+  fullName?: string | null;
+} | null>;
 
 /** Shown when a resend is attempted for an id that no longer has a row. */
 export const INVITE_NOT_FOUND_MESSAGE = "This invite could not be found.";
@@ -548,7 +562,12 @@ export async function resendInvite(
   redirectTo: string,
   deps: SendInviteDeps = {},
 ): Promise<SendInviteOutcome> {
-  let invite: { email: string; accepted: boolean; role: InviteRole } | null;
+  let invite: {
+    email: string;
+    accepted: boolean;
+    role: InviteRole;
+    fullName?: string | null;
+  } | null;
   try {
     invite = await lookupPendingInvite(userId);
   } catch (error) {
@@ -587,6 +606,8 @@ export async function resendInvite(
       successMessage: `A new invite was sent to ${invite.email}.`,
       mintFailureMessage: "Could not resend the invite. Try again.",
     },
+    undefined,
+    invite.fullName,
   );
 
   if (outcome.ok && deps.touchInvitedAt) {

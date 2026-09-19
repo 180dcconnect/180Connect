@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useActionState, useState } from "react";
-import type { ResetPasswordState } from "@/lib/auth/password-reset";
+import {
+  isInviteSetupComplete,
+  type ResetPasswordState,
+} from "@/lib/auth/password-reset";
 import { setNewPassword } from "./actions";
 import {
   FloatingInput,
@@ -83,6 +86,7 @@ export function ResetPasswordForm({
   const [state, action, pending] = useActionState(setNewPassword, initialState);
   const [password, setPassword] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [fullName, setFullName] = useState(existingFullName ?? "");
   const needsName = !existingFullName;
   // Setting up an account asks for a name and the terms; coming back through a
   // forgot-password link does not. That person already has an account, already
@@ -93,6 +97,8 @@ export function ResetPasswordForm({
   const showName = Boolean(isInvite) || needsName;
   const showEmail = Boolean(isInvite) && Boolean(email);
   const showTerms = Boolean(isInvite);
+  const inviteSetupIncomplete =
+    Boolean(isInvite) && !isInviteSetupComplete(fullName, acceptedTerms);
 
   if (linkError) {
     return (
@@ -150,7 +156,8 @@ export function ResetPasswordForm({
             name="fullName"
             type="text"
             autoComplete="name"
-            defaultValue={existingFullName ?? ""}
+            value={fullName}
+            onChange={(event) => setFullName(event.target.value)}
             aria-invalid={Boolean(state.fieldErrors?.fullName)}
             className={fieldClass("light")}
             label="Your name"
@@ -249,7 +256,7 @@ export function ResetPasswordForm({
               ? "Create account"
               : "Set new password"
         }
-        disabled={pending || (showTerms && !acceptedTerms)}
+        disabled={pending || inviteSetupIncomplete}
         className="mt-2 self-start"
       />
     </form>

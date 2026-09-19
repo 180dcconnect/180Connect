@@ -5,6 +5,7 @@ import {
   emailSchema,
   fullNameSchema,
   inviteTokenFromForm,
+  isInviteSetupComplete,
   isRecoveryAllowedPath,
   MAX_FULL_NAME_LENGTH,
   NAME_TOO_LONG_MESSAGE,
@@ -127,6 +128,22 @@ describe("validation", () => {
     const result = fullNameSchema.safeParse("  Jane Doe  ");
     assert.equal(result.success, true);
     assert.equal(result.data, "Jane Doe");
+  });
+});
+
+describe("invite setup readiness", () => {
+  it("keeps account creation unavailable without a visible name", () => {
+    assert.equal(isInviteSetupComplete("", true), false);
+    assert.equal(isInviteSetupComplete("   ", true), false);
+    assert.equal(isInviteSetupComplete("\u200B", true), false);
+  });
+
+  it("keeps account creation unavailable until the terms are accepted", () => {
+    assert.equal(isInviteSetupComplete("Ada Lovelace", false), false);
+  });
+
+  it("allows account creation once both requirements are met", () => {
+    assert.equal(isInviteSetupComplete("Ada Lovelace", true), true);
   });
 });
 

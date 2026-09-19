@@ -23,10 +23,11 @@ function makeLookupPendingInvite(
   return async (id: string) => {
     const { data, error } = await supabase
       .from("users")
-      .select("email, invited_at, invite_accepted_at, role")
+      .select("email, full_name, invited_at, invite_accepted_at, role")
       .eq("id", id)
       .maybeSingle<{
         email: string;
+        full_name: string | null;
         invited_at: string | null;
         invite_accepted_at: string | null;
         role: InviteRole;
@@ -37,7 +38,12 @@ function makeLookupPendingInvite(
     // because invite_accepted_at happens to be null for it too. Same predicate
     // as team-realtime.ts's isPendingInvite().
     if (!data || !data.invited_at) return null;
-    return { email: data.email, accepted: data.invite_accepted_at !== null, role: data.role };
+    return {
+      email: data.email,
+      fullName: data.full_name,
+      accepted: data.invite_accepted_at !== null,
+      role: data.role,
+    };
   };
 }
 

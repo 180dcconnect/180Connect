@@ -25,6 +25,7 @@ import {
 } from "./invite-actions";
 import { GooeyActionButton } from "@/components/ui/gooey-action-button";
 import { OriginButton } from "@/components/ui/origin-button";
+import { useToast } from "@/components/ui/toast";
 import { FloatingLabelInput } from "@/components/spectrumui/floating-label-input";
 import { fieldClass, fieldVars } from "@/components/brand/fields";
 import type { InviteRole, InviteState } from "@/lib/auth/invite";
@@ -45,6 +46,7 @@ import { useRouter } from "next/navigation";
 import { ROLE_OPTIONS } from "./role-options";
 import {
   MAX_BULK_RECIPIENTS,
+  shouldCloseInviteSheet,
   validateInviteEmail,
   validateInviteName,
 } from "./invite-validation";
@@ -127,6 +129,7 @@ export function DarkInviteSheet({
   suspendedEmails = [],
 }: DarkInviteSheetProps = {}) {
   const router = useRouter();
+  const { showToast } = useToast();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<InviteMode>("single");
   const [defaultRole, setDefaultRole] = useState<InviteRole>("cam");
@@ -460,9 +463,18 @@ export function DarkInviteSheet({
         const result = await sendInviteAction({ status: "idle" }, formData);
         setSingleStatus(result);
 
-        // `warning` means the account exists but the email never went out, so
-        // the list has a new pending row either way.
-        if (result.status === "success" || result.status === "warning") {
+        if (shouldCloseInviteSheet(result.status)) {
+          router.refresh();
+          showToast(result.message ?? `Invitation sent to ${singleEmail.trim()}.`);
+          resetForm();
+          setOpen(false);
+          return;
+        }
+
+        // `warning` means the account exists but something still needs the
+        // admin's attention (often the email never went out). Refresh the list,
+        // but keep the drawer open so its explanation and invite link remain.
+        if (result.status === "warning") {
           router.refresh();
         }
       } catch {

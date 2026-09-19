@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   MAX_BULK_RECIPIENTS,
+  shouldCloseInviteSheet,
   validateInviteEmail,
   validateInviteName,
 } from "./invite-validation.ts";
@@ -104,5 +105,17 @@ describe("validateInviteName", () => {
 describe("MAX_BULK_RECIPIENTS", () => {
   it("is a sane batch cap", () => {
     assert.ok(MAX_BULK_RECIPIENTS > 0 && MAX_BULK_RECIPIENTS <= 100);
+  });
+});
+
+describe("shouldCloseInviteSheet", () => {
+  it("closes after a clean send", () => {
+    assert.equal(shouldCloseInviteSheet("success"), true);
+  });
+
+  it("keeps warnings and errors visible so the admin can act", () => {
+    assert.equal(shouldCloseInviteSheet("warning"), false);
+    assert.equal(shouldCloseInviteSheet("error"), false);
+    assert.equal(shouldCloseInviteSheet("idle"), false);
   });
 });

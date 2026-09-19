@@ -26,7 +26,14 @@ import {
 const RESEND_USER_ID = "user-42";
 
 type PendingLookupBehaviour =
-  | { row: { email: string; accepted: boolean; role?: InviteRole } | null }
+  | {
+      row: {
+        email: string;
+        accepted: boolean;
+        role?: InviteRole;
+        fullName?: string | null;
+      } | null;
+    }
   | { error: string };
 
 function fakePendingLookup(behaviour: PendingLookupBehaviour): {
@@ -350,12 +357,39 @@ describe("sendInvite", () => {
 
     assert.equal(sent.length, 1);
     assert.equal(sent[0].to, "ada@180dc.org");
-    const expected = `${REDIRECT_TO}?token_hash=${TOKEN_HASH}&type=invite`;
-    assert.ok(sent[0].text.includes(expected), "the plain-text body carries the full link");
+    const expected = new URL(REDIRECT_TO);
+    expected.searchParams.set("token_hash", TOKEN_HASH);
+    expected.searchParams.set("type", "invite");
+    expected.searchParams.set("email", "ada@180dc.org");
+    assert.ok(sent[0].text.includes(expected.toString()), "the plain-text body carries the full link");
     // The HTML body carries the same URL with the query separator escaped, which is
     // what belongs inside an href — a browser reads `&amp;` back as `&`.
-    assert.ok(sent[0].html.includes(expected.replace(/&/g, "&amp;")));
+    assert.ok(sent[0].html.includes(expected.toString().replace(/&/g, "&amp;")));
     assert.match(sent[0].text, /Bashir/);
+  });
+
+  it("carries the chosen name and email to the account setup screen", async () => {
+    const { lookup } = fakeLookupClient({ row: null });
+    const { client: admin } = fakeAdminClient({ ok: true });
+    const { send, sent } = fakeSender();
+
+    await silencingLogs(() =>
+      sendInvite(
+        lookup,
+        admin,
+        INVITED_BY,
+        { email: "ada@180dc.org", fullName: "Ada Lovelace" },
+        REDIRECT_TO,
+        "180dc.org",
+        { send },
+      ),
+    );
+
+    const link = sent[0]?.text.match(/https:\/\/\S+/)?.[0];
+    assert.ok(link);
+    const url = new URL(link);
+    assert.equal(url.searchParams.get("email"), "ada@180dc.org");
+    assert.equal(url.searchParams.get("name"), "Ada Lovelace");
   });
 
   it("reports an undelivered invite as a warning, not a success or an error", async () => {
@@ -628,7 +662,11 @@ describe("resendInvite", () => {
 
   it("mints a fresh token for the looked-up email and emails it (AC2, AC3)", async () => {
     const { lookup, calls: lookupCalls } = fakePendingLookup({
-      row: { email: "ada@180dc.org", accepted: false },
+      row: {
+        email: "ada@180dc.org",
+        accepted: false,
+        fullName: "Ada Lovelace",
+      },
     });
     const { client: admin, calls: adminCalls } = fakeAdminClient({ ok: true });
     const { send, sent } = fakeSender();
@@ -646,6 +684,9 @@ describe("resendInvite", () => {
     assert.equal(adminCalls[0].email, "ada@180dc.org");
     assert.equal(sent.length, 1);
     assert.match(sent[0].text, new RegExp(`token_hash=${TOKEN_HASH}`));
+    const link = sent[0].text.match(/https:\/\/\S+/)?.[0];
+    assert.ok(link);
+    assert.equal(new URL(link).searchParams.get("name"), "Ada Lovelace");
     assert.ok(logs.some((log) => log.includes("user.invite_resent")));
   });
 

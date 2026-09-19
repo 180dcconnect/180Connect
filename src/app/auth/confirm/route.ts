@@ -83,6 +83,14 @@ export async function GET(request: NextRequest) {
     const url = new URL("/reset-password", request.url);
     url.searchParams.set("flow", "invite");
     url.searchParams.set("token_hash", inviteToken);
+    // The invite is not verified until form submission, so there is no session
+    // from which the setup page can read these yet. Carry the display-only
+    // values from the server-generated invite link; neither is used to choose
+    // the account that the token ultimately updates.
+    const email = request.nextUrl.searchParams.get("email")?.trim();
+    const name = request.nextUrl.searchParams.get("name")?.trim();
+    if (email) url.searchParams.set("email", email);
+    if (name) url.searchParams.set("name", name);
     return NextResponse.redirect(url);
   }
 

@@ -126,6 +126,15 @@ export function normalizeFullName(value: string): string {
   return value.replace(INVISIBLE_CHARACTERS, " ").replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Client-side readiness for the invite setup form. The Server Action repeats
+ * both checks; this only keeps the CTA visibly unavailable until the person has
+ * entered a real, visible name and accepted the terms.
+ */
+export function isInviteSetupComplete(fullName: string, acceptedTerms: boolean): boolean {
+  return normalizeFullName(fullName).length > 0 && acceptedTerms;
+}
+
 export const MAX_FULL_NAME_LENGTH = 120;
 export const REQUIRED_NAME_MESSAGE = "Enter your name.";
 export const NAME_TOO_LONG_MESSAGE = "Name is too long.";

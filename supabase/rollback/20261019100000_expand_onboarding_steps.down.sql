@@ -7,20 +7,11 @@
 -- zero, same caveat as 20260805100000's rollback. Do not run casually against
 -- a workspace that has been using the 7-step guide.
 
-DO $$
-DECLARE
-  r record;
-BEGIN
-  FOR r IN
-    SELECT conname
-    FROM pg_constraint
-    WHERE conrelid = 'public.user_onboarding_steps'::regclass
-      AND contype = 'c'
-      AND pg_get_constraintdef(oid) ILIKE '%step_key%in%''outreach_preferences''%'
-  LOOP
-    EXECUTE format('ALTER TABLE public.user_onboarding_steps DROP CONSTRAINT %I', r.conname);
-  END LOOP;
-END $$;
+-- Named directly, not matched by definition text — see the migration's own
+-- comment on why an ILIKE for "in" beside the values never matches Postgres's
+-- stored `= ANY (ARRAY[...])` rendering of an inline IN (...) check.
+ALTER TABLE public.user_onboarding_steps
+  DROP CONSTRAINT IF EXISTS user_onboarding_steps_step_key_check;
 
 DELETE FROM public.user_onboarding_steps
 WHERE step_key NOT IN ('outreach_preferences', 'review_clients');

@@ -338,7 +338,7 @@ const SIZE_TONE_INSTRUCTIONS: Record<NonNullable<StageOneContext["incomeBand"]>,
   "10k_100k":
     "This client is small. Stay approachable and resource-conscious, with practical language and a low-pressure invitation. Do not mention its size, income, or finances.",
   "100k_500k":
-    "This client is an emerging mid-sized organisation. Be professional, practical, and collaborative, recognizing that they have established programmes and a small core team. Do not mention its size, income, or finances.",
+    "This client is an emerging mid-sized charity. Be professional, practical, and collaborative, recognizing that they have established programmes and a small core team. Do not mention its size, income, or finances.",
   "500k_1m":
     "This client is established and mid-sized. Be professional and collaborative, and assume it has defined priorities and several stakeholders. Do not mention its size, income, or finances.",
   "1m_10m":

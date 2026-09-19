@@ -22,22 +22,16 @@
 -- Documentation: Data Model USER_ONBOARDING_STEPS.step_key allowlist now 7 values.
 -- TODO (spreadsheet, not code): add 7-value allowlist to Data Model tab.
 
--- Drop whatever check currently gates step_key — handles both the original
--- auto-named constraint and any prior expansion that kept the same name.
-DO $$
-DECLARE
-  r record;
-BEGIN
-  FOR r IN
-    SELECT conname
-    FROM pg_constraint
-    WHERE conrelid = 'public.user_onboarding_steps'::regclass
-      AND contype = 'c'
-      AND pg_get_constraintdef(oid) ILIKE '%step_key%in%''outreach_preferences''%'
-  LOOP
-    EXECUTE format('ALTER TABLE public.user_onboarding_steps DROP CONSTRAINT %I', r.conname);
-  END LOOP;
-END $$;
+-- Drop whatever check currently gates step_key. Named directly rather than
+-- matched by definition text: Postgres rewrites an inline `IN (...)` check
+-- into `= ANY (ARRAY[...])` when it stores the constraint, so a pattern
+-- looking for the literal word "in" beside the values never matches, the
+-- DROP silently finds nothing, and the ADD CONSTRAINT below then fails with
+-- "constraint already exists" instead of replacing it. The name itself is
+-- exactly what stays stable (see the comment above) — that name is the
+-- reliable handle, not the definition's rendered SQL.
+ALTER TABLE public.user_onboarding_steps
+  DROP CONSTRAINT IF EXISTS user_onboarding_steps_step_key_check;
 
 -- Recreate with the full set, keeping the canonical constraint name.
 ALTER TABLE public.user_onboarding_steps

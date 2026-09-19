@@ -23,6 +23,7 @@ import { PriceRangeSlider } from "@/components/ui/range-slider";
 import { Checkbox } from "@/components/animate-ui/components/radix/checkbox";
 import { GooeyEmailInput } from "@/components/ui/gooey-email-input";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { HorizontalStickGauge } from "@/components/ui/horizontal-stick-gauge";
 import { useConsole } from "./import-console";
 import {
   Dialog,
@@ -127,6 +128,26 @@ function formatIncome(value: number | null): string {
   if (value >= 1_000_000) return `£${value / 1_000_000}m`;
   if (value >= 1_000) return `£${value / 1_000}k`;
   return MONEY.format(value);
+}
+
+/** Mirrors MAX_IMPORT in register-actions.ts: the action caps the selection, so the estimate must too. */
+const IMPORT_CAP = 10_000;
+
+/**
+ * Seconds one charity costs an import, staging plus promotion. A rough
+ * calibration, not a measurement: staging is local SQLite reads plus one
+ * batched upsert per 500 charities, promotion standardises and writes each
+ * record to Postgres. It only covers the seconds before anything real could
+ * be known — the import writes its run row when it finishes, so unlike the
+ * 360Giving backfill there is no live count to poll, and the gauge fills on
+ * this estimate instead.
+ */
+const SECONDS_PER_CHARITY = 0.5;
+
+function formatImportDuration(totalSeconds: number): string {
+  const clamped = Math.max(0, Math.round(totalSeconds));
+  const minutes = Math.floor(clamped / 60);
+  return `${minutes}:${String(clamped % 60).padStart(2, "0")}`;
 }
 
 // The slider's scale, labels and histogram live in src/lib/income-range.ts,
@@ -512,6 +533,70 @@ export type PresetSummary = {
   filters: CharityRegisterFilters;
 };
 
+/**
+ * What the import dialog shows while the import runs: an elapsed timer, an
+ * estimated countdown, and the stick gauge filling towards it — the same
+ * treatment the 360Giving backfill card gives a running batch.
+ *
+ * Estimated, stated as estimated: the import writes its run row only when it
+ * finishes, so there is no live count to poll. The gauge fills to 95% on the
+ * estimate (never full before the action resolves) and the tooltip stays off,
+ * because hover numbers drawn from an estimate would read as measurements.
+ */
+function ImportProgressGauge({
+  total,
+  elapsed,
+  footnote,
+}: {
+  total: number;
+  elapsed: number;
+  /** Extra line under the gauge, or nothing. The dialog says closing is safe;
+      the sticky bar has nothing to close, so it passes none. */
+  footnote?: string;
+}) {
+  const estimatedTotal = Math.max(total, 1) * SECONDS_PER_CHARITY;
+  const estimatedLeft = Math.max(estimatedTotal - elapsed, 0);
+  const attemptPercent = Math.min(95, Math.round((elapsed / estimatedTotal) * 100));
+  const filled = Math.min(Math.max(total - 1, 0), Math.round((attemptPercent / 100) * total));
+
+  return (
+    <div aria-live="polite">
+      <p className="text-sm font-bold text-foreground" role="status">
+        {total > 0 ? (
+          <>
+            Importing {total.toLocaleString()} {total === 1 ? "client" : "clients"} —{" "}
+            {formatImportDuration(elapsed)} so far ·{" "}
+            {estimatedLeft > 0 ? (
+              <>about {formatImportDuration(estimatedLeft)} to go</>
+            ) : (
+              "taking longer than expected, still working"
+            )}
+            .
+          </>
+        ) : (
+          <>Importing… {formatImportDuration(elapsed)} so far.</>
+        )}
+      </p>
+      {total > 0 && (
+        <div className="mt-3">
+          <HorizontalStickGauge
+            checked={filled}
+            total={total}
+            ariaLabel="Import progress (estimated)"
+            checkedLabel="Imported"
+            remainingLabel="Still to import"
+            showTooltip={false}
+            stickHeight={12}
+          />
+        </div>
+      )}
+      {footnote && (
+        <p className="mt-2 text-xs leading-[1.6] text-foreground/55">{footnote}</p>
+      )}
+    </div>
+  );
+}
+
 export function FilterBuilder({
   presets,
   localAuthorities,
@@ -546,6 +631,29 @@ export function FilterBuilder({
   const [postcodeDraft, setPostcodeDraft] = useState("");
   const [selectedZone, setSelectedZone] = useState<RegionalZone>("All");
   const [isPending, startTransition] = useTransition();
+  /**
+   * True from the moment Import is pressed until its result lands. `isPending`
+   * covers every transition on this screen (preview, save and delete included),
+   * so the dialog's progress view keys off this instead.
+   */
+  const [importing, setImporting] = useState(false);
+  /**
+   * Charities the running import was asked for, capped the way the action caps
+   * it. Captured at press time: edits made while it runs describe the next
+   * import, not this one.
+   */
+  const [importTotal, setImportTotal] = useState(0);
+  // Elapsed timer while the import runs. Reset in the press handler (an event,
+  // not an effect) so the effect body stays pure.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!importing) return;
+    const startedAt = Date.now();
+    const id = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 500);
+    return () => clearInterval(id);
+  }, [importing]);
 
   // Every filter change re-counts, debounced so dragging a control does not fire
   // a request per frame. The ref guards against an older, slower response
@@ -809,13 +917,21 @@ export function FilterBuilder({
     });
   };
 
-  const doImport = () =>
+  const doImport = () => {
+    // The estimate and gauge below are for this press, not for whatever the
+    // filters say by the time it finishes.
+    setImportTotal(Math.min(count ?? 0, IMPORT_CAP));
+    setElapsed(0);
+    setImporting(true);
     startTransition(async () => {
       const result = await runRegisterImport(filters);
       setImportState(result);
-      setConfirming(false);
+      setImporting(false);
       setCounting(false);
+      // The dialog stays open: it now shows the result where the progress was,
+      // rather than closing and leaving the reader to find the banner behind it.
     });
+  };
 
 
   const doSave = () =>
@@ -862,12 +978,21 @@ export function FilterBuilder({
         <div className="rounded-2xl border border-black/[0.09] bg-white/85 p-4 shadow-sm backdrop-blur-md sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
             <div className="min-w-0 flex-1">
+              {/* While an import runs this readout becomes its progress: the
+                  count it would otherwise show describes the next import, not
+                  the one running, and progress nobody can see without scrolling
+                  is the complaint that started this. The result lands in the
+                  banner at the foot of this same bar, and the count returns. */}
+              {importing ? (
+                <ImportProgressGauge total={importTotal} elapsed={elapsed} />
+              ) : (
+              <>
               <p className="flex items-baseline gap-2">
                 <span className="text-[clamp(1.75rem,4vw,2.5rem)] font-semibold leading-none tabular-nums tracking-[-0.03em]">
                   {count === null ? "—" : count.toLocaleString()}
                 </span>
                 <span className="text-sm text-foreground/55">
-                  {count === 1 ? "charity selected" : "charities selected"}
+                  {count === 1 ? "client selected" : "clients selected"}
                 </span>
                 {counting && (
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground/30" />
@@ -886,6 +1011,8 @@ export function FilterBuilder({
                     <span className="font-medium text-foreground/40">· modified</span>
                   )}
                 </p>
+              )}
+              </>
               )}
             </div>
 
@@ -984,7 +1111,13 @@ export function FilterBuilder({
                 {showPreview ? "Hide sample" : "See a sample"}
               </button>
               <OriginButton
-                onClick={() => setConfirming(true)}
+                onClick={() => {
+                  // The single way into an import, so it carries the reset the
+                  // old section button used to: a finished result belongs to
+                  // the import behind it, not to the confirmation opening now.
+                  setImportState({ kind: "idle" });
+                  setConfirming(true);
+                }}
                 disabled={isPending || count === 0}
                 size="md"
                 type="button"
@@ -1072,7 +1205,7 @@ export function FilterBuilder({
                     <table className="w-full min-w-[42rem] text-left text-sm">
                       <thead className="text-[11px] font-bold uppercase tracking-[0.1em] text-foreground/40">
                         <tr>
-                          <th className="py-2 pr-3 font-bold">Charity</th>
+                          <th className="py-2 pr-3 font-bold">Client</th>
                           <th className="py-2 pr-3 font-bold">Income</th>
                           <th className="py-2 pr-3 font-bold">Postcode</th>
                           <th className="py-2 font-bold">What they do</th>
@@ -1184,10 +1317,10 @@ export function FilterBuilder({
                     }
                     className="border-black/20 data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white"
                   />
-                  <span className="text-[14px]">Include charities with no published income</span>
+                  <span className="text-[14px]">Include clients with no published income</span>
                 </label>
                 <InfoTooltip
-                  content="The register publishes no income figure for some charities. That is not the same as a small charity, so they are included unless you say otherwise."
+                  content="The register publishes no income figure for some clients. That is not the same as a small client, so they are included unless you say otherwise."
                   side="top"
                 />
               </div>
@@ -1537,7 +1670,7 @@ export function FilterBuilder({
                   }
                   className="border-black/20 data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white"
                 />
-                <span>Only charities that have filed accounts</span>
+                <span>Only clients that have filed accounts</span>
               </label>
 
               <label
@@ -1567,7 +1700,7 @@ export function FilterBuilder({
         >
           <div className="space-y-4 pt-1">
             <p className="text-xs text-foreground/55">
-              Filter charities by words in their registered name. Type a keyword and tap the plus (or press Enter) to add it.
+              Filter clients by words in their registered name. Type a keyword and tap the plus (or press Enter) to add it.
             </p>
 
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
@@ -1582,7 +1715,7 @@ export function FilterBuilder({
                 inputType="text"
                 align="start"
                 className="shrink-0"
-                fieldLabel="Charity name"
+                fieldLabel="Client name"
                 submitLabel="Add name"
                 successPlaceholder="Added!"
                 validate={(val) => {
@@ -1666,71 +1799,104 @@ export function FilterBuilder({
         </FilterSection>
       </section>
 
-      {/* ── Import, behind a confirmation that restates the count and criteria ── */}
-      <section className="rounded-2xl border border-black/[0.07] bg-white p-5 shadow-xs sm:p-6">
-        <h3 className="text-sm font-bold text-foreground">Import</h3>
-        <p className="mt-1.5 text-sm leading-[1.6] text-foreground/65">
-          Adds the selected charities to the client list, with their filed accounts
-          where the register has them. Charities already on the list are matched,
-          not duplicated, so re-running a filter set is safe. A single import is
-          capped at 10,000 charities.
-        </p>
-
-        {unfiltered && (
-          <p className="mt-4 flex items-start gap-2 rounded-xl bg-amber-50 p-3 text-xs leading-[1.6] text-amber-900">
-            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
-            <span>
-              No filters are set, so this selects the entire register. That is
-              almost certainly not what you want — narrow it first.
-            </span>
-          </p>
-        )}
-
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <OriginButton
-            onClick={() => setConfirming(true)}
-            disabled={isPending || count === 0}
-            size="md"
-            type="button"
-          >
-            Import these charities
-          </OriginButton>
-        </div>
-
-        {importState.kind === "done" && (
-          <div
-            className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-green-50 p-4 text-sm font-bold text-green-900"
-            role="status"
-          >
-            <span>{importState.message}</span>
-            {consoleCtx && (
-              <button
-                type="button"
-                onClick={() => consoleCtx.closeComposer()}
-                className="text-xs font-bold text-green-800 underline underline-offset-2 hover:text-green-950 cursor-pointer"
-              >
-                View recent imports →
-              </button>
-            )}
-          </div>
-        )}
-        {importState.kind === "error" && (
-          <p
-            className="mt-4 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-900"
-            role="alert"
-          >
-            {importState.message}
-          </p>
-        )}
-      </section>
-
       {/* ── Import confirmation dialog ── */}
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent className="rounded-2xl sm:max-w-md">
+          {importing ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Importing…</DialogTitle>
+                <DialogDescription className="leading-[1.65]">
+                  {description}
+                </DialogDescription>
+              </DialogHeader>
+
+              <ImportProgressGauge
+                total={importTotal}
+                elapsed={elapsed}
+                footnote="You can close this — the import keeps running, and the result will be waiting on this page."
+              />
+
+              <DialogFooter className="gap-2 sm:gap-2">
+                <DialogClose asChild>
+                  <button
+                    type="button"
+                    className="rounded-lg px-3 py-2 text-sm font-bold text-foreground/60 transition-colors hover:bg-black/[0.04] hover:text-foreground cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </DialogClose>
+              </DialogFooter>
+            </>
+          ) : importState.kind === "done" ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Import finished</DialogTitle>
+                <DialogDescription className="leading-[1.65]">
+                  {importState.message}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div>
+                <HorizontalStickGauge
+                  checked={importState.written}
+                  total={Math.max(importState.selected, 1)}
+                  ariaLabel="Import result"
+                  checkedLabel="Written"
+                  remainingLabel="Already held"
+                  showTooltip={false}
+                  stickHeight={12}
+                />
+              </div>
+
+              <DialogFooter className="gap-2 sm:gap-2">
+                {consoleCtx && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirming(false);
+                      consoleCtx.closeComposer();
+                    }}
+                    className="mr-auto text-xs font-bold text-brand underline underline-offset-2 hover:opacity-80 cursor-pointer"
+                  >
+                    View recent imports →
+                  </button>
+                )}
+                <OriginButton
+                  onClick={() => setConfirming(false)}
+                  size="md"
+                  type="button"
+                >
+                  Done
+                </OriginButton>
+              </DialogFooter>
+            </>
+          ) : importState.kind === "error" ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Import failed</DialogTitle>
+                <DialogDescription className="leading-[1.65]">
+                  {importState.message}
+                </DialogDescription>
+              </DialogHeader>
+
+              <DialogFooter className="gap-2 sm:gap-2">
+                <DialogClose asChild>
+                  <button
+                    type="button"
+                    className="rounded-lg px-3 py-2 text-sm font-bold text-foreground/60 transition-colors hover:bg-black/[0.04] hover:text-foreground cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </DialogClose>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
           <DialogHeader>
             <DialogTitle>
               Import {count?.toLocaleString() ?? ""}{" "}
-              {count === 1 ? "charity" : "charities"}?
+              {count === 1 ? "client" : "clients"}?
             </DialogTitle>
             <DialogDescription className="leading-[1.65]">
               {description}
@@ -1738,8 +1904,8 @@ export function FilterBuilder({
           </DialogHeader>
 
           <p className="text-sm leading-[1.65] text-foreground/65">
-            Adds the selected charities to the client list, with their filed accounts
-            where the register has them. Charities already on the list are matched,
+            Adds the selected clients to the client list, with their filed accounts
+            where the register has them. Clients already on the list are matched,
             not duplicated. This will be recorded against your name in the audit log.
           </p>
 
@@ -1757,7 +1923,7 @@ export function FilterBuilder({
             <p className="flex items-start gap-2 rounded-xl bg-amber-50 p-3 text-xs leading-[1.6] text-amber-900">
               <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
               <span>
-                A single import is capped at 10,000 charities. The first 10,000 will be imported.
+                A single import is capped at 10,000 clients. The first 10,000 will be imported.
               </span>
             </p>
           )}
@@ -1785,6 +1951,8 @@ export function FilterBuilder({
               </span>
             </OriginButton>
           </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

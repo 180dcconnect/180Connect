@@ -165,7 +165,7 @@ export function QueueQualityCard({ bands, scored, totalOrgs, className = "" }: Q
         {totalOrgs === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-1 py-12 text-center">
             <p className="text-sm font-medium text-foreground">No clients yet</p>
-            <p className="text-xs text-muted-foreground">Organisations will appear here once ingested.</p>
+            <p className="text-xs text-muted-foreground">Clients will appear here once ingested.</p>
           </div>
         ) : (
           <>

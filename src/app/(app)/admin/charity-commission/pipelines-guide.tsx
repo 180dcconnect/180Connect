@@ -107,26 +107,26 @@ export function PipelinesGuide() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="rounded-xl border border-black/[0.06] bg-white p-4">
                   <h4 className="text-xs font-bold uppercase tracking-[0.1em] text-foreground/50">
-                    Why not store all 172,000 charities in our database immediately?
+                    Why not store all 172,000 clients in our database immediately?
                   </h4>
                   <p className="mt-2 text-xs leading-[1.6] text-foreground/70">
-                    Our database service provides a <strong>500 MB free quota</strong>. Each imported charity uses approximately 10 KB once profile details, multi-year filed accounts, and search indexes are recorded. Storing all 172,000 organisations would take <strong>over 1.7 GB</strong> — blowing past our limit by more than 3x and incurring expensive hosting bills.
+                    Our database service provides a <strong>500 MB free quota</strong>. Each imported client uses approximately 10 KB once profile details, multi-year filed accounts, and search indexes are recorded. Storing all 172,000 clients would take <strong>over 1.7 GB</strong> — blowing past our limit by more than 3x and incurring expensive hosting bills.
                   </p>
                   <p className="mt-2 text-xs leading-[1.6] text-foreground/70">
-                    Targeted regional imports (such as 1,000–3,400 local charities) only take ~10–34 MB and fit comfortably within our plan. However, any import exceeding <strong>7,000 charities (&gt;70 MB)</strong> or leaving filters completely open requires typed confirmation to protect our database capacity.
+                    Targeted regional imports (such as 1,000–3,400 local clients) only take ~10–34 MB and fit comfortably within our plan. However, any import exceeding <strong>7,000 clients (&gt;70 MB)</strong> or leaving filters completely open requires typed confirmation to protect our database capacity.
                   </p>
                 </div>
 
                 <div className="rounded-xl border border-black/[0.06] bg-white p-4">
                   <h4 className="text-xs font-bold uppercase tracking-[0.1em] text-foreground/50">
-                    Why some imported charities have an empty Financials tab
+                    Why some imported clients have an empty Financials tab
                   </h4>
                   <p className="mt-2 text-xs leading-[1.6] text-foreground/70">
-                    A charity has twelve months to reach its first financial year end
-                    and ten more to file, so a recently registered charity has no
+                    A client has twelve months to reach its first financial year end
+                    and ten more to file, so a recently registered client has no
                     accounts to show. That is the register being new, not an import
-                    failing. If you want only charities with a track record, tick
-                    &ldquo;only charities that have filed accounts&rdquo;.
+                    failing. If you want only clients with a track record, tick
+                    &ldquo;only clients that have filed accounts&rdquo;.
                   </p>
                 </div>
               </div>

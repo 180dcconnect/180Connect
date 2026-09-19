@@ -182,7 +182,7 @@ export async function fetchPage(
         return {
           status: "not_html",
           requestedUrl,
-          message: "That address is a file rather than a web page. Paste the organisation's website address instead.",
+          message: "That address is a file rather than a web page. Paste the client's website address instead.",
         };
       }
 

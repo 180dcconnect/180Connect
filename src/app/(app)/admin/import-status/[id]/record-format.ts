@@ -119,8 +119,35 @@ export function getStatusDetails(status: ProcessingStatus, source?: string | nul
   );
 }
 
-export function humaniseEntityType(type: unknown): string | null {
-  if (typeof type !== "string" || !type.trim()) return null;
+/**
+ * The staged bulk-charity shape, for the extractors below.
+ *
+ * The register import stages each charity as `{ charity: {...}, annual_returns,
+ * matched_classifications, matched_areas }` (see `toRawPayload`), while the
+ * API path stages a flat record. Every extractor below was written against the
+ * flat shape, so a pending bulk row — no organisation yet, nothing to rescue
+ * it — fell through to the number fallback, no city, "Standard client" and no
+ * address. One accessor for the nested object keeps that knowledge in one
+ * place instead of spreading `p.charity?.x` across seven functions.
+ */
+function bulkCharity(payload: unknown): Record<string, unknown> | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const top = payload as Record<string, unknown>;
+  // `annual_returns` is the marker that this is the staged register shape:
+  // toRawPayload always writes it (possibly empty), so a payload from any
+  // other path that happens to carry a `charity` key is never misread here.
+  if (!Array.isArray(top.annual_returns)) return null;
+  const nested = top.charity;
+  return typeof nested === "object" && nested !== null
+    ? (nested as Record<string, unknown>)
+    : null;
+}
+
+function trimmedString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+export function humaniseEntityType(type: unknown): string | null {  if (typeof type !== "string" || !type.trim()) return null;
   const t = type.toLowerCase().trim();
   if (t === "community-interest-company" || t === "cic") return "Community Interest Company (CIC)";
   if (t === "private-limited-guarant-nsc") return "Company Limited by Guarantee (Non-profit)";
@@ -140,6 +167,11 @@ export function extractRecordName(payload: unknown, fallbackId: string): string 
   if (typeof p.charity_name === "string" && p.charity_name.trim()) return p.charity_name.trim();
   if (typeof p.name === "string" && p.name.trim()) return p.name.trim();
   if (typeof p.title === "string" && p.title.trim()) return p.title.trim();
+
+  // Bulk register extract: the name lives on the nested charity object.
+  const nestedName = trimmedString(bulkCharity(payload)?.charity_name);
+  if (nestedName) return nestedName;
+
   if (typeof p.recipient_organization_name === "string" && p.recipient_organization_name.trim()) {
     return p.recipient_organization_name.trim();
   }
@@ -180,9 +212,43 @@ export function extractRecordCity(payload: unknown): string | null {
   return null;
 }
 
+/**
+ * Postcode when there is no city to show. The bulk register extract carries no
+ * town — only `charity_contact_postcode` — so pending bulk rows would otherwise
+ * show no location at all. Rendered with the same pin, in the city's place.
+ */
+export function extractRecordPostcode(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const p = payload as Record<string, unknown>;
+
+  const flat =
+    trimmedString(p.postcode) ?? trimmedString(p.postal_code) ?? trimmedString(p.postalCode);
+  if (flat) return flat;
+
+  return trimmedString(bulkCharity(payload)?.charity_contact_postcode);
+}
+
 export function formatFullAddress(payload: unknown): string | null {
   if (typeof payload !== "object" || payload === null) return null;
   const p = payload as Record<string, unknown>;
+
+  // Bulk register extract: five address lines plus a postcode, all nested.
+  const bulk = bulkCharity(payload);
+  if (bulk && !p.registered_office_address && !p.contact && !p.address) {
+    const parts: string[] = [];
+    for (const key of [
+      "charity_contact_address1",
+      "charity_contact_address2",
+      "charity_contact_address3",
+      "charity_contact_address4",
+      "charity_contact_address5",
+      "charity_contact_postcode",
+    ]) {
+      const line = trimmedString(bulk[key]);
+      if (line) parts.push(line);
+    }
+    return parts.length > 0 ? parts.join(", ") : null;
+  }
 
   let addrObj: Record<string, unknown> | null = null;
   if (typeof p.registered_office_address === "object" && p.registered_office_address !== null) {
@@ -221,7 +287,8 @@ export function extractMissionOrActivities(payload: unknown): string | null {
 
   if (typeof p.activities === "string" && p.activities.trim()) return p.activities.trim();
   if (typeof p.mission_statement === "string" && p.mission_statement.trim()) return p.mission_statement.trim();
-  if (typeof p.objects === "string" && p.objects.trim()) return p.objects.trim();
+  const nestedActivities = trimmedString(bulkCharity(payload)?.charity_activities);
+  if (nestedActivities) return nestedActivities;  if (typeof p.objects === "string" && p.objects.trim()) return p.objects.trim();
   if (typeof p.description === "string" && p.description.trim()) return p.description.trim();
 
   if (Array.isArray(p.sic_codes) && p.sic_codes.length > 0) {
@@ -237,6 +304,8 @@ export function extractWebsiteUrl(payload: unknown): string | null {
 
   if (typeof p.website === "string" && p.website.trim()) return p.website.trim();
   if (typeof p.website_url === "string" && p.website_url.trim()) return p.website_url.trim();
+  const nestedWebsite = trimmedString(bulkCharity(payload)?.charity_contact_web);
+  if (nestedWebsite) return nestedWebsite;
 
   if (typeof p.contact === "object" && p.contact !== null) {
     const c = p.contact as Record<string, unknown>;
@@ -261,6 +330,12 @@ export function extractRegistryStatus(payload: unknown): string | null {
     return humaniseToken(p.status.trim());
   }
 
+  // Bulk register extract: the register's own reporting status, nested.
+  const bulk = bulkCharity(payload);
+  const nestedStatus =
+    trimmedString(bulk?.charity_reporting_status) ?? trimmedString(bulk?.charity_registration_status);
+  if (nestedStatus) return humaniseToken(nestedStatus);
+
   return null;
 }
 
@@ -276,6 +351,17 @@ export function extractFilingType(payload: unknown): string | null {
   }
   if (typeof p.charity_type === "string" && p.charity_type.trim()) {
     return humaniseEntityType(p.charity_type.trim());
+  }
+
+  // Bulk register extract: the only type signal staged is the CIO flag, and a
+  // bulk row is a registered charity by construction (the file holds nothing
+  // else), so "Standard client" never fits one.
+  const bulk = bulkCharity(payload);
+  if (bulk) {
+    if (bulk.charity_is_cio === 1 || bulk.charity_is_cio === true) {
+      return humaniseEntityType("cio");
+    }
+    return "Registered Charity";
   }
 
   return null;
@@ -337,6 +423,8 @@ export type RawRecordView = {
   recordSource: string;
   name: string;
   city: string | null;
+  /** Postcode, shown with the pin when there is no city (bulk rows carry no town). */
+  postcode: string | null;
   fullAddress: string | null;
   missionOrActivities: string | null;
   website: string | null;
@@ -362,6 +450,7 @@ export function describeRawRecord(
   const received = new Date(row.received_at);
   const name = orgPreview?.legalName || extractRecordName(row.raw_payload, row.source_record_id);
   const city = orgPreview?.city || extractRecordCity(row.raw_payload);
+  const postcode = extractRecordPostcode(row.raw_payload);
   const excluded = Array.isArray(row.excluded_fields) ? row.excluded_fields : [];
   const fullAddress = formatFullAddress(row.raw_payload);
   const missionOrActivities = extractMissionOrActivities(row.raw_payload);
@@ -383,6 +472,7 @@ export function describeRawRecord(
     recordSource: row.record_source,
     name,
     city,
+    postcode,
     fullAddress,
     missionOrActivities,
     website,
@@ -409,6 +499,7 @@ export function matchesRecordQuery(view: RawRecordView, query: string): boolean 
     view.name,
     view.sourceRecordId,
     view.city ?? "",
+    view.postcode ?? "",
     view.fullAddress ?? "",
     view.recordSource,
     view.status.label,

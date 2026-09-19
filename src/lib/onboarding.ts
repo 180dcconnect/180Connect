@@ -45,7 +45,7 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
     key: "outreach_preferences",
     title: "Set your outreach preferences",
     description:
-      "Tell us which locations, sectors and organisation sizes you want to focus on. Your client queue is built from these, so it's worth a minute now.",
+      "Tell us which locations, sectors and client sizes you want to focus on. Your client queue is built from these, so it's worth a minute now.",
     href: "/settings/outreach-preferences",
     cta: "Open preferences",
   },
@@ -53,7 +53,7 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
     key: "review_clients",
     title: "Review your assigned clients",
     description:
-      "See the organisations you're responsible for, with their pipeline status. This is your working list day to day.",
+      "See the clients you're responsible for, with their pipeline status. This is your working list day to day.",
     href: "/clients",
     cta: "View my clients",
   },
@@ -66,7 +66,7 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
  */
 export const REVIEW_CLIENTS_EMPTY_STATE = {
   description:
-    "Nothing is assigned to you yet. Browse the client list and take ownership of an organisation to start building your pipeline.",
+    "Nothing is assigned to you yet. Browse the client list and take ownership of a client to start building your pipeline.",
   cta: "Browse clients",
 } as const;
 
@@ -87,6 +87,10 @@ export type OnboardingUser = {
  * It is a stricter test than "have they logged in before", and unlike a login count
  * it cannot drift.
  *
+ * Admins are CAMs with extra pages — they do the same client work and need the same
+ * first-run checklist. So the role gate is `cam` or `admin`; the only role kept out
+ * is `viewer` (leadership), who never owns clients or sets outreach preferences.
+ *
  * Either terminal timestamp being set ends the guide for good (AC5). Nothing here
  * treats them differently; they are two columns rather than one so that "finished it"
  * and "closed it early" stay distinguishable afterwards.
@@ -94,7 +98,7 @@ export type OnboardingUser = {
 export function shouldShowGuide(user: OnboardingUser | null): boolean {
   if (!user) return false;
   return (
-    user.role === "cam" &&
+    (user.role === "cam" || user.role === "admin") &&
     user.inviteAcceptedAt !== null &&
     user.onboardingCompletedAt === null &&
     user.onboardingDismissedAt === null

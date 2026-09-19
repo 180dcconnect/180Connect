@@ -459,14 +459,23 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
 
   return {
     async loadPendingRecords(source) {
-      const { data, error } = await supabase
-        .from("raw_source_records")
-        .select("id, raw_payload, source_record_id")
-        .eq("record_source", source)
-        .eq("processing_status", "pending");
+      // Paged, ordered, oldest first so the pages tile rather than overlap.
+      // PostgREST caps an unbounded select at 1000 rows without saying it
+      // truncated one — a bulk import staging several thousand would otherwise
+      // promote the first thousand and silently leave the rest pending, to be
+      // discovered (or not) on some later run.
+      const pending = await fetchAllPages<PendingRecord>(async (from, to) => {
+        const { data, error } = await supabase
+          .from("raw_source_records")
+          .select("id, raw_payload, source_record_id")
+          .eq("record_source", source)
+          .eq("processing_status", "pending")
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data: data as PendingRecord[] | null, error };
+      });
 
-      if (error) throw error;
-      return (data ?? []) as PendingRecord[];
+      return pending;
     },
 
     async loadExistingOrganisationsForMatching() {

@@ -228,6 +228,89 @@ describe("humaniseErrorMessage", () => {
   });
 });
 
+describe("register imports distinguish staging from clients added", () => {
+  const bulk = (overrides: Partial<IngestionRunRow> = {}): IngestionRunRow =>
+    run({
+      api_source: "charity_commission_bulk",
+      records_fetched: 2231,
+      records_inserted: 2231,
+      records_skipped: 0,
+      records_failed: 0,
+      records_flagged: 0,
+      run_stats: {
+        selected: 2231,
+        written: 2231,
+        unchanged: 0,
+        inserted: 0,
+        flagged: 0,
+        needsReview: 0,
+        doesNotMeet: 0,
+        invalidData: 0,
+        failed: 1934,
+      },
+      ...overrides,
+    });
+
+  it("never calls staged rows added", () => {
+    const summary = summariseRun(bulk());
+    assert.match(summary, /Staged 2,231 of 2,231 records/);
+    assert.match(summary, /0 added to the client list/);
+    assert.match(summary, /1,934 failed to save/);
+    assert.doesNotMatch(summary, /Added 2,231/);
+  });
+
+  it("reads clients added from the promotion breakdown", () => {
+    const summary = summariseRun(
+      bulk({
+        records_fetched: 66,
+        records_inserted: 66,
+        run_stats: {
+          selected: 66,
+          written: 66,
+          unchanged: 0,
+          inserted: 60,
+          flagged: 2,
+          needsReview: 1,
+          doesNotMeet: 2,
+          invalidData: 1,
+          failed: 0,
+        },
+      }),
+    );
+    assert.match(summary, /Staged 66 of 66 records, 60 added to the client list/);
+    assert.match(summary, /1 flagged for review/);
+    assert.match(summary, /2 did not meet the client criteria/);
+    assert.match(summary, /2 matched a client already on the list/);
+    assert.match(summary, /1 could not be used/);
+  });
+
+  it("says staged alone when promotion never ran", () => {
+    const summary = summariseRun(
+      bulk({ run_stats: { selected: 2231, written: 2231, unchanged: 0 } }),
+    );
+    assert.equal(summary, "Staged 2,231 of 2,231 records");
+  });
+
+  it("keeps the legacy labels for runs without a breakdown", () => {
+    const view = describeRun(run({ api_source: "charitybase" }), NOW);
+    assert.deepEqual(
+      view.counts.map((count) => count.label),
+      ["Fetched", "Added", "Skipped", "Failed", "Flagged"],
+    );
+  });
+
+  it("shows staged and clients-added counts for register imports", () => {
+    const view = describeRun(bulk(), NOW);
+    assert.deepEqual(
+      view.counts.map((count) => count.label),
+      ["Fetched", "Staged", "Clients added", "Skipped", "Failed", "Flagged"],
+    );
+    assert.equal(view.counts.find((count) => count.label === "Staged")?.value, 2231);
+    assert.equal(view.counts.find((count) => count.label === "Clients added")?.value, 0);
+    assert.equal(view.counts.find((count) => count.label === "Failed")?.value, 1934);
+  });
+});
+
 describe("matchesRunQuery", () => {
   const view = describeRun(
     run({ job_status: "failed", error_message: "COMPANIES_HOUSE_API_KEY is not set." }),

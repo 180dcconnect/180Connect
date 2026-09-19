@@ -43,11 +43,11 @@ export function NoAccountsNotice({
           title: "No accounts filed yet — and none is due",
           body: (
             <>
-              This charity was registered{" "}
+              This client was registered{" "}
               {reason.monthsRegistered <= 1
                 ? "within the last month"
                 : `${reason.monthsRegistered} months ago`}
-              . A charity has twelve months to reach its first financial year end
+              . A client has twelve months to reach its first financial year end
               and ten more to file, so the Commission publishes nothing until
               then
               {reason.dueFrom
@@ -65,7 +65,7 @@ export function NoAccountsNotice({
               <>
                 Registered {Math.floor(reason.monthsRegistered / 12)} years ago,
                 with no annual return the Commission publishes figures for. That
-                is unusual for a charity of that age — it may be late filing, or
+                is unusual for a client of that age — it may be late filing, or
                 filing under a threshold that reports totals only.
               </>
             ),
@@ -76,7 +76,7 @@ export function NoAccountsNotice({
             body: (
               <>
                 We hold no filed accounts and no registration date for this
-                charity, so we cannot say whether a return is due. The weekly
+                client, so we cannot say whether a return is due. The weekly
                 register refresh fills both in.
               </>
             ),
@@ -98,7 +98,7 @@ export function NoAccountsNotice({
               rel="noopener noreferrer"
               className="mt-2.5 inline-block text-[12.5px] font-medium text-lead underline decoration-lead/30 underline-offset-2 transition-colors hover:decoration-lead"
             >
-              Check charity {charityNumber} on the register
+              Check {charityNumber} on the register
               <span className="sr-only"> (opens in a new tab)</span>
             </a>
           )}

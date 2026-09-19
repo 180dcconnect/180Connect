@@ -140,7 +140,7 @@ function MatchCard({
         >
           <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" strokeWidth={2.4} />
           <span>
-            The Charity Commission lists this charity as{" "}
+            The Charity Commission lists this client as{" "}
             <strong className="font-semibold">
               {match.insolvent && match.inAdministration
                 ? "insolvent and in administration"

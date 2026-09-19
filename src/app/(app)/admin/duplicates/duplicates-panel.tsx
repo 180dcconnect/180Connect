@@ -774,7 +774,7 @@ export function DuplicatesPanel({
       {pending.length === 0 ? (
         <p className="rounded-panel border border-dashed border-rule bg-white px-5 py-6 font-body text-sm leading-[1.65] text-dim">
           {decided.length === 0
-            ? "Nothing has been held for a duplicate check yet. When an import finds a charity that looks like one already on the client list, it appears here."
+            ? "Nothing has been held for a duplicate check yet. When an import finds a client that looks like one already on the client list, it appears here."
             : "Nothing is waiting for a decision. Anything the importer flags from now on appears here."}
         </p>
       ) : (
@@ -793,7 +793,7 @@ export function DuplicatesPanel({
                   chipsBelow={false}
                   filters={searchFilters}
                   placeholder="Search"
-                  subjects={["charity names", "postcodes", "registration numbers"]}
+                  subjects={["client names", "postcodes", "registration numbers"]}
                   categories={searchCategories}
                   params={{
                     [MATCH_FILTER_CATEGORY]: "matched",
@@ -821,7 +821,7 @@ export function DuplicatesPanel({
             <p className="mt-0.5 text-[13px] leading-[1.55] text-dim">
               Showing {filteredPending.length.toLocaleString()} of{" "}
               {pending.length.toLocaleString()} waiting{" "}
-              {filteredPending.length === 1 ? "charity" : "charities"}
+              {filteredPending.length === 1 ? "client" : "clients"}
               {isFiltering && " matching this search"}
             </p>
             {searchFilters.length > 0 && (

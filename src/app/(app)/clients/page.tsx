@@ -937,7 +937,7 @@ export default async function ClientsPage({
                   value,
                 })),
                 ...typeValues.map((value) => ({
-                  category: "Filter by organisation type",
+                  category: "Filter by client type",
                   label: formatOrganisationType(value),
                   value,
                 })),
@@ -980,7 +980,7 @@ export default async function ClientsPage({
                 "Filter by city": "city",
                 "Filter by country": "country",
                 "Filter by outreach status": "status",
-                "Filter by organisation type": "type",
+                "Filter by client type": "type",
                 "Filter by sector": "sector",
                 "Filter by owner": "owner",
                 "Filter by tag": "tags",
@@ -993,7 +993,7 @@ export default async function ClientsPage({
                 "Filter by city": uniqueCities.map(c => ({ label: c, value: c })),
                 "Filter by country": uniqueCountries.map(c => ({ label: c, value: c })),
                 "Filter by outreach status": statusOptions,
-                "Filter by organisation type": typeOptions,
+                "Filter by client type": typeOptions,
                 "Filter by sector": SECTOR_FILTER_OPTIONS,
                 "Filter by owner": [
                   { label: "Unassigned", value: "unassigned" },
@@ -1024,12 +1024,12 @@ export default async function ClientsPage({
                   placeholder: "climate, youth education…",
                   hint:
                     missionTerm === null
-                      ? "Enter what a charity does — its mission, in your own words."
+                      ? "Enter what a client does — its mission, in your own words."
                       : missionExpansion?.mode === "semantic"
-                        ? `Also matching charities whose mission says it differently: ${missionKeywords.slice(0, 4).join(", ")}.`
+                        ? `Also matching clients whose mission says it differently: ${missionKeywords.slice(0, 4).join(", ")}.`
                         : missionExpansion?.mode === "unavailable"
                           ? "Widened matching is unavailable right now — matching your exact words only."
-                          : "Enter what a charity does — its mission, in your own words.",
+                          : "Enter what a client does — its mission, in your own words.",
                   maxLength: MISSION_TERM_MAX_LENGTH,
                 },
               }}
@@ -1053,7 +1053,7 @@ export default async function ClientsPage({
               <p className="mt-3 text-sm leading-[1.7] text-foreground/65">
                 {isOwnedView
                   ? "Clients you currently own. Reassigned away from you, or to you, this list reflects it on your next visit."
-                  : "The active working list. A suppressed charity is hidden from here until an admin lifts the suppression."}
+                  : "The active working list. A suppressed client is hidden from here until an admin lifts the suppression."}
               </p>
 
               {authorization.actor.role === "cam" && (

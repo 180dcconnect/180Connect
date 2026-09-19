@@ -45,8 +45,11 @@ describe("shouldShowGuide", () => {
     assert.equal(shouldShowGuide(newCam({ inviteAcceptedAt: null })), false);
   });
 
-  it("does not show it to admins or viewers", () => {
-    assert.equal(shouldShowGuide(newCam({ role: "admin" })), false);
+  it("shows the guide to an admin who was invited — admins are CAMs with extra pages", () => {
+    assert.equal(shouldShowGuide(newCam({ role: "admin" })), true);
+  });
+
+  it("does not show it to viewers (leadership — read only, no queue)", () => {
     assert.equal(shouldShowGuide(newCam({ role: "viewer" })), false);
   });
 

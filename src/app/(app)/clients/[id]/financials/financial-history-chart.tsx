@@ -422,8 +422,8 @@ export function IncomeMixPanel({ year }: { year: FinancialYear }) {
 
       <p className="mt-2 text-[11.5px] leading-[1.5] text-faint">
         {partial
-          ? `The register published ${formatCompactGbp(accounted)} of this year's ${formatCompactGbp(year.income)} income as a breakdown — smaller charities file totals with only part of the split, so these lines are not expected to add up.`
-          : "Lines as filed in the charity's annual return."}
+          ? `The register published ${formatCompactGbp(accounted)} of this year's ${formatCompactGbp(year.income)} income as a breakdown — smaller clients file totals with only part of the split, so these lines are not expected to add up.`
+          : "Lines as filed in the client's annual return."}
       </p>
     </div>
   );

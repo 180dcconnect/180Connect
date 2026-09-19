@@ -91,7 +91,7 @@ export async function proposeMissionFromWebsite(
     return {
       status: "skipped",
       reason:
-        "That page does not describe what this organisation does — it publishes no description of itself. You can still write a mission by hand.",
+        "That page does not describe what this client does — it publishes no description of itself. You can still write a mission by hand.",
     };
   }
 
@@ -110,7 +110,7 @@ export async function proposeMissionFromWebsite(
     return {
       status: "skipped",
       reason:
-        "That page only repeats the organisation's name back — it says nothing about what it does. You can still write a mission by hand.",
+        "That page only repeats the client's name back — it says nothing about what it does. You can still write a mission by hand.",
     };
   }
 

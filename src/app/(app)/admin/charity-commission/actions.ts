@@ -228,7 +228,7 @@ export async function previewCharityForImport(
   if (result.status === "not_found") {
     return {
       kind: "error",
-      message: "No charity on the Charity Commission register has that registration number.",
+      message: "No record on the Charity Commission register has that registration number.",
     };
   }
   if (result.status === "unavailable") {

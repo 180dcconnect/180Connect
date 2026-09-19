@@ -52,7 +52,7 @@ export function importStateFromSummary(
     // aren't actionable by the admin the way "you typed a bad number" is.
     const safeLookupMessages = [
       "Enter a valid Charity Commission registration number.",
-      "Charity Commission could not find a charity with that registration number.",
+      "Charity Commission could not find a record with that registration number.",
     ];
     return {
       kind: "error",

@@ -4,6 +4,15 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+## Computer-use consent
+
+- **Do not use browser, computer-use, or app automation unless the user explicitly
+  authorises it in the current request.** Assume it is unnecessary for most tasks.
+- Prefer repository inspection, code-level checks, and focused command-line
+  verification. Leave visual verification to the user unless they explicitly ask
+  the agent to perform it.
+- Permission is scoped to the task the user named; do not carry it into later tasks.
+
 ## Who will maintain this app
 
 The app is built by a technical developer, but it is being built on the assumption

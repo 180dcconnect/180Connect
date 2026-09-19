@@ -106,7 +106,7 @@ export function humaniseErrorMessage(errorMessage: string | null): HumanisedErro
     return {
       summary: "Charity Commission API subscription key is not set",
       description:
-        "The server requires a Charity Commission primary API key to fetch live registered charity records.",
+        "The server requires a Charity Commission primary API key to fetch live register records.",
       actionHint:
         "An administrator can configure this by setting the `CHARITY_COMMISSION_API_KEY` variable in your deployment environment settings.",
       rawMessage: raw,
@@ -168,6 +168,15 @@ export type IngestionRunRow = {
   completed_at: string | null;
   error_message: string | null;
   triggered_by?: string | null;
+  /**
+   * The run's own breakdown, when the pipeline wrote one. Register imports
+   * (Charity Commission bulk, Companies House bulk) stage register rows into
+   * raw_source_records and then promote them into clients in the same run, so
+   * `records_inserted` counts staged rows — not clients. When run_stats
+   * carries the staging/promotion split, the summary and counts below read
+   * from it instead of repeating the staging counter as "added".
+   */
+  run_stats?: Record<string, unknown> | null;
 };
 
 /** One count, ready to render. Zeroes are kept — "0 failed" is reassuring. */
@@ -198,6 +207,47 @@ export type RunView = {
 
 const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
 
+/** Sources whose runs stage register rows before promoting them into clients. */
+const REGISTER_IMPORT_SOURCES = new Set(["charity_commission_bulk", "companies_house"]);
+
+function numericStat(stats: Record<string, unknown>, key: string): number | null {
+  const value = stats[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Staging/promotion split for a register-import run, or null when the row
+ * predates the breakdown (or is not a register import at all). Keyed off the
+ * run_stats shape rather than the source alone: `companies_house` also labels
+ * non-import runs, and only the register import writes `written`.
+ */
+export type RegisterImportBreakdown = {
+  staged: number;
+  clientsAdded: number | null;
+  duplicates: number;
+  needsReview: number;
+  didNotMeet: number;
+  notUsable: number;
+  failedToSave: number;
+};
+
+export function registerImportBreakdown(run: IngestionRunRow): RegisterImportBreakdown | null {
+  if (!REGISTER_IMPORT_SOURCES.has(run.api_source)) return null;
+  const stats = run.run_stats;
+  if (!stats || typeof stats !== "object") return null;
+  const staged = numericStat(stats, "written");
+  if (staged === null) return null;
+  return {
+    staged,
+    clientsAdded: numericStat(stats, "inserted"),
+    duplicates: numericStat(stats, "flagged") ?? 0,
+    needsReview: numericStat(stats, "needsReview") ?? 0,
+    didNotMeet: numericStat(stats, "doesNotMeet") ?? 0,
+    notUsable: numericStat(stats, "invalidData") ?? 0,
+    failedToSave: numericStat(stats, "failed") ?? 0,
+  };
+}
+
 /**
  * The outcome as a sentence. Built from the counts rather than from the status
  * alone: two `completed` runs where one added ten thousand records and the other
@@ -226,6 +276,39 @@ export function summariseRun(run: IngestionRunRow, now: Date = new Date()): stri
 
   if (fetched === 0) return "Nothing to fetch — the source returned no records";
 
+  // Register imports stage rows and then promote them: the staging counter is
+  // not clients added, so the sentence carries both halves. Promotion keys are
+  // only present once promotion has run — a row with staging but no promotion
+  // breakdown says staged alone rather than claiming an outcome it never saw.
+  const register = registerImportBreakdown(run);
+  if (register) {
+    const staged =
+      register.staged === 0
+        ? `Staged nothing new from ${plural(fetched, "record")}`
+        : `Staged ${register.staged.toLocaleString()} of ${plural(fetched, "record")}`;
+    if (register.clientsAdded === null) {
+      return run.job_status === "partial" ? `${staged} — the run did not finish cleanly` : staged;
+    }
+    const tail = [
+      `${register.clientsAdded.toLocaleString()} added to the client list`,
+      register.needsReview > 0 ? `${register.needsReview.toLocaleString()} flagged for review` : "",
+      register.didNotMeet > 0
+        ? `${register.didNotMeet.toLocaleString()} did not meet the client criteria`
+        : "",
+      register.duplicates > 0
+        ? `${register.duplicates.toLocaleString()} matched a client already on the list`
+        : "",
+      register.notUsable > 0 ? `${register.notUsable.toLocaleString()} could not be used` : "",
+      register.failedToSave > 0
+        ? `${register.failedToSave.toLocaleString()} failed to save`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    const summary = `${staged}, ${tail}`;
+    return run.job_status === "partial" ? `${summary} — the run did not finish cleanly` : summary;
+  }
+
   const added =
     inserted === 0
       ? `Added nothing new from ${plural(fetched, "record")}`
@@ -242,13 +325,44 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
   const finished = run.completed_at ? new Date(run.completed_at) : null;
   const humanError = humaniseErrorMessage(run.error_message);
 
-  const counts: RunCount[] = [
-    { label: "Fetched", value: run.records_fetched, tone: "neutral" },
-    { label: "Added", value: run.records_inserted, tone: "success" },
-    { label: "Skipped", value: run.records_skipped, tone: "neutral" },
-    { label: "Failed", value: run.records_failed, tone: "danger" },
-    { label: "Flagged", value: run.records_flagged, tone: "warning" },
-  ];
+  const register = registerImportBreakdown(run);
+  const counts: RunCount[] = register
+    ? [
+        { label: "Fetched", value: run.records_fetched, tone: "neutral" },
+        { label: "Staged", value: register.staged, tone: "neutral" },
+        {
+          label: "Clients added",
+          value: register.clientsAdded ?? 0,
+          tone: "success",
+        },
+        { label: "Skipped", value: run.records_skipped, tone: "neutral" },
+        {
+          label: "Failed",
+          value: run.records_failed + register.failedToSave,
+          tone: "danger",
+        },
+        {
+          label: "Flagged",
+          value: run.records_flagged + register.duplicates,
+          tone: "warning",
+        },
+        ...(register.needsReview > 0
+          ? [{ label: "Needs review", value: register.needsReview, tone: "info" as RunTone }]
+          : []),
+        ...(register.didNotMeet > 0
+          ? [{ label: "Did not meet criteria", value: register.didNotMeet, tone: "neutral" as RunTone }]
+          : []),
+        ...(register.notUsable > 0
+          ? [{ label: "Not usable", value: register.notUsable, tone: "warning" as RunTone }]
+          : []),
+      ]
+    : [
+        { label: "Fetched", value: run.records_fetched, tone: "neutral" },
+        { label: "Added", value: run.records_inserted, tone: "success" },
+        { label: "Skipped", value: run.records_skipped, tone: "neutral" },
+        { label: "Failed", value: run.records_failed, tone: "danger" },
+        { label: "Flagged", value: run.records_flagged, tone: "warning" },
+      ];
 
   const triggeredBy = run.triggered_by ?? null;
   const triggerLabel =

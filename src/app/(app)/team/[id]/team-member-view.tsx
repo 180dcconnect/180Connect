@@ -336,7 +336,7 @@ export function TeamMemberView({
               <SectionCard
                 headingId="top-clients-heading"
                 title="Top Priority Clients"
-                hint="Highest priority organisation accounts currently owned."
+                hint="Highest priority client accounts currently owned."
                 icon={<Building2 />}
                 action={
                   clients.length > 4 ? (

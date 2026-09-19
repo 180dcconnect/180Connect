@@ -40,7 +40,7 @@ describe("checkClientCriteria", () => {
     assert.equal(health.healthcareAligned, true);
   });
 
-  it("rejects an organisation type outside the configured policy", () => {
+  it("rejects a client type outside the configured policy", () => {
     assert.equal(checkClientCriteria({ organisationType: "commercial" }).outcome, "does_not_meet");
   });
 

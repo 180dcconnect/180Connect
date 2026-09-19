@@ -137,7 +137,7 @@ describe("proposeSectorFromWebsite", () => {
     assert.ok(result.matchedTerms.includes("hospice"));
   });
 
-  it("reads the organisation's name as evidence alongside the description", async () => {
+  it("reads the client's name as evidence alongside the description", async () => {
     // The description alone points nowhere; the name carries "woodland" and
     // "conservation", and the proposal follows them.
     const result = await proposeSectorFromWebsite(

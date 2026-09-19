@@ -74,17 +74,27 @@ const COUNT_CLASS: Record<RunTone, string> = {
 const COUNT_DESCRIPTIONS: Record<string, string> = {
   Fetched: "Total retrieved from registry API",
   Added: "New or updated records saved",
+  Staged: "Register rows copied ready for promotion",
+  "Clients added": "New clients created from this run",
   Skipped: "Unchanged matching checksums",
   Failed: "Malformed records or API errors",
   Flagged: "Dissolved/status drift detected",
+  "Needs review": "Held for an admin decision",
+  "Did not meet criteria": "Outside the client criteria",
+  "Not usable": "No usable name to promote",
 };
 
 const COUNT_EXPLANATIONS: Record<string, string> = {
-  Fetched: "Total raw organisation records returned by the registry during this run.",
-  Added: "Brand-new organisations, or organisations whose details changed since last import.",
+  Fetched: "Total raw client records returned by the registry during this run.",
+  Added: "Brand-new clients, or clients whose details changed since last import.",
+  Staged: "Register rows copied into the staging table. Staging is not clients added — the promotion breakdown says how many became clients.",
+  "Clients added": "New client records created by this run's promotion.",
   Skipped: "Records whose data was 100% identical to what we already store. Skipped to prevent redundant processing.",
   Failed: "Records that failed validation, had empty IDs, or encountered network/database errors.",
-  Flagged: "Active client organisations where status recheck found the entity was dissolved, liquidated, or altered.",
+  Flagged: "Active clients where status recheck found the entity was dissolved, liquidated, or altered.",
+  "Needs review": "Clients held for an admin approval decision before joining the active list.",
+  "Did not meet criteria": "Records outside the branch's client criteria, so not added.",
+  "Not usable": "Records promotion could not read at all, such as a missing name.",
 };
 
 export type RunDayGroup = { key: string; label: string; events: RunView[] };

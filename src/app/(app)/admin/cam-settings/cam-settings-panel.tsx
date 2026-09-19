@@ -196,7 +196,7 @@ export function CamSettingsPanel({
               <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-5 text-sm text-blue-900 shadow-sm">
                 <p className="font-bold">No custom outreach preferences configured</p>
                 <p className="mt-1 text-blue-800/80">
-                  This CAM has not saved specific sector, geographic, or size filters. Their prospect queue receives standard default weighting across all locations, organisation sizes, and causes.
+                  This CAM has not saved specific sector, geographic, or size filters. Their prospect queue receives standard default weighting across all locations, client sizes, and causes.
                 </p>
               </div>
             </Rise>
@@ -227,7 +227,7 @@ export function CamSettingsPanel({
                   ) : (
                     <div className="rounded-xl bg-black/[0.03] p-3 text-xs text-foreground/60">
                       <span className="font-semibold text-foreground/80">All geographies included</span>
-                      <p className="mt-0.5">Local, regional, national, and international charities all appear.</p>
+                      <p className="mt-0.5">Local, regional, national, and international clients all appear.</p>
                     </div>
                   )}
                 </div>
@@ -238,7 +238,7 @@ export function CamSettingsPanel({
             <Rise>
               <div className="flex h-full flex-col rounded-2xl border border-black/[0.06] bg-white p-6 shadow-sm">
                 <div className="mb-4">
-                  <h3 className="text-base font-bold text-foreground">Organisation size</h3>
+                  <h3 className="text-base font-bold text-foreground">Client size</h3>
                   <p className="text-xs text-foreground/55">
                     Annual income range favoured in their queue.
                   </p>
@@ -258,7 +258,7 @@ export function CamSettingsPanel({
                   ) : (
                     <div className="rounded-xl bg-black/[0.03] p-3 text-xs text-foreground/60">
                       <span className="font-semibold text-foreground/80">All sizes included</span>
-                      <p className="mt-0.5">Charities across all income ranges appear without size filtering.</p>
+                      <p className="mt-0.5">Clients across all income ranges appear without size filtering.</p>
                     </div>
                   )}
                 </div>
@@ -271,7 +271,7 @@ export function CamSettingsPanel({
                 <div className="mb-4">
                   <h3 className="text-base font-bold text-foreground">Sector preferences</h3>
                   <p className="text-xs text-foreground/55">
-                    Targeted charity causes and focus areas.
+                    Targeted causes and focus areas.
                   </p>
                 </div>
                 <div className="flex-1">
@@ -289,7 +289,7 @@ export function CamSettingsPanel({
                   ) : (
                     <div className="rounded-xl bg-black/[0.03] p-3 text-xs text-foreground/60">
                       <span className="font-semibold text-foreground/80">All sectors included</span>
-                      <p className="mt-0.5">No specific sector filters set; all charity causes are eligible.</p>
+                      <p className="mt-0.5">No specific sector filters set; all causes are eligible.</p>
                     </div>
                   )}
                 </div>

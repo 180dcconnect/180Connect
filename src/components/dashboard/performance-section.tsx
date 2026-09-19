@@ -531,7 +531,7 @@ export function PerformanceSection({
           activeColorClass="bg-converted"
         />
         <PerformanceTile
-          label="Organisations Scored"
+          label="Clients Scored"
           count={effectiveSummary.orgsScored}
           unit="orgs"
           data={bucketData?.scores}

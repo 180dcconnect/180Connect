@@ -211,13 +211,13 @@ export function createCharityCommissionLookupAdapter(
         details = await fetchCharityDetails([registeredNumber], headers);
       } catch {
         throw new Error(
-          "Charity Commission could not find a charity with that registration number.",
+          "Charity Commission could not find a record with that registration number.",
         );
       }
 
       if (details.length === 0) {
         throw new Error(
-          "Charity Commission could not find a charity with that registration number.",
+          "Charity Commission could not find a record with that registration number.",
         );
       }
 

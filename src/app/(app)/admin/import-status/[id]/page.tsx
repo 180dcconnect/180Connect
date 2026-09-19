@@ -229,12 +229,12 @@ export default async function IngestionRunDetailPage({
                   <h2 className="text-lg font-bold text-foreground">
                     {isGrantSource
                       ? "Imported Grants & Client Breakdown"
-                      : "Imported Organisations & Filing Breakdown"}
+                      : "Imported Clients & Filing Breakdown"}
                   </h2>
                   <p className="text-xs text-foreground/60">
                     {isGrantSource
                       ? "Review grant records retrieved from 360Giving, verify which clients they were linked to, and view active client profiles in 180Connect."
-                      : "Review organisations retrieved from the official register, check filing status, and view active client profiles in 180Connect."}
+                      : "Review clients retrieved from the official register, check filing status, and view active client profiles in 180Connect."}
                   </p>
                 </div>
                 <p className="text-xs font-bold uppercase tracking-wider text-foreground/40 tabular-nums">

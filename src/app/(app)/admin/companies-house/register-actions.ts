@@ -180,6 +180,19 @@ export type ImportState =
       doesNotMeet: number;
       /** Matched an organisation already on the list, so flagged rather than added. */
       duplicates: number;
+      /**
+       * Records promotion could not read at all (no usable name). Counted but
+       * previously never mentioned, so an import that staged thousands and
+       * added nothing named nowhere they went.
+       */
+      invalidData: number;
+      /**
+       * Records whose organisation insert failed. Each failure is logged with
+       * its raw record id, and the rows keep status `error` — promotion only
+       * reads `pending`, so these are NOT picked up by a re-run and need a
+       * developer rather than a second press.
+       */
+      failed: number;
     };
 
 /**
@@ -283,6 +296,59 @@ export async function runCompaniesRegisterImport(
 
     const promoted = await promotePendingCompaniesHouseRecords();
 
+    // Records promotion could not save are the ones that need a human, and
+    // they used to be invisible: the message below never mentioned them, so an
+    // import that staged thousands and added nothing read as a silent zero.
+    // Logged with the run for the same reason — the counts alone in the run
+    // row cannot tell a quiet all-duplicates run from a broken one.
+    if (promoted.invalidData > 0 || promoted.failed > 0) {
+      await reportError(
+        new Error(
+          `Companies register import staged ${outcome.selected} but promotion ` +
+            `could not save ${promoted.invalidData + promoted.failed} ` +
+            `(invalid ${promoted.invalidData}, failed ${promoted.failed}).`,
+        ),
+        {
+          operation: "admin.companies_register.import.promote",
+          actorUserId: authorization.actor.id,
+          runId,
+          selected: outcome.selected,
+          written: outcome.written,
+          unchanged: outcome.unchanged,
+          inserted: promoted.inserted,
+          flagged: promoted.flagged,
+          needsReview: promoted.needsReview,
+          doesNotMeet: promoted.doesNotMeet,
+          invalidData: promoted.invalidData,
+          failed: promoted.failed,
+        },
+      );
+    }
+
+    // The run row's own counters describe staging; the promotion breakdown
+    // joins them so the row explains the whole import on its own — Import
+    // Status reads this row, and without these it can only repeat the staging
+    // half ("2,231 written") while the client list tells the other half.
+    await supabase
+      .from("ingestion_runs")
+      .update({
+        run_stats: {
+          available,
+          cap,
+          truncated,
+          selected: outcome.selected,
+          written: outcome.written,
+          unchanged: outcome.unchanged,
+          inserted: promoted.inserted,
+          flagged: promoted.flagged,
+          needsReview: promoted.needsReview,
+          doesNotMeet: promoted.doesNotMeet,
+          invalidData: promoted.invalidData,
+          failed: promoted.failed,
+        },
+      })
+      .eq("id", runId);
+
     // The criteria in words, not just the count: an import is the awkward thing
     // to undo on this screen, and "2,000 organisations" tells nobody later what
     // was actually asked for.
@@ -306,20 +372,28 @@ export async function runCompaniesRegisterImport(
     revalidatePath("/admin/companies-house");
     revalidatePath("/clients");
 
-    // Truncation leads, because it changes what the other numbers mean: "500
-    // added" reads as the whole job unless it says the job was a tenth of what
-    // was asked for.
+    // Staging and promotion are two different counts and the message must carry
+    // both: staging says how many register rows were copied (`written` counts
+    // re-writes too, not just new companies), promotion says how many clients
+    // resulted.
+    const staged =
+      outcome.unchanged > 0
+        ? `${outcome.selected.toLocaleString()} staged (${outcome.unchanged.toLocaleString()} already held)`
+        : `${outcome.selected.toLocaleString()} staged`;
     const summary = [
       truncated
         ? `Imported the first ${cap.toLocaleString()} of ${available.toLocaleString()} matching companies`
-        : "",
+        : staged,
       `${promoted.inserted.toLocaleString()} added to the client list`,
       promoted.needsReview > 0 ? `${promoted.needsReview.toLocaleString()} flagged for review` : "",
       promoted.doesNotMeet > 0
         ? `${promoted.doesNotMeet.toLocaleString()} did not meet the client criteria`
         : "",
       promoted.flagged > 0 ? `${promoted.flagged.toLocaleString()} matched a client already on the list` : "",
-      outcome.unchanged > 0 ? `${outcome.unchanged.toLocaleString()} already held` : "",
+      promoted.invalidData > 0 ? `${promoted.invalidData.toLocaleString()} could not be used` : "",
+      promoted.failed > 0
+        ? `${promoted.failed.toLocaleString()} failed to save — recorded, ask a developer to take a look`
+        : "",
     ]
       .filter(Boolean)
       .join(", ");
@@ -341,6 +415,8 @@ export async function runCompaniesRegisterImport(
       needsReview: promoted.needsReview,
       doesNotMeet: promoted.doesNotMeet,
       duplicates: promoted.flagged,
+      invalidData: promoted.invalidData,
+      failed: promoted.failed,
     };
   } catch (error) {
     if (runId) {

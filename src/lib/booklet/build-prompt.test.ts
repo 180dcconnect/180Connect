@@ -298,7 +298,7 @@ describe("buildBookletPrompt", () => {
 
   it("does not mention scraped website content when none is given", () => {
     const { system, prompt } = buildBookletPrompt(RICH_ORG, RICH_ENRICHMENT);
-    assert.doesNotMatch(system, /extracted from the charity's own website/);
+    assert.doesNotMatch(system, /extracted from the client's own website/);
     assert.doesNotMatch(prompt, /Extracted text from/);
   });
 
@@ -307,7 +307,7 @@ describe("buildBookletPrompt", () => {
       text: "We run weekly youth clubs across London.",
       hostname: "test-charity.org",
     });
-    assert.match(system, /extracted from the charity's own website/);
+    assert.match(system, /extracted from the client's own website/);
     assert.match(system, /navigation labels, cookie notices/);
     assert.match(prompt, /Extracted text from test-charity\.org:/);
     assert.match(prompt, /We run weekly youth clubs across London\./);

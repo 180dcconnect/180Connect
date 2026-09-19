@@ -88,7 +88,7 @@ const MAX_IMPORT = 10_000;
  * path error, which names the filesystem and helps nobody using the screen.
  */
 const REGISTER_MISSING =
-  "The charity register is not loaded on this deployment. Use “Refresh register” " +
+  "The register is not loaded on this deployment. Use “Refresh register” " +
   "to build it, or ask an admin to.";
 
 export type PreviewState =
@@ -205,6 +205,19 @@ export type ImportState =
       doesNotMeet: number;
       /** Matched an organisation already on the list, so flagged rather than added. */
       duplicates: number;
+      /**
+       * Records promotion could not read at all (no usable name). Counted but
+       * previously never mentioned, so an import that staged thousands and
+       * added nothing named nowhere they went.
+       */
+      invalidData: number;
+      /**
+       * Records whose organisation insert failed. Each failure is logged with
+       * its raw record id, and the rows keep status `error` — promotion only
+       * reads `pending`, so these are NOT picked up by a re-run and need a
+       * developer rather than a second press.
+       */
+      failed: number;
     };
 
 /**
@@ -296,6 +309,56 @@ export async function runRegisterImport(
 
     const promoted = await promotePendingCharityCommissionBulkRecords();
 
+    // Records promotion could not save are the ones that need a human, and
+    // they used to be invisible: the message below never mentioned them, so an
+    // import that staged thousands and added nothing read as a silent zero.
+    // Logged with the run for the same reason — the counts alone in the run
+    // row cannot tell a quiet all-duplicates run from a broken one.
+    if (promoted.invalidData > 0 || promoted.failed > 0) {
+      await reportError(
+        new Error(
+          `Charity register import staged ${outcome.selected} but promotion ` +
+            `could not save ${promoted.invalidData + promoted.failed} ` +
+            `(invalid ${promoted.invalidData}, failed ${promoted.failed}).`,
+        ),
+        {
+          operation: "admin.charity_register.import.promote",
+          actorUserId: authorization.actor.id,
+          runId,
+          selected: outcome.selected,
+          written: outcome.written,
+          unchanged: outcome.unchanged,
+          inserted: promoted.inserted,
+          flagged: promoted.flagged,
+          needsReview: promoted.needsReview,
+          doesNotMeet: promoted.doesNotMeet,
+          invalidData: promoted.invalidData,
+          failed: promoted.failed,
+        },
+      );
+    }
+
+    // The run row's own counters describe staging; the promotion breakdown
+    // joins them so the row explains the whole import on its own — Import
+    // Status reads this row, and without these it can only repeat the staging
+    // half ("2,231 written") while the client list tells the other half.
+    await supabase
+      .from("ingestion_runs")
+      .update({
+        run_stats: {
+          selected: outcome.selected,
+          written: outcome.written,
+          unchanged: outcome.unchanged,
+          inserted: promoted.inserted,
+          flagged: promoted.flagged,
+          needsReview: promoted.needsReview,
+          doesNotMeet: promoted.doesNotMeet,
+          invalidData: promoted.invalidData,
+          failed: promoted.failed,
+        },
+      })
+      .eq("id", runId);
+
     // The criteria in words, not just the count: an import is the awkward thing
     // to undo on this screen, and "2,000 organisations" tells nobody later what
     // was actually asked for.
@@ -317,14 +380,29 @@ export async function runRegisterImport(
     revalidatePath("/admin/charity-commission");
     revalidatePath("/clients");
 
+    // Staging and promotion are two different counts and the message must carry
+    // both: staging says how many register rows were copied (`written` counts
+    // re-writes too, not just new charities), promotion says how many clients
+    // resulted. Leading with promotion alone is what once reported "0 added"
+    // for an import that had staged thousands — with the failed and unusable
+    // rows, which live in neither count a reader can see, named rather than
+    // dropped.
+    const staged =
+      outcome.unchanged > 0
+        ? `${outcome.selected.toLocaleString()} staged (${outcome.unchanged.toLocaleString()} already held)`
+        : `${outcome.selected.toLocaleString()} staged`;
     const summary = [
+      staged,
       `${promoted.inserted.toLocaleString()} added to the client list`,
       promoted.needsReview > 0 ? `${promoted.needsReview.toLocaleString()} flagged for review` : "",
       promoted.doesNotMeet > 0
         ? `${promoted.doesNotMeet.toLocaleString()} did not meet the client criteria`
         : "",
       promoted.flagged > 0 ? `${promoted.flagged.toLocaleString()} matched a client already on the list` : "",
-      outcome.unchanged > 0 ? `${outcome.unchanged.toLocaleString()} already held` : "",
+      promoted.invalidData > 0 ? `${promoted.invalidData.toLocaleString()} could not be used` : "",
+      promoted.failed > 0
+        ? `${promoted.failed.toLocaleString()} failed to save — recorded, ask a developer to take a look`
+        : "",
     ]
       .filter(Boolean)
       .join(", ");
@@ -339,6 +417,8 @@ export async function runRegisterImport(
       needsReview: promoted.needsReview,
       doesNotMeet: promoted.doesNotMeet,
       duplicates: promoted.flagged,
+      invalidData: promoted.invalidData,
+      failed: promoted.failed,
     };
   } catch (error) {
     if (runId) {
@@ -535,7 +615,7 @@ export async function runAnnualReturnBackfillNow(
     if (outcome.organisations === 0) {
       return {
         kind: "done",
-        message: "Nothing to fill in — every charity already holds what the register publishes.",
+        message: "Nothing to fill in — every client already holds what the register publishes.",
         ...outcome,
       };
     }
@@ -544,7 +624,7 @@ export async function runAnnualReturnBackfillNow(
       kind: "done",
       message:
         `Filled ${outcome.periods.toLocaleString()} filed ${outcome.periods === 1 ? "year" : "years"} ` +
-        `across ${outcome.organisations.toLocaleString()} ${outcome.organisations === 1 ? "charity" : "charities"}` +
+        `across ${outcome.organisations.toLocaleString()} ${outcome.organisations === 1 ? "client" : "clients"}` +
         (outcome.remaining > 0 ? `. ${outcome.remaining.toLocaleString()} still queued.` : "."),
       ...outcome,
     };
@@ -662,7 +742,7 @@ export async function runProfileBackfillNow(
     if (outcome.organisations === 0) {
       return {
         kind: "done",
-        message: "Nothing to fill in — every charity already holds what the register publishes.",
+        message: "Nothing to fill in — every client already holds what the register publishes.",
         ...outcome,
       };
     }
@@ -671,7 +751,7 @@ export async function runProfileBackfillNow(
       kind: "done",
       message:
         `Filled ${outcome.fields.toLocaleString()} ${outcome.fields === 1 ? "field" : "fields"} ` +
-        `across ${outcome.organisations.toLocaleString()} ${outcome.organisations === 1 ? "charity" : "charities"}` +
+        `across ${outcome.organisations.toLocaleString()} ${outcome.organisations === 1 ? "client" : "clients"}` +
         (outcome.remaining > 0 ? `. ${outcome.remaining.toLocaleString()} still queued.` : "."),
       ...outcome,
     };
@@ -784,7 +864,7 @@ export async function runReachBackfillNow(
     if (outcome.organisations === 0) {
       return {
         kind: "done",
-        message: "Nothing to fill in — every charity already has how far it works on file.",
+        message: "Nothing to fill in — every client already has how far it works on file.",
         ...outcome,
       };
     }
@@ -793,7 +873,7 @@ export async function runReachBackfillNow(
       kind: "done",
       message:
         `Filled in how far ${outcome.organisations.toLocaleString()} ` +
-        `${outcome.organisations === 1 ? "charity works" : "charities work"}` +
+        `${outcome.organisations === 1 ? "client works" : "clients work"}` +
         (outcome.remaining > 0 ? `. ${outcome.remaining.toLocaleString()} still queued.` : "."),
       ...outcome,
     };
@@ -924,7 +1004,7 @@ export async function runCompanyNumberBackfillNow(
       return {
         kind: "done",
         message:
-          "Nothing outstanding — every charity the register publishes a company number for already carries it.",
+          "Nothing outstanding — every client the register publishes a company number for already carries it.",
         ...outcome,
       };
     }

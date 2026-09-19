@@ -107,11 +107,11 @@ export default function PreviewMetricPage() {
         {/* Large Dashboard Card */}
         <div className="space-y-3">
           <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
-            Total Organisations (Large / Dashboard Style)
+            Total Clients (Large / Dashboard Style)
           </h2>
           <ProgressMetricCard
             size="lg"
-            title="Total Organisations"
+            title="Total Clients"
             accent="brand"
             data={SAMPLE_30_DAYS}
             period="Past 30 days"

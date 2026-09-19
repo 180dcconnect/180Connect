@@ -206,7 +206,7 @@ function EntityLink({
         href={`/clients/${entity.id}`}
         onClick={(e) => e.stopPropagation()}
         className={`font-bold text-foreground underline decoration-black/20 hover:decoration-brand hover:text-brand transition-colors cursor-pointer ${className ?? ""}`}
-        title={`View organisation overview for ${entity.name}`}
+        title={`View client record for ${entity.name}`}
       >
         {entity.name}
       </Link>

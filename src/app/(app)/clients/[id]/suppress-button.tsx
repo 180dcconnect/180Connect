@@ -41,7 +41,7 @@ export function SuppressButton({
       });
       const body = await response.json();
       if (!response.ok) {
-        setMessage(body.error ?? "The charity could not be suppressed.");
+        setMessage(body.error ?? "The client could not be suppressed.");
         return;
       }
       // The server component re-reads suppression state and swaps this button for

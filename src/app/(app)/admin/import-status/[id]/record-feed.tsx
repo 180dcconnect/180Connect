@@ -72,7 +72,7 @@ export function RecordFeed({
               Already Up to Date in 180Connect
             </h3>
             <p className="mt-0.5 text-xs leading-[1.6] text-foreground/80">
-              <strong className="text-foreground font-bold">{recordsSkipped.toLocaleString()} {isGrantSource ? (recordsSkipped === 1 ? "grant" : "grants") : (recordsSkipped === 1 ? "organisation" : "organisations")}</strong> from {source} were verified and found to be already up to date with no new changes on record.
+              <strong className="text-foreground font-bold">{recordsSkipped.toLocaleString()} {isGrantSource ? (recordsSkipped === 1 ? "grant" : "grants") : (recordsSkipped === 1 ? "client" : "clients")}</strong> from {source} were verified and found to be already up to date with no new changes on record.
             </p>
           </div>
         </div>
@@ -92,7 +92,7 @@ export function RecordFeed({
                   : "bg-white text-foreground/70 ring-1 ring-black/[0.08] hover:bg-black/[0.02]"
               }`}
             >
-              {isGrantSource ? "All Grants" : "All Organisations"}
+              {isGrantSource ? "All Grants" : "All Clients"}
               <span className="opacity-60 tabular-nums">({counts.all})</span>
             </button>
 
@@ -183,7 +183,7 @@ export function RecordFeed({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search organisation or ID…"
+              placeholder="Search client or ID…"
               className="w-full rounded-full border border-black/[0.08] bg-white py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-foreground/40 focus:border-brand focus:outline-hidden focus:ring-1 focus:ring-brand"
             />
           </div>
@@ -223,10 +223,10 @@ export function RecordFeed({
                       <span className="text-[11px] font-bold text-foreground/50">
                         {record.recordSource.replace(/_/g, " ")} #{record.sourceRecordId}
                       </span>
-                      {record.city && (
+                      {(record.city ?? record.postcode) && (
                         <span className="inline-flex items-center gap-1 text-xs text-foreground/60">
                           <MapPin className="h-3 w-3 opacity-60" />
-                          {record.city}
+                          {record.city ?? record.postcode}
                         </span>
                       )}
                       {record.filingType && (
@@ -358,9 +358,9 @@ export function RecordFeed({
 
                             <dl className="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
                               <div>
-                                <dt className="font-bold text-foreground/45">Organisation Type</dt>
+                                <dt className="font-bold text-foreground/45">Client Type</dt>
                                 <dd className="mt-0.5 font-medium text-foreground">
-                                  {record.filingType ?? "Standard Organisation"}
+                                  {record.filingType ?? "Standard client"}
                                 </dd>
                               </div>
 
@@ -446,12 +446,12 @@ export function RecordFeed({
       ) : (
         <div className="rounded-2xl border border-black/[0.06] bg-white p-12 text-center shadow-xs">
           <p className="text-sm font-bold text-foreground">
-            {isGrantSource ? "No grants match this search." : "No organisations match this search."}
+            {isGrantSource ? "No grants match this search." : "No clients match this search."}
           </p>
           <p className="mt-1 text-xs text-foreground/60">
             {isGrantSource
               ? "Try searching by funder name, recipient, grant ID, or selecting a different status filter tab."
-              : "Try searching by organisation name, charity number, or selecting a different status filter tab."}
+              : "Try searching by client name, charity number, or selecting a different status filter tab."}
           </p>
         </div>
       )}

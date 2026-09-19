@@ -97,7 +97,7 @@ function QueueRail({
             {pending.toLocaleString()}
             {capped ? "+" : ""}
           </span>
-          {pending === 1 && !capped ? "charity is" : "charities are"} waiting for a
+          {pending === 1 && !capped ? "client is" : "clients are"} waiting for a
           decision
         </>
       ) : (

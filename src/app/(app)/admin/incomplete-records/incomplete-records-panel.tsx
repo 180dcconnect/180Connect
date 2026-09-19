@@ -161,7 +161,7 @@ const TABS: { value: FilterTab; label: string; missing: string }[] = [
 ];
 
 const CITY_FILTER = "Filter by city";
-const TYPE_FILTER = "Filter by organisation type";
+const TYPE_FILTER = "Filter by client type";
 const SECTOR_FILTER = "Filter by sector";
 const MISSING_FILTER = "Filter by missing detail";
 
@@ -495,13 +495,13 @@ function whyItMatters(key: FieldKey, isRedacted: boolean): string {
       case "email":
         return "A personal email address was redacted during ingestion to comply with data privacy policy. Replace with a generic role inbox (such as info@ or enquiries@).";
       case "website":
-        return "The recorded website contained personal information that was redacted. Replace with the organisation's public homepage.";
+        return "The recorded website contained personal information that was redacted. Replace with the client's public homepage.";
       case "mission":
         return "The mission statement contained personal details that were redacted. Add a cleaned statement.";
       case "sector":
         return "The sector entry contained redacted details. Select the correct sector.";
       case "city":
-        return "The location details were redacted. Set the organisation's town or council area.";
+        return "The location details were redacted. Set the client's town or council area.";
     }
   }
   return WHY_IT_MATTERS[key];
@@ -1251,7 +1251,7 @@ function ClientCleaningCard({
       <textarea
         id={missionId}
         rows={3}
-        placeholder="Enter or paste the organisation's mission statement…"
+        placeholder="Enter or paste the client's mission statement…"
         value={missionInput}
         onChange={(e) => setMissionInput(e.target.value)}
         disabled={isSavingMission}
@@ -1363,7 +1363,7 @@ function ClientCleaningCard({
           groups={SECTOR_SELECT_GROUPS}
           placeholder="Select a sector…"
           searchPlaceholder="Search sectors…"
-          emptyMessage="No sector matches that. Try a word the organisation uses about itself."
+          emptyMessage="No sector matches that. Try a word the client uses about itself."
           unlistedLabel="not in the standard list"
           disabled={isSavingSector}
           ariaLabel="Sector"

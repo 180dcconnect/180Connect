@@ -58,10 +58,10 @@ export function checkClientCriteria(
       priority,
       healthcareAligned,
       reasons: [
-        "Organisation type meets the target-client criteria.",
+        "Client type meets the target-client criteria.",
         local
           ? "Sheffield/South Yorkshire location receives priority."
-          : "National and international organisations remain eligible.",
+          : "National and international clients remain eligible.",
       ],
     };
   }
@@ -84,7 +84,7 @@ export function checkClientCriteria(
       priority,
       healthcareAligned,
       reasons: [
-        "Organisation type needs evidence of non-profit or social purpose before activation.",
+        "Client type needs evidence of non-profit or social purpose before activation.",
       ],
     };
   }
@@ -93,6 +93,6 @@ export function checkClientCriteria(
     outcome: "does_not_meet",
     priority,
     healthcareAligned,
-    reasons: ["Organisation type is outside the configured target-client criteria."],
+    reasons: ["Client type is outside the configured target-client criteria."],
   };
 }

@@ -1377,7 +1377,7 @@ export default async function DashboardPage({
   let guide: ReturnType<typeof guideProgress> | null = null;
   let ownsAnyClient = false;
 
-  if (actor.role === "cam") {
+  if (actor.role === "cam" || actor.role === "admin") {
     const { profile, steps: completedSteps } = await viewerState;
 
     if (profile.error) {
@@ -1590,9 +1590,9 @@ export default async function DashboardPage({
                   <Rise glass className="relative z-20 h-full flex-1 focus-within:z-50">
                     <ProgressMetricCard
                       size="lg"
-                      title="Total Organisations"
+                      title="Total Clients"
                       total={metrics.totalCharities.toLocaleString()}
-                      unit="organisations"
+                      unit="clients"
                       accent="brand"
                       data={growth}
                       period="Past 30 days"

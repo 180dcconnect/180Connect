@@ -183,7 +183,7 @@ export default async function AdminImportStatusPage({
   let query = supabase
     .from("ingestion_runs")
     .select(
-      "id, api_source, job_status, records_fetched, records_inserted, records_skipped, records_failed, records_flagged, started_at, completed_at, error_message, triggered_by",
+      "id, api_source, job_status, records_fetched, records_inserted, records_skipped, records_failed, records_flagged, started_at, completed_at, error_message, triggered_by, run_stats",
     )
     .order("started_at", { ascending: false })
     .limit(WINDOW);
@@ -281,6 +281,14 @@ export default async function AdminImportStatusPage({
   );
   const recordsAdded = views.reduce(
     (total, view) => total + (view.counts.find((count) => count.label === "Added")?.value ?? 0),
+    0,
+  );
+  // Register imports report staging and client creation separately (see
+  // registerImportBreakdown): their clients-added total joins the legacy
+  // records-added total in the header rather than either going missing.
+  const clientsAdded = views.reduce(
+    (total, view) =>
+      total + (view.counts.find((count) => count.label === "Clients added")?.value ?? 0),
     0,
   );
   const failures = views.filter((view) => view.status === "failed").length;
@@ -408,8 +416,20 @@ export default async function AdminImportStatusPage({
                 {views.length > 0 && (
                   <>
                     {" · "}
-                    <span className="tabular-nums">{recordsAdded.toLocaleString()}</span> record
-                    {recordsAdded === 1 ? "" : "s"} added
+                    {clientsAdded > 0 && (
+                      <>
+                        <span className="tabular-nums">{clientsAdded.toLocaleString()}</span> client
+                        {clientsAdded === 1 ? "" : "s"} added
+                        {recordsAdded > 0 && " · "}
+                      </>
+                    )}
+                    {recordsAdded > 0 && (
+                      <>
+                        <span className="tabular-nums">{recordsAdded.toLocaleString()}</span> record
+                        {recordsAdded === 1 ? "" : "s"} added
+                      </>
+                    )}
+                    {clientsAdded === 0 && recordsAdded === 0 && <>nothing added yet</>}
                     {failures > 0 && (
                       <>
                         {" · "}

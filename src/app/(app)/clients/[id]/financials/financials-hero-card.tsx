@@ -380,7 +380,7 @@ export function FinancialsHeroCard({
         <SubSection
           number="1.2"
           title="Where they Operate"
-          hint="The areas this charity declares on its annual return, which is the other half of how big it is."
+          hint="The areas this client declares on its annual return, which is the other half of how big it is."
         >
           <OperatingReach geography={geography} />
         </SubSection>

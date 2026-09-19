@@ -149,17 +149,17 @@ export const REPLY_CLOSING_APPROACH_LABELS: Record<ReplyClosingApproach, string>
  *   An email implying otherwise misrepresents a third party.
  */
 export const ORG_FACTS = `About the sender:
-180 Degrees Consulting Sheffield is a non-profit, student-led consultancy providing strategic and technical consulting to charities, non-profits and social enterprises. Its mission is to help those organisations create impactful community change, and in doing so to develop the next generation of social impact leaders.
+180 Degrees Consulting Sheffield is a non-profit, student-led consultancy providing strategic and technical consulting to clients — charities, non-profits and social enterprises. Its mission is to help those clients create impactful community change, and in doing so to develop the next generation of social impact leaders.
 Six practice areas; most projects combine two or three:
 - Strategy and market entry: growth plans, new services, feasibility studies, positioning for a changing funding landscape.
 - Operational efficiency: process reviews, service redesign, volunteer and staff resourcing models.
 - Impact measurement: theories of change and KPI frameworks, for the evidence funders increasingly ask for.
-- Marketing and engagement: brand, messaging, campaign planning, reaching the communities the charity exists to serve.
+- Marketing and engagement: brand, messaging, campaign planning, reaching the communities the client exists to serve.
 - Digital innovation: websites, automation, CRM selection, low-cost technology adoption.
 - Fundraising and revenue: funder mapping, bid support, diversified and more resilient income models.
-How an engagement runs, if it is useful to say: a no-obligation scoping call to test whether we are the right fit, then an agreed proposal, then a typical eight-week project with a dedicated team and checkpoints the charity steers, then handover with recommendations, materials and follow-up.
+How an engagement runs, if it is useful to say: a no-obligation scoping call to test whether we are the right fit, then an agreed proposal, then a typical eight-week project with a dedicated team and checkpoints the client steers, then handover with recommendations, materials and follow-up.
 Every engagement ends with a clear, implementable set of recommendations, not a report that sits on a shelf.
-We advise; we do not implement. We can produce recommendations, frameworks and resources — a list of funders worth approaching, say — but we never carry the work out on the charity's behalf, and never imply otherwise.
+We advise; we do not implement. We can produce recommendations, frameworks and resources — a list of funders worth approaching, say — but we never carry the work out on the client's behalf, and never imply otherwise.
 Never state or imply that the work is free, pro bono, unpaid or at no cost. Do not raise cost, fees, price or affordability at all: that conversation belongs on the call, not in a first email.
 Never claim or imply that any university endorses, accredits, sponsors or formally recognises us, and never describe us as a university society. Describing the team as student-led, or the writer as a student in Sheffield, is accurate and fine.`
 
@@ -177,8 +177,8 @@ Never claim or imply that any university endorses, accredits, sponsors or formal
 export const PAST_WORK = `Track record, usable as supporting detail but never embellished:
 Over 20 projects delivered for mission-driven organisations. State that count plainly — never add an evaluative adjective such as "successful", "impactful" or "transformative" to it, and never claim a result for any project. Winner of the 180DC Best New Branch Award, EMEA. Representative work:
 - Improving volunteer engagement by mapping recruitment streams and creating marketing template materials.
-- Market research for a charity launching a new service.
-- Building a database of potential audiences to find gaps in a charity's outreach strategy.`;
+- Market research for a client launching a new service.
+- Building a database of potential audiences to find gaps in a client's outreach strategy.`;
 
 /**
  * Rules that hold for every draft regardless of which dials were chosen and
@@ -216,7 +216,7 @@ Register records are stored in capitals, so a name may arrive as "SHEFFIELD AFRI
 Use the everyday name, not the registered one: prefer the trading name when one is supplied, and drop legal suffixes such as Limited, Ltd, CIC, plc or "Registered Charity No." unless the organisation plainly uses them itself.
 Never abbreviate, shorten or initialise a name the organisation has not been supplied as using. If the full name is long, use it in full or refer to "your team" or "your organisation" — never invent an acronym from its initials.
 Read the name for meaning, not just for spelling. Many organisations state who they serve, or what they do, directly in their name — a name like "Sheffield African Caribbean Mental Health Association" says the community it exists for. When the name carries that, reflect it plainly in the opening rather than retreating to the sector: write about mental health support for Sheffield's African and Caribbean communities, not about "the health and social care sector".
-Keep that detail in the sentence about THEM. The sentences describing 180 Degrees Consulting Sheffield are the same for every charity we write to, and must never be narrowed to this one's field, community or cause. "We support organisations delivering mental health support for Sheffield's African and Caribbean communities" is a lie: we are a general consultancy, and that is a claim about them wearing our sentence. Say what they do in their sentence, say what we do in ours, and let the connection between the two be the point of the email rather than a merger of the two descriptions.
+Keep that detail in the sentence about THEM. The sentences describing 180 Degrees Consulting Sheffield are the same for every client we write to, and must never be narrowed to this one's field, community or cause. "We support organisations delivering mental health support for Sheffield's African and Caribbean communities" is a lie: we are a general consultancy, and that is a claim about them wearing our sentence. Say what they do in their sentence, say what we do in ours, and let the connection between the two be the point of the email rather than a merger of the two descriptions.
 Use only what the name actually states. Never infer beliefs, politics, religion or funding from a name, and never guess at what an ambiguous name might mean.`;
 
 export const SHARED_RULES = `Write in British English throughout: -ise and -isation endings, never -ize or -ization (organisation, recognise, prioritise, specialised), plus programme, favour, centre and behaviour.
@@ -310,8 +310,8 @@ export const REGISTER_INSTRUCTIONS: Record<EmailRegister, string> = {
 };
 
 const OPENING_INSTRUCTIONS: Record<OpeningApproach, string> = {
-  mission_led: "Open with one specific, sincere observation about the charity's supplied mission or work, then introduce 180DC.",
-  direct_intro: "Open with a direct introduction to 180DC and the reason for contacting this organisation.",
+  mission_led: "Open with one specific, sincere observation about the client's supplied mission or work, then introduce 180DC.",
+  direct_intro: "Open with a direct introduction to 180DC and the reason for contacting this client.",
   news_hook: "Open with a supplied relevant news hook. If no news hook is supplied, fall back to a mission-led opening without inventing news.",
 };
 
@@ -334,21 +334,21 @@ const CLOSING_INSTRUCTIONS: Record<ClosingApproach, string> = {
  */
 const SIZE_TONE_INSTRUCTIONS: Record<NonNullable<StageOneContext["incomeBand"]>, string> = {
   under_10k:
-    "This organisation is very small. Be personal and practical, avoid corporate language, and assume little spare budget or staff time. Do not mention its size, income, or finances.",
+    "This client is very small. Be personal and practical, avoid corporate language, and assume little spare budget or staff time. Do not mention its size, income, or finances.",
   "10k_100k":
-    "This organisation is small. Stay approachable and resource-conscious, with practical language and a low-pressure invitation. Do not mention its size, income, or finances.",
+    "This client is small. Stay approachable and resource-conscious, with practical language and a low-pressure invitation. Do not mention its size, income, or finances.",
   "100k_500k":
-    "This organisation is an emerging mid-sized charity. Be professional, practical, and collaborative, recognizing that they have established programmes and a small core team. Do not mention its size, income, or finances.",
+    "This client is an emerging mid-sized charity. Be professional, practical, and collaborative, recognizing that they have established programmes and a small core team. Do not mention its size, income, or finances.",
   "500k_1m":
-    "This organisation is established and mid-sized. Be professional and collaborative, and assume it has defined priorities and several stakeholders. Do not mention its size, income, or finances.",
+    "This client is established and mid-sized. Be professional and collaborative, and assume it has defined priorities and several stakeholders. Do not mention its size, income, or finances.",
   "1m_10m":
-    "This organisation is substantial and well established. Use a polished, structured approach suitable for a mature non-profit with dedicated leadership and multiple workstreams. Do not mention its size, income, or finances.",
+    "This client is substantial and well established. Use a polished, structured approach suitable for a mature non-profit with dedicated leadership and multiple workstreams. Do not mention its size, income, or finances.",
   "10m_50m":
-    "This organisation is a large regional anchor institution. Use a polished, highly professional approach suitable for a prominent regional non-profit with senior executive leadership. Do not mention its size, income, or finances.",
+    "This client is a large regional anchor institution. Use a polished, highly professional approach suitable for a prominent regional non-profit with senior executive leadership. Do not mention its size, income, or finances.",
   "50m_100m":
-    "This organisation is a major national non-profit. Use a formal, structured approach appropriate for a large national entity with established governance. Do not mention its size, income, or finances.",
+    "This client is a major national non-profit. Use a formal, structured approach appropriate for a large national entity with established governance. Do not mention its size, income, or finances.",
   over_100m:
-    "This organisation is a major global or national institution. Use a polished, strategic approach suitable for a large-scale institution, framing 180DC's local or youth-oriented impact. Do not mention its size, income, or finances.",
+    "This client is a major global or national institution. Use a polished, strategic approach suitable for a large-scale institution, framing 180DC's local or youth-oriented impact. Do not mention its size, income, or finances.",
 };
 
 export function sizeToneFor(
@@ -360,7 +360,7 @@ export function sizeToneFor(
     sizeTemplate,
     sizeTone:
       sizeTemplate === "default"
-        ? "Organisation size is not known. Do not speculate about its budget, staff, or capacity, and do not mention size or finances."
+        ? "Client size is not known. Do not speculate about its budget, staff, or capacity, and do not mention size or finances."
         : SIZE_TONE_INSTRUCTIONS[sizeTemplate],
   };
 }
@@ -380,10 +380,10 @@ export const SIZE_TEMPLATES = [
 export type SizeTemplate = (typeof SIZE_TEMPLATES)[number];
 
 export const SIZE_TONE_LABELS: Record<SizeTemplate, string> = {
-  under_10k: "Very small charity (under £10k)",
-  "10k_100k": "Small charity (£10k – £100k)",
-  "100k_500k": "Emerging mid-size charity (£100k – £500k)",
-  "500k_1m": "Established mid-size charity (£500k – £1m)",
+  under_10k: "Very small client (under £10k)",
+  "10k_100k": "Small client (£10k – £100k)",
+  "100k_500k": "Emerging mid-size client (£100k – £500k)",
+  "500k_1m": "Established mid-size client (£500k – £1m)",
   "1m_10m": "Large non-profit (£1m – £10m)",
   "10m_50m": "Regional anchor institution (£10m – £50m)",
   "50m_100m": "Major national non-profit (£50m – £100m)",
@@ -419,7 +419,7 @@ export const ORGANISATION_TYPE_LABELS: Record<string, string> = {
   charity: "Registered charity",
   company: "Company",
   both: "Registered charity and company",
-  other: "Other organisation type",
+  other: "Other client type",
 };
 
 export const GEOGRAPHIC_REACH_LABELS: Record<string, string> = {

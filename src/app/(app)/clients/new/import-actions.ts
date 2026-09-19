@@ -195,8 +195,8 @@ export async function importFromUrl(
       );
       return {
         kind: "duplicate",
-        message: "A matching charity already exists in the database.",
-        detail: `This website matches an existing client record (${matchedOrg?.legal_name || "Existing Organisation"}). A duplicate client was not created.`,
+        message: "A matching client already exists in the database.",
+        detail: `This website matches an existing client record (${matchedOrg?.legal_name || "Existing client"}). A duplicate client was not created.`,
         sourceUrl,
         duplicate: {
           organisationId: duplicateMatch.organisationId,
@@ -218,10 +218,10 @@ export async function importFromUrl(
         notes: [
           ...(resolution.notes ?? []),
           ...(extraction.legalName
-            ? [`Identified organisation name: "${extraction.legalName}"`]
-            : ["No organisation name could be identified from the page."]),
+            ? [`Identified client name: "${extraction.legalName}"`]
+            : ["No client name could be identified from the page."]),
           ...(!extraction.charity && !extraction.companyNumber
-            ? ["No charity or company registration number was identified."]
+            ? ["No registration number was identified."]
             : []),
           ...(!extraction.postcode ? ["No UK postcode was found on the page."] : []),
           ...(!extraction.contactEmail ? ["No contact email was found on the page."] : []),

@@ -40,12 +40,12 @@ export {
 } from "../../../lib/income-band.ts";
 
 export const GRANT_PREFERENCE_LABELS = {
-  prioritise_grant_recipients: "Prioritise organisations with previous grant history (360Giving)",
+  prioritise_grant_recipients: "Prioritise clients with previous grant history (360Giving)",
 } as const;
 
 export const GRANT_PREFERENCE_DESCRIPTIONS = {
   prioritise_grant_recipients:
-    "Gives higher priority in your personal queue to experienced organisations with recorded grant funding awards from UK grantmakers and philanthropic foundations.",
+    "Gives higher priority in your personal queue to experienced clients with recorded grant funding awards from UK grantmakers and philanthropic foundations.",
 } as const;
 
 // ORGANISATIONS.sector has no enum yet (LLM-classified free text, F089/F041/F055 not

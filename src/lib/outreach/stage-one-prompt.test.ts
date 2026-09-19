@@ -181,9 +181,9 @@ test("buildStageOnePrompt applies each closing approach safely", () => {
 test("buildStageOnePrompt adapts its size guidance to the latest income band", () => {
   const context = { organisationName: "Example", organisationType: "charity" };
   assert.equal(buildStageOnePrompt({ ...context, incomeBand: "under_10k" }).sizeTemplate, "under_10k");
-  assert.match(buildStageOnePrompt({ ...context, incomeBand: "under_10k" }).system, /organisation is very small/);
+  assert.match(buildStageOnePrompt({ ...context, incomeBand: "under_10k" }).system, /client is very small/);
   assert.equal(buildStageOnePrompt({ ...context, incomeBand: "10k_100k" }).sizeTemplate, "10k_100k");
-  assert.match(buildStageOnePrompt({ ...context, incomeBand: "10k_100k" }).system, /organisation is small/);
+  assert.match(buildStageOnePrompt({ ...context, incomeBand: "10k_100k" }).system, /client is small/);
   assert.equal(buildStageOnePrompt({ ...context, incomeBand: "100k_500k" }).sizeTemplate, "100k_500k");
   assert.match(buildStageOnePrompt({ ...context, incomeBand: "100k_500k" }).system, /emerging mid-sized charity/);
   assert.equal(buildStageOnePrompt({ ...context, incomeBand: "500k_1m" }).sizeTemplate, "500k_1m");
@@ -198,7 +198,7 @@ test("buildStageOnePrompt adapts its size guidance to the latest income band", (
   assert.match(buildStageOnePrompt({ ...context, incomeBand: "over_100m" }).system, /major global or national institution/);
   const fallback = buildStageOnePrompt(context);
   assert.equal(fallback.sizeTemplate, "default");
-  assert.match(fallback.system, /Organisation size is not known/);
+  assert.match(fallback.system, /Client size is not known/);
 });
 
 test("a supplied sender name becomes the sign-off, and a missing one does not", () => {

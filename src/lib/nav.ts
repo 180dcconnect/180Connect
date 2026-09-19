@@ -28,7 +28,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   {
     href: "/clients/new",
     label: "Add a client",
-    description: "Find one organisation in a register, read it from its website, or type it in.",
+    description: "Find one client in a register, read it from its website, or type it in.",
     permission: "client:edit",
   },
   {

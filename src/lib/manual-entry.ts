@@ -100,14 +100,14 @@ export const manualEntryDraftSchema = z.object({
 }).superRefine(sizeNeedsYearEnd);
 
 export const manualEntrySchema = z.object({
-  legalName: z.string().trim().min(1, "Enter the organisation name.").max(200),
-  missionStatement: z.string().trim().min(1, "Enter the organisation mission.").max(5000),
+  legalName: z.string().trim().min(1, "Enter the client name.").max(200),
+  missionStatement: z.string().trim().min(1, "Enter the client mission.").max(5000),
   organisationType: organisationTypeSchema,
   addressLine1: z.string().trim().min(1, "Enter the first address line.").max(300),
   city: z.string().trim().min(1, "Enter the town or city.").max(200),
   postcode: z.string().trim().min(1, "Enter the postcode or postal code.").max(32),
   countryCode: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/, "Choose a two-letter country code."),
-  website: z.string().trim().min(1, "Enter the organisation website.").max(500),
+  website: z.string().trim().min(1, "Enter the client website.").max(500),
   contactEmail: z.string().trim().min(1, "Enter the contact email.").max(320),
   registryName: z.string().trim().min(1, "Enter the registry name.").max(200),
   registryNumber: z.string().trim().min(1, "Enter the registry number.").max(200),
@@ -225,7 +225,7 @@ export function checkManualEntryCriteria(
   if (!organisationType) {
     return {
       status: "blocked",
-      message: "Select or derive an organisation type before approving this manual entry.",
+      message: "Select or derive a client type before approving this manual entry.",
     };
   }
 

@@ -136,7 +136,7 @@ function EntryFacts({
             Shared inbox confirmed by {confirmation.by}
           </span>
           {confirmation.at && ` on ${confirmation.at}`}. {entry.contact_email} looked like a
-          personal address. Check it is the organisation&rsquo;s inbox, not a named
+          personal address. Check it is the client&rsquo;s inbox, not a named
           person&rsquo;s, before approving.
         </p>
       )}
@@ -308,7 +308,7 @@ export function PendingManualEntryCard({
                 <div className="border-t border-rule-soft pt-4">
                   <h3 className="text-sm font-semibold text-ink">Approval checks</h3>
                   <p className="mt-0.5 text-[13px] leading-[1.55] text-dim">
-                    Submitted organisation type:{" "}
+                    Submitted client type:{" "}
                     <span className="font-medium text-ink">{entry.organisation_type}</span>
                   </p>
                   <form action={checkAction} className="mt-3 space-y-3">
@@ -327,7 +327,7 @@ export function PendingManualEntryCard({
                           htmlFor={`eligible-${entry.id}`}
                           className="cursor-pointer text-[13px] leading-[1.55] text-ink"
                         >
-                          I have confirmed that this organisation is a non-profit, social
+                          I have confirmed that this client is a non-profit, social
                           enterprise, NGO or socially focused startup.
                         </label>
                         <input
@@ -423,10 +423,10 @@ export function PendingManualEntryCard({
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="link_existing">
-                                  Same organisation — link existing client
+                                  Same client — link existing client
                                 </SelectItem>
                                 <SelectItem value="create_new">
-                                  Different organisation — create separate client
+                                  Different client — create separate client
                                 </SelectItem>
                               </SelectContent>
                             </Select>

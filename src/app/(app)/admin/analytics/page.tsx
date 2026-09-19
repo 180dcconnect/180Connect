@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 
 import { getViewingActor } from "@/lib/auth/actor";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
@@ -369,6 +370,7 @@ export default async function AdminAnalyticsPage({
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+      {authorization.actor.role === "viewer" && <RecordOnboardingStep step="view_analytics" />}
       <Stage className="mx-auto w-full max-w-6xl space-y-10">
         <Rise>
           <AnalyticsHeader current="/admin/analytics">

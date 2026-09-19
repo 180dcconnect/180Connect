@@ -1656,7 +1656,7 @@ export function GmailInboxShell({
                 { label: "Sent", value: "sent" },
               ],
               "Filter by owner": ownerOptions,
-              "Filter by organisation type": ORGANISATION_TYPES.map((value) => ({
+              "Filter by client type": ORGANISATION_TYPES.map((value) => ({
                 label: formatOrganisationType(value),
                 value,
               })),
@@ -1670,7 +1670,7 @@ export function GmailInboxShell({
               "Filter by sector": "sector",
               "Filter by status": "status",
               "Filter by owner": "owner",
-              "Filter by organisation type": "type",
+              "Filter by client type": "type",
               "Filter by priority score": "score",
             }}
           />
@@ -1939,7 +1939,7 @@ export function GmailInboxShell({
                         ? {
                             icon: Inbox,
                             title: `No results for “${trimmedQuery}”`,
-                            hint: "Try a different organisation, subject, or contact — or clear the search and press Enter.",
+                            hint: "Try a different client, subject, or contact — or clear the search and press Enter.",
                           }
                         : appliedLabels.size > 0
                           ? {

@@ -133,7 +133,7 @@ export function PeopleDial({
       colour: "var(--ink)",
       // Worth saying: a charity counting its volunteers is estimating, and the
       // round numbers in the register make that obvious once you look.
-      note: "People giving time unpaid, as the charity counted them. Usually an estimate.",
+      note: "People giving time unpaid, as the client counted them. Usually an estimate.",
     },
   ].filter((segment): segment is Segment => Boolean(segment));
 

@@ -211,7 +211,7 @@ export default async function TeamMemberPage({ params }: { params: Params }) {
     organisationName:
       n.organisation && typeof n.organisation === "object" && "legal_name" in n.organisation
         ? (n.organisation.legal_name as string)
-        : "Unknown organisation",
+        : "Unknown client",
   }));
 
   const activities: MemberActivityItem[] = ((activitiesResult.data as RawTeamActivityRow[] | null) ?? [])

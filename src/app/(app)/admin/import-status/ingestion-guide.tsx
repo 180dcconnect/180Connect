@@ -109,7 +109,7 @@ export function IngestionGuide() {
                     3. Smart Deduplication
                   </h3>
                   <p className="mt-1 text-xs leading-[1.6] text-foreground/70">
-                    We compare each record with your database. If an organisation is already completely up to date, it is <strong className="text-foreground font-bold">Skipped</strong> so you get zero duplicates.
+                    We compare each record with your database. If a client is already completely up to date, it is <strong className="text-foreground font-bold">Skipped</strong> so you get zero duplicates.
                   </p>
                 </div>
 
@@ -125,7 +125,7 @@ export function IngestionGuide() {
                     4. Profile Creation
                   </h3>
                   <p className="mt-1 text-xs leading-[1.6] text-foreground/70">
-                    New organisations are <strong className="text-foreground font-bold">Added</strong> as active client profiles, verified against live websites, and ready for your team.
+                    New clients are <strong className="text-foreground font-bold">Added</strong> as active client profiles, verified against live websites, and ready for your team.
                   </p>
                 </div>
               </div>

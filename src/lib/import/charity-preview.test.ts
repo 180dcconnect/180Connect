@@ -116,7 +116,7 @@ describe("previewCharity", () => {
     const result = await previewCharity(
       "9999999",
       deps(async () => {
-        throw new Error("Charity Commission could not find a charity with that registration number.");
+        throw new Error("Charity Commission could not find a record with that registration number.");
       }),
     );
     assert.deepEqual(result, { status: "not_found" });

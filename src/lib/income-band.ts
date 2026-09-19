@@ -45,7 +45,7 @@ export const INCOME_BAND_DESCRIPTIONS: Record<IncomeBand, string> = {
   "500k_1m": "Established mid-size (£500k – £1m)",
   "1m_10m": "Large non-profit (£1m – £10m)",
   "10m_50m": "Regional anchor (£10m – £50m)",
-  "50m_100m": "Major national charity (£50m – £100m)",
+  "50m_100m": "Major national client (£50m – £100m)",
   over_100m: "Mega-NGO & global institution (> £100m)",
 };
 

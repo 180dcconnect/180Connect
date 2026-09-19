@@ -93,7 +93,7 @@ const SOURCE_DETAILS: Readonly<
     summary:
       "Primary information curated or imported directly by a 180 Degrees team member.",
     relevance:
-      "Captures verified primary intelligence, direct client stakeholder contacts, and fresh organizational updates.",
+      "Captures verified primary intelligence, direct client stakeholder contacts, and fresh client updates.",
   },
 };
 

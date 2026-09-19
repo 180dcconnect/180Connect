@@ -37,10 +37,10 @@ import { getViewingActor } from "@/lib/auth/actor";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { reportError } from "@/lib/error-logging";
-import { hasPermission } from "@/lib/auth/permissions";
+import { canView, hasPermission } from "@/lib/auth/permissions";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
-import { parseFilters } from "@/lib/charity-register/filters";
+import { parseFilters, type CharityRegisterFilters } from "@/lib/charity-register/filters";
 import { loadCharityIdentifiers } from "@/lib/charity-register/coverage-reads";
 import {
   coverageRefreshShouldStart,
@@ -77,7 +77,24 @@ export const maxDuration = 300;
 
 const RUN_WINDOW = 8;
 
-export default async function CharityCommissionPage() {
+/**
+ * `?again=<run id>` — "Run this again" from a run's page on Import status.
+ *
+ * The criteria come from the run itself rather than riding in the link: a URL
+ * carrying a whole selection can be edited by hand into one nobody agreed to,
+ * and the run row is the record of what was actually asked for. The screen
+ * opens on the composer with those criteria loaded and the live count beside
+ * them; nothing is imported until Import is pressed, because repeating an
+ * import is a bulk write to the client list and one tap is not enough between
+ * a link and thousands of rows.
+ */
+type SearchParams = Promise<{ again?: string }>;
+
+export default async function CharityCommissionPage({
+  searchParams,
+}: {
+  searchParams?: SearchParams;
+}) {
   // `client:edit`, not `user:manage`: the team decided everyone who works the
   // client list can shape and run imports. Viewers still cannot.
   const authorization = await getViewingActor("client:edit");
@@ -93,6 +110,7 @@ export default async function CharityCommissionPage() {
   // for. Asking the same questions here keeps a button a viewer cannot use off
   // the page, rather than letting them press it and be refused.
   const canImport = hasPermission(authorization.actor.role, "client:edit");
+  const canInspectRuns = canView(authorization.actor.role, "platform-settings:manage");
   const canRefreshRegister =
     canImport && hasPermission(authorization.actor.role, "platform-settings:manage");
 
@@ -103,7 +121,7 @@ export default async function CharityCommissionPage() {
     supabase
       .from("ingestion_runs")
       .select(
-        "id, api_source, started_at, job_status, records_fetched, records_inserted, records_skipped, records_failed, run_stats",
+        "id, api_source, started_at, job_status, records_fetched, records_inserted, records_skipped, records_failed, run_stats, triggered_by",
       )
       .in("api_source", ["charity_commission", "charity_commission_bulk"])
       .order("started_at", { ascending: false })
@@ -145,6 +163,32 @@ export default async function CharityCommissionPage() {
     description: row.description,
     filters: parseFilters(row.filters),
   }));
+
+  // The criteria to reopen the composer with, when arriving from a run.
+  const againRunId = (await searchParams)?.again?.trim();
+  let repeatFilters: CharityRegisterFilters | null = null;
+  if (againRunId && canImport) {
+    const { data: againRun, error: againError } = await supabase
+      .from("ingestion_runs")
+      .select("id, api_source, run_stats")
+      .eq("id", againRunId)
+      .in("api_source", ["charity_commission", "charity_commission_bulk"])
+      .maybeSingle();
+    if (againError) {
+      await reportError(againError, {
+        operation: "admin.charity_commission.repeat_run",
+        runId: againRunId,
+      });
+    }
+    const stats = (againRun?.run_stats ?? null) as Record<string, unknown> | null;
+    // A run from before criteria were recorded has none to reopen with. The
+    // composer then opens empty rather than pretending to have restored
+    // something — an import run against the wrong selection is the one
+    // outcome worth any amount of caution.
+    if (stats && typeof stats.criteria === "object" && stats.criteria !== null) {
+      repeatFilters = parseFilters(stats.criteria);
+    }
+  }
 
   const snapshotDate = meta?.builtOn ?? null;
   const registerSize = meta?.charities ?? 0;
@@ -205,6 +249,7 @@ export default async function CharityCommissionPage() {
         <Group>
           <Rise>
             <ImportConsole
+              initialMode={repeatFilters ? "composer" : "home"}
               home={
                 <>
                   {/* The screen's other starting point, beside the primary one
@@ -236,6 +281,7 @@ export default async function CharityCommissionPage() {
                     <RecentRuns
                       runs={runs}
                       nowIso={now.toISOString()}
+                      canInspect={canInspectRuns}
                       action={staged && canImport ? <NewImportButton /> : undefined}
                       secondaryAction={
                         canImport ? (
@@ -313,6 +359,7 @@ export default async function CharityCommissionPage() {
                   presets={presets}
                   localAuthorities={localAuthorities}
                   registerSize={registerSize}
+                  initialFilters={repeatFilters ?? undefined}
                 />
               }
             />

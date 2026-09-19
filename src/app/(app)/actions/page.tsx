@@ -5,6 +5,7 @@ import { isViewOnly } from "@/lib/auth/permissions";
 import { adminRouteDestination } from "@/lib/auth/admin-route";
 import { reportError } from "@/lib/error-logging";
 import { formatMyActions, type ActionRow } from "@/lib/actions";
+import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Group, Rise, Stage } from "@/components/dashboard-stage";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { ActionsHeader } from "./actions-header";
@@ -85,6 +86,7 @@ export default async function ActionsPage() {
   );
   return (
     <div className="min-h-screen max-w-full overflow-x-hidden bg-[#f4f4ef] px-4 py-8 sm:px-8 sm:py-10 xl:px-12 xl:py-12">
+      <RecordOnboardingStep step="my_tasks" />
       <Stage className="mx-auto w-full max-w-[1400px] space-y-6">
         <Rise>
           <ActionsHeader current="/actions">

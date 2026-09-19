@@ -164,9 +164,9 @@ function OutcomeCard({
           ) : (
             <p className="text-sm font-semibold">
               {outcome.kind === "held_for_review"
-                ? "That charity was imported but is held for review, so it has not joined the client list yet."
+                ? "That client was imported but is held for review, so it has not joined the client list yet."
                 : outcome.kind === "does_not_meet"
-                  ? "That charity does not meet the branch's client criteria, so it was not added."
+                  ? "That client does not meet the branch's client criteria, so it was not added."
                   : fallbackMessage}
             </p>
           )}
@@ -218,7 +218,7 @@ function LookupPanel({ configured, onReset }: { configured: boolean; onReset: ()
           onClick={onReset}
           type="button"
         >
-          Look up another charity
+          Look up another client
         </button>
       </>
     );
@@ -247,7 +247,7 @@ function LookupPanel({ configured, onReset }: { configured: boolean; onReset: ()
               onClick={onReset}
               type="button"
             >
-              Look up another charity
+              Look up another client
             </button>
           ) : (
             <>
@@ -306,7 +306,7 @@ function LookupPanel({ configured, onReset }: { configured: boolean; onReset: ()
           size="md"
           type="submit"
         >
-          {previewing ? "Looking up…" : "Look up charity"}
+          {previewing ? "Looking up…" : "Look up client"}
         </OriginButton>
       </form>
 
@@ -339,7 +339,7 @@ export function CharityLookupDialog({ configured }: { configured: boolean }) {
           className="group inline-flex items-center gap-2 text-sm text-dim transition-colors hover:text-ink"
         >
           <Search className="h-3.5 w-3.5" strokeWidth={2.2} />
-          Looking for one particular charity?
+          Looking for one particular client?
           <span className="font-bold text-brand group-hover:underline">
             Look it up by number
           </span>
@@ -348,11 +348,11 @@ export function CharityLookupDialog({ configured }: { configured: boolean }) {
 
       <DialogContent className="max-h-[85vh] space-y-4 overflow-y-auto rounded-2xl sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Look up one charity</DialogTitle>
+          <DialogTitle>Look up one client</DialogTitle>
           <DialogDescription className="leading-[1.65]">
-            Fetches a single charity straight from the Charity Commission by its
+            Fetches a single client straight from the Charity Commission by its
             registration number, and shows you what it found before anything is
-            saved. No filters apply, so this reaches charities well outside the
+            saved. No filters apply, so this reaches clients well outside the
             branch&rsquo;s usual patch — the standard client checks still run,
             and the result says what they decided.
           </DialogDescription>

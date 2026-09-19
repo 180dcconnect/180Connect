@@ -21,6 +21,11 @@ import {
   // Relative, not `@/lib/...`: node --test strips types but does not resolve the
   // tsconfig path alias, and this module is tested directly.
 } from "../../../../lib/display-format.ts";
+import { describeImportFailure } from "../../../../lib/import-failure-reason.ts";
+import {
+  importProgressPlanFromStats,
+  type ImportProgressPlan,
+} from "../../../../lib/ingestion/import-progress.ts";
 import { labelForStatus, runDisplayStatus, stalledRunSummary } from "./status-helpers.ts";
 
 /**
@@ -83,6 +88,18 @@ export function humaniseErrorMessage(errorMessage: string | null): HumanisedErro
   if (!errorMessage || !errorMessage.trim()) return null;
   const raw = errorMessage.trim();
 
+  // Some runs created before the ingestion runner learned to read `.message`
+  // from PostgREST errors persisted this JavaScript placeholder. It tells an
+  // admin nothing, so history needs to say what can be done with that run.
+  if (/^\[object Object\]$/i.test(raw)) {
+    return {
+      summary: "The import stopped without a readable reason",
+      description:
+        "This older import did not save a useful failure reason. Try the import again; if it stops again, ask a developer to check the import logs.",
+      rawMessage: raw,
+    };
+  }
+
   // Companies House API key missing
   if (
     /COMPANIES_HOUSE_API_KEY/i.test(raw) ||
@@ -106,7 +123,7 @@ export function humaniseErrorMessage(errorMessage: string | null): HumanisedErro
     return {
       summary: "Charity Commission API subscription key is not set",
       description:
-        "The server requires a Charity Commission primary API key to fetch live registered charity records.",
+        "The server requires a Charity Commission primary API key to fetch live register records.",
       actionHint:
         "An administrator can configure this by setting the `CHARITY_COMMISSION_API_KEY` variable in your deployment environment settings.",
       rawMessage: raw,
@@ -168,10 +185,31 @@ export type IngestionRunRow = {
   completed_at: string | null;
   error_message: string | null;
   triggered_by?: string | null;
+  /**
+   * The run's own breakdown, when the pipeline wrote one. Register imports
+   * (Charity Commission bulk, Companies House bulk) stage register rows into
+   * raw_source_records and then promote them into clients in the same run, so
+   * `records_inserted` counts staged rows — not clients. When run_stats
+   * carries the staging/promotion split, the summary and counts below read
+   * from it instead of repeating the staging counter as "added".
+   */
+  run_stats?: Record<string, unknown> | null;
 };
 
 /** One count, ready to render. Zeroes are kept — "0 failed" is reassuring. */
-export type RunCount = { label: string; value: number; tone: RunTone };
+export type RunCount = {
+  label: string;
+  value: number;
+  tone: RunTone;
+  /**
+   * The record statuses this count is made of (`recordStatusKey` values on the
+   * run detail page). A count that names them can be opened: the card becomes a
+   * way into the records behind it, instead of a number the reader then has to
+   * go and find by hand. Absent means the count has no records to show — a
+   * skipped record was never staged, so there is nothing to open.
+   */
+  statusKeys?: string[];
+};
 
 export type RunView = {
   id: string;
@@ -181,22 +219,135 @@ export type RunView = {
   tone: RunTone;
   /** What happened, in one line. */
   summary: string;
+  /** Every count, headline first — what the details panel and search read. */
   counts: RunCount[];
+  /** The three a non-technical reader came for. See `describeRun`. */
+  headline: RunCount[];
+  /** The pipeline's own breakdown, for whoever opens the run. */
+  details: RunCount[];
   /** The counts worth putting on a collapsed row: the ones that aren't zero. */
   highlights: RunCount[];
   errorMessage: string | null;
   humanError: HumanisedError | null;
   startedRelative: string;
+  /** Shared server clock for a hydration-safe first countdown reading. */
+  observedAt: string;
   startedExact: string;
+  /**
+   * The stored timestamp, untouched — the cursor the list page pages on. Kept
+   * beside the formatted times because a cursor built from a display string
+   * would be a different instant the first time a format changed.
+   */
+  startedIso: string;
   finishedExact: string | null;
   duration: string;
   dayKey: string;
   dayLabel: string;
   triggeredBy?: string | null;
   triggerLabel?: string | null;
+  /**
+   * What the run was asked to import, in the words the person who started it
+   * agreed to — or null for a run that predates the criteria being recorded,
+   * and for every job that has no criteria to state (a backfill, a recheck).
+   */
+  criteriaSentence: string | null;
+  /** Real source progress when available, otherwise a clearly-labelled estimate. */
+  progress: ImportProgressPlan | null;
 };
 
+/**
+ * The criteria a register import ran with, as the sentence the confirmation
+ * dialog showed.
+ *
+ * Read defensively: `run_stats` is jsonb written by several different jobs,
+ * and every run from before imports started recording this has counts and
+ * nothing else. A run that cannot say what it looked for says nothing, rather
+ * than inventing a description from its counts.
+ */
+export function runCriteriaSentence(run: IngestionRunRow): string | null {
+  const stats = run.run_stats;
+  if (!stats || typeof stats !== "object") return null;
+  const sentence = (stats as Record<string, unknown>).criteriaSentence;
+  return typeof sentence === "string" && sentence.trim() ? sentence.trim() : null;
+}
+
 const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
+
+/** Sources whose runs stage register rows before promoting them into clients. */
+const REGISTER_IMPORT_SOURCES = new Set(["charity_commission_bulk", "companies_house"]);
+
+function numericStat(stats: Record<string, unknown>, key: string): number | null {
+  const value = stats[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Staging/promotion split for a register-import run, or null when the row
+ * predates the breakdown (or is not a register import at all). Keyed off the
+ * run_stats shape rather than the source alone: `companies_house` also labels
+ * non-import runs, and only the register import writes `written`.
+ */
+export type RegisterImportBreakdown = {
+  staged: number;
+  clientsAdded: number | null;
+  duplicates: number;
+  /**
+   * Records the importer matched to a client it already holds, certainly
+   * enough that no one was asked (`isCertainMatch` in write-organisations.ts).
+   * They are clients we already have, not work waiting on anybody, so they
+   * count alongside the skipped records rather than with the duplicates.
+   */
+  alreadyHeld: number;
+  needsReview: number;
+  didNotMeet: number;
+  notUsable: number;
+  failedToSave: number;
+  /**
+   * Why the failures happened, as the promote step recorded them (raw database
+   * text — `describeImportFailure` translates it). Empty for runs written
+   * before the reasons were kept, which is why the page still has to cope with
+   * a failure count and no reason.
+   */
+  failureReasons: string[];
+};
+
+function stringListStat(stats: Record<string, unknown>, key: string): string[] {
+  const value = stats[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
+}
+
+export function registerImportBreakdown(run: IngestionRunRow): RegisterImportBreakdown | null {
+  return registerImportBreakdownFrom(run.api_source, run.run_stats);
+}
+
+/**
+ * The same reading from the two fields it actually needs, so the source pages
+ * (`admin/charity-commission`, `admin/companies-house`) can describe a run the
+ * way Import Status does without carrying the whole row shape. One reader means
+ * the two screens cannot disagree about whether an import worked.
+ */
+export function registerImportBreakdownFrom(
+  apiSource: string,
+  runStats: Record<string, unknown> | null | undefined,
+): RegisterImportBreakdown | null {
+  if (!REGISTER_IMPORT_SOURCES.has(apiSource)) return null;
+  const stats = runStats;
+  if (!stats || typeof stats !== "object") return null;
+  const staged = numericStat(stats, "written");
+  if (staged === null) return null;
+  return {
+    staged,
+    clientsAdded: numericStat(stats, "inserted"),
+    duplicates: numericStat(stats, "flagged") ?? 0,
+    alreadyHeld: numericStat(stats, "alreadyHeld") ?? 0,
+    needsReview: numericStat(stats, "needsReview") ?? 0,
+    didNotMeet: numericStat(stats, "doesNotMeet") ?? 0,
+    notUsable: numericStat(stats, "invalidData") ?? 0,
+    failedToSave: numericStat(stats, "failed") ?? 0,
+    failureReasons: stringListStat(stats, "failureReasons"),
+  };
+}
 
 /**
  * The outcome as a sentence. Built from the counts rather than from the status
@@ -226,6 +377,69 @@ export function summariseRun(run: IngestionRunRow, now: Date = new Date()): stri
 
   if (fetched === 0) return "Nothing to fetch — the source returned no records";
 
+  // Register imports copy register rows into a holding table and then add them
+  // to the client list. The holding table is an implementation step, not an
+  // outcome, so it does not appear in the sentence at all — a run that "staged
+  // 311" while adding nobody is the shape that read as a success for a year.
+  const register = registerImportBreakdown(run);
+  if (register) {
+    if (register.clientsAdded === null) {
+      // Promotion never ran, so no outcome can be claimed. Say only what is
+      // known, in the words of the job.
+      const held = `${plural(register.staged, "record")} from the source are waiting to be added`;
+      return run.job_status === "partial" ? `${held} — the run did not finish cleanly` : held;
+    }
+
+    // A run that refused records is not a list of counts with one unlucky
+    // number in it — it is a failure, and the sentence leads with that. The
+    // reason comes from the run's own record of why the saves were refused, so
+    // the reader is told what went wrong instead of being sent to find a
+    // developer with nothing to hand them.
+    if (register.failedToSave > 0) {
+      const count = register.failedToSave.toLocaleString();
+      const noun = register.failedToSave === 1 ? "record" : "records";
+      const head =
+        register.clientsAdded === 0
+          ? `Nothing was added to the client list — all ${count} ${noun} were refused`
+          : `${register.clientsAdded.toLocaleString()} added to the client list, ${count} ${noun} refused`;
+      const reason = describeImportFailure(register.failureReasons[0] ?? null);
+      return reason ? `${head}. ${reason.summary}.` : `${head}.`;
+    }
+
+    const head =
+      register.clientsAdded === 0
+        ? `Nothing new to add from ${plural(fetched, "record")} in the source`
+        : `${register.clientsAdded.toLocaleString()} added to the client list from ` +
+          `${plural(fetched, "record")} in the source`;
+
+    const parts = [head];
+
+    // Adding is not scoped to one run: it works through everything waiting,
+    // including records earlier runs left behind. Nearly always that backlog is
+    // empty and the two numbers agree — but on the run that drains one, "821
+    // added from 98 records" is two different populations in one sentence, so
+    // the sentence has to say so. Approximate by construction (some of this
+    // run's own rows may have been duplicates), hence "about".
+    const backlog = register.clientsAdded - register.staged;
+    if (backlog > 0) {
+      parts.push(
+        `about ${backlog.toLocaleString()} of them had been waiting from earlier imports`,
+      );
+    }
+
+    const needsLook = register.needsReview + register.duplicates + register.notUsable;
+    if (needsLook > 0) parts.push(`${needsLook.toLocaleString()} need a look`);
+    if (register.didNotMeet > 0) {
+      parts.push(`${register.didNotMeet.toLocaleString()} did not fit the client criteria`);
+    }
+    if (run.records_skipped > 0) {
+      parts.push(`${run.records_skipped.toLocaleString()} already on the list`);
+    }
+
+    const summary = parts.join(", ");
+    return run.job_status === "partial" ? `${summary} — the run did not finish cleanly` : summary;
+  }
+
   const added =
     inserted === 0
       ? `Added nothing new from ${plural(fetched, "record")}`
@@ -240,15 +454,142 @@ export function summariseRun(run: IngestionRunRow, now: Date = new Date()): stri
 export function describeRun(run: IngestionRunRow, now: Date): RunView {
   const started = new Date(run.started_at);
   const finished = run.completed_at ? new Date(run.completed_at) : null;
-  const humanError = humaniseErrorMessage(run.error_message);
+  const register = registerImportBreakdown(run);
 
-  const counts: RunCount[] = [
-    { label: "Fetched", value: run.records_fetched, tone: "neutral" },
-    { label: "Added", value: run.records_inserted, tone: "success" },
-    { label: "Skipped", value: run.records_skipped, tone: "neutral" },
-    { label: "Failed", value: run.records_failed, tone: "danger" },
-    { label: "Flagged", value: run.records_flagged, tone: "warning" },
-  ];
+  // Two ways a run can have gone wrong, one panel to explain either: the run
+  // itself stopped (`error_message`), or it finished but the client list
+  // refused what it tried to save (`run_stats.failureReasons`). The second used
+  // to render nothing at all — the row showed a failure count and no reason,
+  // which is how an import that added zero clients could still look fine.
+  const promoteFailure =
+    register && register.failedToSave > 0
+      ? describeImportFailure(register.failureReasons[0] ?? null)
+      : null;
+  const humanError: HumanisedError | null =
+    humaniseErrorMessage(run.error_message) ??
+    (promoteFailure
+      ? {
+          summary: promoteFailure.summary,
+          description: promoteFailure.description,
+          actionHint: promoteFailure.actionHint,
+          rawMessage: promoteFailure.rawMessage,
+        }
+      : register && register.failedToSave > 0
+        ? {
+            // Runs from before the promote step kept its reasons. Saying so is
+            // the honest answer; leaving the panel out entirely is what made
+            // these look like ordinary runs with an odd number on them.
+            summary: "The client list refused these records, and this run did not record why",
+            description:
+              "This import ran before the app started keeping the reason a record was refused, so the count is all it saved.",
+            actionHint:
+              "Run the import again — a repeat failure will say what went wrong. If it succeeds, nothing more is needed.",
+            rawMessage: "",
+          }
+        : null);
+  // ── Three numbers, then everything else ──
+  //
+  // The page used to headline eight: fetched, staged, added, skipped, failed,
+  // flagged, needs review, did not meet criteria. Five of those name a stage of
+  // the pipeline rather than an outcome, and one of them — staged — is a
+  // holding table the reader cannot act on and should never have been asked to
+  // reason about. A CAM or admin arrives with three questions: did clients get
+  // added, how many were already here, and is anything waiting on me. So those
+  // three lead, and the rest moves behind the details expander for whoever
+  // wants it. Nothing is dropped; the ordering says what matters.
+  const headline: RunCount[] = register
+    ? [
+        {
+          label: "Added to the client list",
+          value: register.clientsAdded ?? 0,
+          tone: "success",
+          statusKeys: ["validated"],
+        },
+        {
+          label: "Already on the list",
+          value: run.records_skipped + register.alreadyHeld,
+          tone: "neutral",
+        },
+        {
+          // Everything that stopped short of the client list and has somewhere
+          // to be answered — one number, because a reader wants to know whether
+          // anything is waiting on them, not how it is filed internally. Red,
+          // not amber: this is the one count on the row that asks for something.
+          label: "Needs a look",
+          statusKeys: ["matched", "rejected_review", "error"],
+          value:
+            register.needsReview +
+            register.duplicates +
+            register.notUsable +
+            register.failedToSave +
+            run.records_failed +
+            run.records_flagged,
+          tone: "danger",
+        },
+      ]
+    : [
+        {
+          label: "Added to the client list",
+          value: run.records_inserted,
+          tone: "success",
+          statusKeys: ["validated"],
+        },
+        { label: "Already on the list", value: run.records_skipped, tone: "neutral" },
+        {
+          label: "Needs a look",
+          value: run.records_failed + run.records_flagged,
+          tone: "danger",
+          statusKeys: ["matched", "rejected_review", "error"],
+        },
+      ];
+
+  const details: RunCount[] = register
+    ? [
+        { label: "From the source", value: run.records_fetched, tone: "neutral" },
+        {
+          label: "Held for review",
+          value: register.needsReview,
+          tone: "info",
+          statusKeys: ["rejected_review"],
+        },
+        {
+          label: "Possible duplicates",
+          value: register.duplicates + run.records_flagged,
+          tone: "warning",
+          statusKeys: ["matched"],
+        },
+        {
+          label: "Did not fit the criteria",
+          value: register.didNotMeet,
+          tone: "neutral",
+          statusKeys: ["rejected"],
+        },
+        {
+          label: "Could not be saved",
+          value: register.notUsable + register.failedToSave + run.records_failed,
+          tone: "danger",
+          statusKeys: ["error"],
+        },
+      ]
+    : [
+        { label: "From the source", value: run.records_fetched, tone: "neutral" },
+        {
+          label: "Possible duplicates",
+          value: run.records_flagged,
+          tone: "warning",
+          statusKeys: ["matched"],
+        },
+        {
+          label: "Could not be saved",
+          value: run.records_failed,
+          tone: "danger",
+          statusKeys: ["error"],
+        },
+      ];
+
+  // `counts` stays the whole picture, headline first, because the details panel
+  // and the free-text search both read it.
+  const counts: RunCount[] = [...headline, ...details];
 
   const triggeredBy = run.triggered_by ?? null;
   const triggerLabel =
@@ -257,7 +598,15 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
   // Display-only: a run the database still calls `running` reads as `stalled`
   // past the threshold, and the badge, tone and sentence all follow that one
   // answer. The stored row is untouched.
-  const status = runDisplayStatus(run.job_status, run.started_at, now);
+  let status = runDisplayStatus(run.job_status, run.started_at, now);
+
+  // Display-only again, for the same reason: a run that staged rows and then
+  // had every one of them refused was stored as `completed`, so the page put a
+  // green badge over an import that added nothing. The stored row is left
+  // alone; what the reader is shown matches what the run actually achieved.
+  if (status === "completed" && register && register.failedToSave > 0) {
+    status = register.clientsAdded === 0 || register.clientsAdded === null ? "failed" : "partial";
+  }
 
   return {
     id: run.id,
@@ -267,13 +616,18 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
     tone: toneForStatus(status),
     summary: summariseRun(run, now),
     counts,
-    // The collapsed row carries only what happened. A row of five counts where
-    // four are zero is four pieces of furniture around one fact.
-    highlights: counts.filter((count) => count.value > 0),
+    headline,
+    details,
+    // The collapsed row carries only what happened, and only from the three
+    // that lead. A row of counts where most are zero is furniture around one
+    // fact.
+    highlights: headline.filter((count) => count.value > 0),
     errorMessage: run.error_message,
     humanError,
     startedRelative: formatRelativeTime(started, now),
+    observedAt: now.toISOString(),
     startedExact: formatExactTime(started),
+    startedIso: run.started_at,
     finishedExact: finished ? formatExactTime(finished) : null,
     // A run still going has no duration yet, and guessing one from `now` would
     // show a number that changes every refresh for a reason nothing explains.
@@ -282,6 +636,8 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
     dayLabel: formatDayLabel(started, now),
     triggeredBy,
     triggerLabel,
+    criteriaSentence: runCriteriaSentence(run),
+    progress: importProgressPlanFromStats(run.run_stats),
   };
 }
 

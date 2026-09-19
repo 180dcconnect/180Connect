@@ -139,7 +139,7 @@ export async function checkRegistrationField(
           status: "unchecked",
           number,
           listedOrganisationId,
-          message: "The charity register file is not loaded here, so only the number's shape was checked.",
+          message: "The register file is not loaded here, so only the number's shape was checked.",
         };
       }
       const charity = charityByRegisteredNumber(Number(number));
@@ -158,7 +158,7 @@ export async function checkRegistrationField(
             status: "not_found",
             number,
             listedOrganisationId,
-            message: "No charity in the England and Wales register has this number. Check it before you submit.",
+            message: "No record in the England and Wales register has this number. Check it before you submit.",
           };
     }
 

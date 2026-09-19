@@ -39,6 +39,7 @@ import {
 import {
   Chip,
   FilterSection,
+  ImportProgressGauge,
   summariseList,
 } from "../charity-commission/filter-builder";
 import {
@@ -137,16 +138,24 @@ export function CompaniesFilterBuilder({
   presets,
   sicValues,
   registerSize,
+  initialFilters,
 }: {
   presets: CompaniesPresetSummary[];
   /** Every SIC code in the snapshot with its title and staged count. */
   sicValues: SicValue[];
   registerSize: number;
+  /** The selection to open with, when repeating an earlier run. */
+  initialFilters?: CompanyRegisterFilters;
 }) {
-  const [filters, setFilters] = useState<CompanyRegisterFilters>({
-    statuses: [...DEFAULT_STATUSES],
-  });
-  const [count, setCount] = useState<number | null>(registerSize);
+  const [filters, setFilters] = useState<CompanyRegisterFilters>(
+    initialFilters ?? { statuses: [...DEFAULT_STATUSES] },
+  );
+  // Restored criteria ("Run this again") almost never select the whole
+  // register, so starting from registerSize would show that wrong number —
+  // in the confirmation, the cap warning, and the progress total — for the
+  // 250ms before the debounced recount below corrects it. Unknown reads
+  // honestly as "—" until the real count for these filters lands.
+  const [count, setCount] = useState<number | null>(initialFilters ? null : registerSize);
   const [counting, setCounting] = useState(false);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
   const [showPreview, setShowPreview] = useState(false);
@@ -166,7 +175,21 @@ export function CompaniesFilterBuilder({
   const [postcodeDraft, setPostcodeDraft] = useState("");
   const [selectedLocationZone, setSelectedLocationZone] = useState<CityRegionZone>("All");
   const [isPending, startTransition] = useTransition();
+  /** Separate from `isPending`, which also covers previews and saved sets. */
+  const [importing, setImporting] = useState(false);
+  /** The running import's selection, captured before its criteria are locked. */
+  const [importTotal, setImportTotal] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
   const reduceMotion = useReducedMotionConfig();
+
+  useEffect(() => {
+    if (!importing) return;
+    const startedAt = Date.now();
+    const id = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 500);
+    return () => clearInterval(id);
+  }, [importing]);
 
   // Every filter change re-counts, debounced so typing does not fire a request
   // per keystroke. The ref guards against an older, slower response
@@ -429,12 +452,17 @@ export function CompaniesFilterBuilder({
     });
   };
 
-  const doImport = () =>
+  const doImport = () => {
+    setImportTotal(Math.min(count ?? 0, MAX_IMPORT));
+    setElapsed(0);
+    setImporting(true);
+    setConfirming(false);
     startTransition(async () => {
       setImportState(await runCompaniesRegisterImport(filters));
-      setConfirming(false);
+      setImporting(false);
       setCounting(false);
     });
+  };
 
   const doSave = () =>
     startTransition(async () => {
@@ -478,6 +506,10 @@ export function CompaniesFilterBuilder({
         <div className="rounded-2xl border border-black/[0.09] bg-white/85 p-4 shadow-sm backdrop-blur-md sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
             <div className="min-w-0 flex-1">
+              {importing ? (
+                <ImportProgressGauge total={importTotal} elapsed={elapsed} />
+              ) : (
+                <>
               <p className="flex items-baseline gap-2">
                 <span className="text-[clamp(1.75rem,4vw,2.5rem)] font-semibold leading-none tabular-nums tracking-[-0.03em]">
                   {count === null ? "—" : count.toLocaleString()}
@@ -503,9 +535,11 @@ export function CompaniesFilterBuilder({
                   )}
                 </p>
               )}
+                </>
+              )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            {!importing && <div className="flex flex-wrap items-center gap-2">
               {/* Saved sets live here, not in a card at the foot of the page:
                   they act on the whole selection, which is what this bar is. */}
               <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -595,7 +629,7 @@ export function CompaniesFilterBuilder({
               >
                 {showPreview ? "Hide sample" : "See a sample"}
               </button>
-            </div>
+            </div>}
           </div>
 
           {unfiltered && (
@@ -700,7 +734,23 @@ export function CompaniesFilterBuilder({
       </AnimatePresence>
 
       {/* ── The controls ──────────────────────────────────────────────────── */}
-      <section className="rounded-panel border border-rule bg-white px-5">
+      {importing && (
+        <p
+          id="companies-import-criteria-lock"
+          className="rounded-inset bg-paper px-4 py-3 text-[13px] leading-[1.55] text-dim"
+          role="status"
+        >
+          This import is using the criteria shown below. They are locked until it
+          finishes; then you can change them and start another import.
+        </p>
+      )}
+      <section
+        aria-describedby={importing ? "companies-import-criteria-lock" : undefined}
+        className={`rounded-panel border border-rule bg-white px-5 transition-opacity ${
+          importing ? "opacity-60" : ""
+        }`}
+        inert={importing}
+      >
         <FilterSection
           onCommit={commitCount}
           title="Name"
@@ -1078,7 +1128,12 @@ export function CompaniesFilterBuilder({
       </section>
 
       {/* ── Import, behind a confirmation that restates the count and criteria ── */}
-      <section className="rounded-2xl border border-black/[0.07] bg-white p-5 shadow-xs sm:p-6">
+      <section
+        className={`rounded-2xl border border-black/[0.07] bg-white p-5 shadow-xs transition-opacity sm:p-6 ${
+          importing ? "opacity-60" : ""
+        }`}
+        inert={importing}
+      >
         <h3 className="text-sm font-bold text-foreground">Import</h3>
         <p className="mt-1.5 text-sm leading-[1.6] text-foreground/65">
           Adds the selected companies to the client list. Companies already on

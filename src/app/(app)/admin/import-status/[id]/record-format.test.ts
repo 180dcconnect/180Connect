@@ -1,214 +1,142 @@
-import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 
 import {
   describeRawRecord,
-  extractGrantDetails,
+  extractFilingType,
   extractMissionOrActivities,
+  extractRecordCity,
   extractRecordName,
-  formatFullAddress,
+  extractRecordPostcode,
+  extractRegistryStatus,
+  extractWebsiteUrl,
   getStatusDetails,
-  humaniseEntityType,
-  matchesRecordQuery,
+  formatFullAddress,
   type RawSourceRecordRow,
 } from "./record-format.ts";
 
-const NOW = new Date("2026-08-15T12:00:00.000Z");
+/**
+ * The staged bulk-charity shape nests everything under `charity`
+ * (see toRawPayload). A pending bulk row has no organisation to rescue it, so
+ * these extractors are the only thing standing between the breakdown and a
+ * bold register number with "Standard client" underneath.
+ */
+const bulkPayload = {
+  charity: {
+    organisation_number: 1234567,
+    registered_charity_number: 567890,
+    charity_name: "Sheffield Arts Collective",
+    charity_registration_status: "Registered",
+    charity_reporting_status: "Registered",
+    date_of_registration: "2015-06-01",
+    charity_contact_address1: "12 Division Street",
+    charity_contact_address2: "Sheffield",
+    charity_contact_address3: null,
+    charity_contact_address4: null,
+    charity_contact_address5: null,
+    charity_contact_postcode: "S1 4GE",
+    charity_contact_email: null,
+    charity_contact_web: "https://sheffield-arts.example.org",
+    charity_company_registration_number: null,
+    charity_is_cio: 1,
+    charity_activities: "Arts workshops for young people.",
+  },
+  annual_returns: [],
+  matched_classifications: ["Arts"],
+  matched_areas: ["Sheffield"],
+};
 
-function fakeRow(overrides: Partial<RawSourceRecordRow> = {}): RawSourceRecordRow {
+function bulkRow(): RawSourceRecordRow {
   return {
-    id: "rec-1",
+    id: "row-1",
     ingestion_run_id: "run-1",
-    record_source: "companies_house",
-    source_record_id: "01234567",
-    raw_payload: {
-      company_name: "Acme Innovations CIC",
-      type: "community-interest-company",
-      company_status: "active",
-      registered_office_address: {
-        address_line_1: "10 High Street",
-        locality: "London",
-        postal_code: "EC1A 1AA",
-      },
-      sic_codes: ["88990"],
-    },
-    received_at: "2026-08-15T10:00:00.000Z",
-    processing_status: "validated",
-    matched_organisation_id: "org-1",
-    checksum: "a1b2c3d4e5f67890",
+    record_source: "charity_commission_bulk",
+    source_record_id: "1234567",
+    raw_payload: bulkPayload,
+    received_at: "2026-09-10T10:00:00.000Z",
+    processing_status: "pending",
+    matched_organisation_id: null,
+    checksum: "abc",
     ingestion_attempt: 1,
     source_country: "GB",
-    source_registry_name: "Companies House",
-    excluded_fields: ["contact_email"],
+    source_registry_name: "Charity Commission for England and Wales",
+    excluded_fields: [],
     rule_version_applied: 1,
-    ...overrides,
   };
 }
 
-describe("extractRecordName", () => {
-  it("extracts legal_name or company_name or charity_name", () => {
-    assert.equal(extractRecordName({ legal_name: "Oxfam GB" }, "123"), "Oxfam GB");
-    assert.equal(extractRecordName({ company_name: "Tesla UK Ltd" }, "123"), "Tesla UK Ltd");
-    assert.equal(extractRecordName({ charity_name: "Red Cross" }, "123"), "Red Cross");
-    assert.equal(extractRecordName({ name: "Save The Children" }, "123"), "Save The Children");
+describe("bulk charity payload", () => {
+  it("names the charity, not its register number", () => {
+    assert.equal(extractRecordName(bulkPayload, "1234567"), "Sheffield Arts Collective");
   });
 
-  it("extracts recipientOrganization from 360Giving payload", () => {
-    assert.equal(
-      extractRecordName({ recipientOrganization: [{ name: "Youth Impact Fund" }] }, "123"),
-      "Youth Impact Fund",
-    );
+  it("reads the postcode where no town is staged", () => {
+    assert.equal(extractRecordCity(bulkPayload), null);
+    assert.equal(extractRecordPostcode(bulkPayload), "S1 4GE");
   });
 
-  it("falls back to fallback ID on missing or empty payload", () => {
-    assert.equal(extractRecordName(null, "01234567"), "01234567");
-    assert.equal(extractRecordName({}, "01234567"), "01234567");
+  it("reads activities, website, address and status from the nested charity", () => {
+    assert.equal(extractMissionOrActivities(bulkPayload), "Arts workshops for young people.");
+    assert.equal(extractWebsiteUrl(bulkPayload), "https://sheffield-arts.example.org");
+    assert.equal(formatFullAddress(bulkPayload), "12 Division Street, Sheffield, S1 4GE");
+    assert.equal(extractRegistryStatus(bulkPayload), "Registered");
+  });
+
+  it("reads the CIO flag as the filing type", () => {
+    assert.equal(extractFilingType(bulkPayload), "Charitable Incorporated Organisation (CIO)");
+  });
+
+  it("calls a non-CIO bulk row a registered charity, never a standard client", () => {
+    const payload = {
+      charity: { ...bulkPayload.charity, charity_is_cio: 0 },
+      annual_returns: [],
+    };
+    assert.equal(extractFilingType(payload), "Registered Charity");
+  });
+
+  it("describes a pending bulk row by name with a location", () => {
+    const view = describeRawRecord(bulkRow(), null, new Date("2026-09-11T10:00:00.000Z"));
+    assert.equal(view.name, "Sheffield Arts Collective");
+    assert.equal(view.city, null);
+    assert.equal(view.postcode, "S1 4GE");
+    assert.equal(view.status.label, "Waiting to be added");
+    // A staged record is not waiting on a person, so it must not offer a queue.
+    assert.equal(view.status.reviewHref, undefined);
+  });
+
+  it("never misreads a payload that merely happens to carry a charity key", () => {
+    // No annual_returns marker: not the staged register shape.
+    const lookalike = { charity: { charity_name: "Someone Else" } };
+    assert.equal(extractRecordName(lookalike, "999"), "999");
+    assert.equal(extractFilingType(lookalike), null);
   });
 });
 
-describe("humaniseEntityType", () => {
-  it("converts raw registry codes into readable names", () => {
-    assert.equal(humaniseEntityType("community-interest-company"), "Community Interest Company (CIC)");
-    assert.equal(humaniseEntityType("cic"), "Community Interest Company (CIC)");
-    assert.equal(humaniseEntityType("private-limited-guarant-nsc"), "Company Limited by Guarantee (Non-profit)");
-    assert.equal(humaniseEntityType("registered-charity"), "Registered Charity");
-  });
-});
-
-describe("formatFullAddress", () => {
-  it("formats registered office address into a clean line", () => {
-    const formatted = formatFullAddress({
-      registered_office_address: {
-        address_line_1: "123 Oxford Street",
-        locality: "London",
-        postal_code: "W1D 2HG",
-      },
-    });
-    assert.equal(formatted, "123 Oxford Street, London, W1D 2HG");
-  });
-});
-
-describe("extractMissionOrActivities", () => {
-  it("extracts activities or mission statement", () => {
-    assert.equal(
-      extractMissionOrActivities({ activities: "Providing youth mentorship." }),
-      "Providing youth mentorship.",
-    );
-    assert.equal(
-      extractMissionOrActivities({ sic_codes: ["88990"] }),
-      "Nature of business (SIC codes): 88990",
-    );
+describe("flat payloads", () => {
+  it("keeps preferring top-level names", () => {
+    assert.equal(extractRecordName({ legal_name: "Flat Ltd" }, "1"), "Flat Ltd");
+    assert.equal(extractRecordName({ company_name: "Flat Co" }, "1"), "Flat Co");
   });
 });
 
 describe("getStatusDetails", () => {
-  it("returns human-friendly business status labels for organisation registries", () => {
-    assert.equal(getStatusDetails("validated").label, "Added to CRM");
-    assert.equal(getStatusDetails("matched").label, "Duplicate Candidate");
-    assert.equal(getStatusDetails("pending").label, "Pending Review");
-    assert.equal(getStatusDetails("rejected").label, "Excluded by Criteria");
-    assert.equal(getStatusDetails("error").label, "Import Issue");
+  it("sends a duplicate and a held record to the screens that decide them", () => {
+    const duplicate = getStatusDetails("matched", "charity_commission_bulk");
+    assert.equal(duplicate.reviewHref, "/admin/duplicates");
+
+    const held = getStatusDetails("rejected", "charity_commission_bulk", { heldForReview: true });
+    assert.equal(held.label, "Held for review");
+    assert.equal(held.reviewHref, "/admin/review");
   });
 
-  it("returns grant-specific status labels for 360Giving", () => {
-    const matched = getStatusDetails("matched", "360giving");
-    assert.equal(matched.label, "Matched to Client");
-    assert.equal(matched.tone, "success");
+  it("keeps a settled rejection settled, with no queue to open", () => {
+    const settled = getStatusDetails("rejected", "charity_commission_bulk");
+    assert.match(settled.label, /did not meet the client criteria/i);
+    assert.equal(settled.reviewHref, undefined);
+  });
 
-    const rejected = getStatusDetails("rejected", "360giving");
-    assert.equal(rejected.label, "No Matching Client");
-    assert.equal(rejected.tone, "neutral");
-
-    const pending = getStatusDetails("pending", "360giving");
-    assert.equal(pending.label, "Pending Match");
-    assert.equal(pending.tone, "info");
+  it("does not offer the client review queues for grant records", () => {
+    const grant = getStatusDetails("rejected", "360giving", { heldForReview: true });
+    assert.equal(grant.reviewHref, undefined);
   });
 });
-
-describe("describeRawRecord", () => {
-  it("formats a raw record with business presentation", () => {
-    const view = describeRawRecord(fakeRow(), null, NOW);
-    assert.equal(view.name, "Acme Innovations CIC");
-    assert.equal(view.city, "London");
-    assert.equal(view.filingType, "Community Interest Company (CIC)");
-    assert.equal(view.fullAddress, "10 High Street, London, EC1A 1AA");
-    assert.equal(view.registryStatus, "Active");
-    assert.equal(view.receivedRelative, "2 hours ago");
-  });
-});
-
-describe("matchesRecordQuery", () => {
-  const view = describeRawRecord(fakeRow(), null, NOW);
-
-  it("matches name, registration number, city, or address", () => {
-    assert.equal(matchesRecordQuery(view, "acme"), true);
-    assert.equal(matchesRecordQuery(view, "01234567"), true);
-    assert.equal(matchesRecordQuery(view, "london"), true);
-    assert.equal(matchesRecordQuery(view, "high street"), true);
-  });
-});
-
-describe("extractGrantDetails", () => {
-  it("extracts funder name, formatted amount, award date, and programme", () => {
-    const details = extractGrantDetails({
-      fundingOrganization: [{ name: "National Lottery Community Fund" }],
-      amountAwarded: 50000,
-      currency: "GBP",
-      awardDate: "2024-03-15T00:00:00Z",
-      grantProgramme: [{ title: "Community Grants" }],
-      description: "Supporting local youth mentorship program",
-    });
-
-    assert.equal(details?.funderName, "National Lottery Community Fund");
-    assert.equal(details?.amountFormatted, "£50,000");
-    assert.equal(details?.awardDate, "2024-03-15");
-    assert.equal(details?.grantProgramme, "Community Grants");
-    assert.equal(details?.description, "Supporting local youth mentorship program");
-  });
-
-  it("returns null for non-grant payloads", () => {
-    assert.equal(extractGrantDetails(null), null);
-    assert.equal(extractGrantDetails({}), null);
-  });
-});
-
-describe("describeRawRecord for 360Giving", () => {
-  it("formats a matched grant record with client match status and grant details", () => {
-    const grantRow = fakeRow({
-      record_source: "360giving",
-      processing_status: "matched",
-      source_record_id: "grant-999",
-      raw_payload: {
-        fundingOrganization: [{ name: "Esmee Fairbairn Foundation" }],
-        amountAwarded: 75000,
-        currency: "GBP",
-        awardDate: "2023-11-20",
-        recipientOrganization: [{ name: "Bashir Charity" }],
-      },
-    });
-
-    const view = describeRawRecord(
-      grantRow,
-      {
-        id: "org-1",
-        legalName: "Bashir Charity",
-        organisationType: "charity",
-        sector: "Community",
-        city: "Sheffield",
-        countryCode: "GB",
-        outreachStatus: "active",
-        website: "https://example.org",
-        ownerId: null,
-        ownerName: null,
-        ownerEmail: null,
-      },
-      NOW,
-    );
-
-    assert.equal(view.status.label, "Matched to Client");
-    assert.equal(view.status.tone, "success");
-    assert.equal(view.grantDetails?.funderName, "Esmee Fairbairn Foundation");
-    assert.equal(view.grantDetails?.amountFormatted, "£75,000");
-  });
-});
-

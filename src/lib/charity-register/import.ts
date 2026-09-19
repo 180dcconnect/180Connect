@@ -215,12 +215,12 @@ async function importSelected(
 
   // What is already held, so an unchanged charity is not rewritten. Sliced well
   // under PostgREST's row cap so a full page can never be a truncated one.
-  const existing = new Map<string, { checksum: string; ingestion_attempt: number }>();
+  const existing = new Map<string, { checksum: string; ingestion_attempt: number; status: string }>();
   for (let i = 0; i < numbers.length; i += BATCH_SIZE) {
     const slice = numbers.slice(i, i + BATCH_SIZE).map(String);
     const { data, error } = await supabase
       .from("raw_source_records")
-      .select("source_record_id, checksum, ingestion_attempt")
+      .select("source_record_id, checksum, ingestion_attempt, processing_status")
       .eq("record_source", "charity_commission_bulk")
       .in("source_record_id", slice)
       .limit(PAGE_LIMIT);
@@ -229,6 +229,7 @@ async function importSelected(
       existing.set(row.source_record_id, {
         checksum: row.checksum,
         ingestion_attempt: row.ingestion_attempt,
+        status: row.processing_status,
       });
     }
   }
@@ -262,7 +263,15 @@ async function importSelected(
     const checksum = hashPayload(cleared.payload);
     const previous = existing.get(id);
 
-    if (previous?.checksum === checksum) {
+    // A failed promote is infrastructure, not a verdict on the data: the row
+    // keeps status `error`, which promotion never reads, so without this a
+    // re-run would skip it as "unchanged" and the charity would sit unsaved
+    // forever with no screen offering a way back. Re-staging it (below resets
+    // it to pending) retries the insert the user asked for by pressing Import
+    // again. Every other terminal status stands: identical data gets the same
+    // answer, and only genuinely new or changed rows re-enter promotion.
+    const retryFailed = previous?.checksum === checksum && previous.status === "error";
+    if (previous?.checksum === checksum && !retryFailed) {
       outcome.unchanged += 1;
       continue;
     }
@@ -278,6 +287,16 @@ async function importSelected(
       ingestion_attempt: previous ? previous.ingestion_attempt + 1 : 1,
       excluded_fields: cleared.excludedFields,
       rule_version_applied: policy.version,
+      // Re-queued for promotion. The upsert only touches rows that are new or
+      // whose checksum changed, and every promotion outcome writes a terminal
+      // status (validated, matched, rejected, error) — without this, a row the
+      // register changed after a failed or rejected promote would keep that
+      // status forever: re-running the import would stage it again and promote
+      // nothing, reporting "0 added" for thousands of staged charities.
+      // Checksum-identical rows `continue` above, so untouched records are
+      // never needlessly reprocessed; changed ones re-enter promotion, where
+      // duplicates of existing clients take the designed flag-and-heal path.
+      processing_status: "pending",
     });
 
     if (batch.length >= BATCH_SIZE) {

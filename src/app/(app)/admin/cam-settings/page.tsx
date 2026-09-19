@@ -77,7 +77,7 @@ export default async function AdminCamSettingsPage(props: PageProps) {
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-[1.7] text-foreground/65">
               Inspect how team members have configured their outreach queues (F187).
-              Outreach preferences filter and weight prospects by geography, organization size, and sector.
+              Outreach preferences filter and weight prospects by geography, client size, and sector.
             </p>
           </div>
           <div className="flex items-center gap-4">

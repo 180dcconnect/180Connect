@@ -52,6 +52,19 @@ export interface HorizontalStickGaugeProps {
   valueFormatter?: (value: number) => string;
   /** Optional custom accessible value text for screen readers. */
   ariaValueText?: string;
+  /**
+   * Skips the scroll-reveal fade-in and renders at full opacity from the
+   * first frame. For a gauge that is never below the fold when it mounts —
+   * a live progress row, say — waiting on an `IntersectionObserver` firing
+   * is pure risk: if the observer's first callback lands while a parent
+   * entrance animation has the row at zero height (a real timing this
+   * component cannot control), that observer may never fire again, and the
+   * track sticks stay at `opacity: 0` forever — invisible until a hover
+   * happens to set their opacity directly, which is what "the gauge is
+   * transparent until I hover" turned out to be. Defaults to false so
+   * existing scroll-triggered charts keep their reveal.
+   */
+  alwaysVisible?: boolean;
 }
 
 type HoverState = {
@@ -115,11 +128,12 @@ export function HorizontalStickGauge({
   checkedLabel = "Checked",
   remainingLabel = "Still to check",
   valueFormatter = (v) => v.toLocaleString(),
+  alwaysVisible = false,
 }: HorizontalStickGaugeProps) {
   const compId = useId().replace(/:/g, "");
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number>(0);
-  const [hasEnteredView, setHasEnteredView] = useState(false);
+  const [hasEnteredView, setHasEnteredView] = useState(alwaysVisible);
   const [hoverState, setHoverState] = useState<HoverState | null>(null);
 
   // Animated progress (0 to target active ticks count)
@@ -143,6 +157,12 @@ export function HorizontalStickGauge({
     });
     resizeObserver.observe(node);
 
+    // Already visible from the first frame — nothing to reveal, and nothing
+    // that can get stuck waiting on a callback that may never fire again.
+    if (alwaysVisible) {
+      return () => resizeObserver.disconnect();
+    }
+
     const intersectionObserver = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -158,7 +178,7 @@ export function HorizontalStickGauge({
       resizeObserver.disconnect();
       intersectionObserver.disconnect();
     };
-  }, []);
+  }, [alwaysVisible]);
 
   const hasSegments = Boolean(segments && segments.length > 0);
 

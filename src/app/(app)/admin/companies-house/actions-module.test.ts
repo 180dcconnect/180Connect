@@ -50,6 +50,6 @@ describe("Companies House server-action module", () => {
     assert.doesNotMatch(source, /outcome\.selected\s*>\s*cap/);
     assert.match(source, /const available = countCompanies\(parsed\)/);
     assert.match(source, /const truncated = available > cap/);
-    assert.match(source, /job_status: truncated \? "partial" : "completed"/);
+    assert.match(source, /truncated\s*\?\s*"partial"\s*:\s*"completed"/);
   });
 });

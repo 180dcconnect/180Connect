@@ -151,14 +151,14 @@ describe("buildManualOrganisation", () => {
 });
 
 describe("checkManualEntryCriteria", () => {
-  it("fails closed when organisation type evidence is missing", () => {
+  it("fails closed when client type evidence is missing", () => {
     assert.deepEqual(checkManualEntryCriteria(), {
       status: "blocked",
-      message: "Select or derive an organisation type before approving this manual entry.",
+      message: "Select or derive a client type before approving this manual entry.",
     });
   });
 
-  it("passes an eligible charity through the shared F047 checker", () => {
+  it("passes an eligible client through the shared F047 checker", () => {
     assert.deepEqual(checkManualEntryCriteria({ organisationType: "charity" }), { status: "passed" });
   });
 

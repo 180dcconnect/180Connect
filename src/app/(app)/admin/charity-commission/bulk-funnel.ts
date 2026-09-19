@@ -12,6 +12,11 @@
  * directly rather than only through a rendered page.
  */
 
+// Relative with an explicit extension, like the status helpers below: this
+// module is run directly by node --test, which resolves neither the tsconfig
+// path alias nor an extensionless specifier.
+import { describeImportFailure } from "../../../../lib/import-failure-reason.ts";
+import { registerImportBreakdownFrom } from "../import-status/run-format.ts";
 import {
   isStalledRun,
   stalledRunSummary,
@@ -130,6 +135,7 @@ export type CharityCommissionRun = {
   records_skipped: number;
   records_failed: number;
   run_stats: RunStats;
+  triggered_by?: string | null;
 };
 
 /** Which pipeline a run came from, in the words this page uses for them. */
@@ -156,10 +162,38 @@ export function summariseRun(run: CharityCommissionRun, now: Date = new Date()):
   }
   if (run.job_status === "failed") return "Failed — nothing was imported.";
 
+  // `records_inserted` counts register rows staged, not clients. When the run
+  // recorded what promotion did with them, that is the half a reader came for
+  // — and a run that staged hundreds and saved none of them is a failure, not
+  // a big number with a footnote.
+  const register = registerImportBreakdownFrom(run.api_source, run.run_stats);
+  if (register && register.failedToSave > 0) {
+    const count = formatCount(register.failedToSave);
+    const noun = register.failedToSave === 1 ? "record" : "records";
+    const head =
+      register.clientsAdded === null || register.clientsAdded === 0
+        ? `Nothing was added to the client list — all ${count} ${noun} were refused`
+        : `${formatCount(register.clientsAdded)} added to the client list, ${count} ${noun} refused`;
+    const reason = describeImportFailure(register.failureReasons[0] ?? null);
+    return reason ? `${head}. ${reason.summary}.` : `${head}.`;
+  }
+
   const parts: string[] = [];
-  if (run.records_inserted > 0) parts.push(`${formatCount(run.records_inserted)} written`);
-  if (run.records_skipped > 0) parts.push(`${formatCount(run.records_skipped)} already held`);
-  if (run.records_failed > 0) parts.push(`${formatCount(run.records_failed)} unusable`);
+  if (register && register.clientsAdded !== null) {
+    if (register.clientsAdded > 0) parts.push(`${formatCount(register.clientsAdded)} added to the client list`);
+    if (register.duplicates > 0)
+      parts.push(`${formatCount(register.duplicates)} matched a client already on the list`);
+    if (register.needsReview > 0) parts.push(`${formatCount(register.needsReview)} flagged for review`);
+    if (register.didNotMeet > 0)
+      parts.push(`${formatCount(register.didNotMeet)} did not meet the client criteria`);
+  } else if (run.records_inserted > 0) {
+    // No promotion breakdown on this row, so all that is honestly known is how
+    // many records the run took from the register. "Written" is the pipeline's
+    // word for it, not the reader's.
+    parts.push(`${formatCount(run.records_inserted)} taken from the source`);
+  }
+  if (run.records_skipped > 0) parts.push(`${formatCount(run.records_skipped)} already on the list`);
+  if (run.records_failed > 0) parts.push(`${formatCount(run.records_failed)} could not be saved`);
 
   // A run that found nothing is a normal weekly outcome, not a problem, and
   // saying so plainly stops it being read as one.

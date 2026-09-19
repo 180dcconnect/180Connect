@@ -393,7 +393,7 @@ export async function proposeSectorFromWebsite(
     return {
       status: "skipped",
       reason:
-        "That page does not describe what this organisation does, so there is nothing to read a sector from. Pick one above instead.",
+        "That page does not describe what this client does, so there is nothing to read a sector from. Pick one above instead.",
     };
   }
 

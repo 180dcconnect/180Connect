@@ -43,7 +43,7 @@ describe("importStateFromSummary", () => {
   });
 
   it("shows safe lookup failures so the admin can correct the input", () => {
-    const message = "Charity Commission could not find a charity with that registration number.";
+    const message = "Charity Commission could not find a record with that registration number.";
     assert.equal(importStateFromSummary(summary("failed", message)).message, message);
   });
 });
@@ -53,11 +53,13 @@ function promoteCounts(overrides: Partial<PromoteCounts> = {}): PromoteCounts {
     read: 0,
     inserted: 0,
     flagged: 0,
+    alreadyHeld: 0,
     rejected: 0,
     invalidData: 0,
     needsReview: 0,
     doesNotMeet: 0,
     failed: 0,
+    failureReasons: [],
     ...overrides,
   };
 }

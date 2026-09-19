@@ -2,11 +2,13 @@
 
 import { AnimatePresence, motion, useReducedMotionConfig, type Variants } from "motion/react";
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
-import { ArrowRight, Check, ChevronLeft, History, Mail, Plus, Search, SlidersHorizontal, X } from "lucide-react";
+import { ArrowDownUp, ArrowRight, Check, ChevronLeft, History, Mail, Plus, Search, SlidersHorizontal, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { EASE, stagger } from "@/components/brand/motion";
 import { LIP, SEARCH_GLASS, SEARCH_GLASS_FROSTED, SEARCH_GLASS_FROSTED_LIGHT, SEARCH_GLASS_LIGHT, SEARCH_GLASS_OPEN, SEARCH_GLASS_OPEN_LIGHT } from "@/components/brand/tokens";
+import { DateRangeCalendar } from "@/components/ui/date-range-calendar";
+import { todayIso, type CalendarPreset, type RangeSelection } from "@/lib/date-range";
 import { tagPillStyle } from "@/lib/tags/tag-colours";
 
 /** Cycles behind the prompt while the field is empty and unfocused. */
@@ -56,6 +58,9 @@ const GLASS_OPTIONS = glassItemIndexed(0.025, 0.3);
  * they stay legible.
  */
 export type SearchBarTone = "dark" | "light";
+
+/** Which way a sort runs. The words for it are the field's own — see `sort`. */
+export type SortDirection = "asc" | "desc";
 
 const SEARCH_BAR_TONES: Record<
   SearchBarTone,
@@ -179,6 +184,189 @@ function rankOption(label: string, query: string): number {
  * chip row below the bar the full pill tint is used instead.
  */
 export type FilterOption = { label: string; value: string; colour?: string };
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_MONTH = /^\d{4}-\d{2}$/;
+const IMPORT_DATE_PRESET_VALUES = new Set([
+  "today",
+  "yesterday",
+  "7d",
+  "30d",
+  "this_month",
+  "last_month",
+]);
+
+function isoDayFromUtc(year: number, month: number, day: number): string {
+  return new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10);
+}
+
+/** Turns the Import Status URL vocabulary into the calendar's concrete span. */
+function dateRangeForFilterValue(value: string, now: Date): RangeSelection | null {
+  const today = todayIso(now);
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+
+  if (value === "today") return { from: today, to: today };
+  if (value === "yesterday") {
+    const yesterday = isoDayFromUtc(year, month, now.getUTCDate() - 1);
+    return { from: yesterday, to: yesterday };
+  }
+  if (value === "7d" || value === "30d") {
+    const days = value === "7d" ? 7 : 30;
+    return { from: isoDayFromUtc(year, month, now.getUTCDate() - days), to: today };
+  }
+  if (value === "this_month") {
+    return { from: isoDayFromUtc(year, month, 1), to: today };
+  }
+  if (value === "last_month") {
+    return {
+      from: isoDayFromUtc(year, month - 1, 1),
+      to: isoDayFromUtc(year, month, 0),
+    };
+  }
+  if (ISO_MONTH.test(value)) {
+    const [filterYear, filterMonth] = value.split("-").map(Number);
+    return {
+      from: isoDayFromUtc(filterYear, filterMonth - 1, 1),
+      to: isoDayFromUtc(filterYear, filterMonth, 0),
+    };
+  }
+  if (value.includes("..")) {
+    const [from, to] = value.split("..");
+    if (ISO_DAY.test(from) && ISO_DAY.test(to)) {
+      return from <= to ? { from, to } : { from: to, to: from };
+    }
+  }
+  if (ISO_DAY.test(value)) return { from: value, to: value };
+  return null;
+}
+
+function formatCalendarDay(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function SearchDateCalendar({
+  current,
+  options,
+  onBack,
+  onApply,
+}: {
+  current?: FilterOption;
+  options: FilterOption[];
+  onBack: () => void;
+  onApply: (selection: { from: string; to: string }) => void;
+}) {
+  // This instance owns one clock so midnight cannot make the selected range
+  // and the preset row disagree during a single open interaction.
+  const [now] = useState(() => new Date());
+  const initial = current ? dateRangeForFilterValue(current.value, now) : null;
+  const [mode, setMode] = useState<"single" | "range">(
+    current && ISO_DAY.test(current.value) ? "single" : "range",
+  );
+  const [selection, setSelection] = useState<RangeSelection>(
+    initial ?? { from: null, to: null },
+  );
+
+  const presets = useMemo<CalendarPreset[]>(
+    () =>
+      options
+        .filter((option) => IMPORT_DATE_PRESET_VALUES.has(option.value))
+        .flatMap((option) => {
+          const range = dateRangeForFilterValue(option.value, now);
+          return range?.from && range.to
+            ? [{ label: option.label, from: range.from, to: range.to }]
+            : [];
+        }),
+    [now, options],
+  );
+
+  const completeSelection =
+    selection.from && selection.to
+      ? { from: selection.from, to: selection.to }
+      : null;
+
+  return (
+    <motion.div
+      key="date-calendar"
+      className="max-h-[calc(100vh-7rem)] overflow-y-auto px-4 pb-4 pt-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+      variants={PANEL_STAGGER}
+      initial="hidden"
+      animate="show"
+      exit={{ opacity: 0, transition: { duration: 0.15 } }}
+    >
+      <motion.div variants={GLASS_ITEM} className="mb-3 flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="font-body flex shrink-0 items-center gap-1 rounded-inset px-2.5 py-1 text-[13px] font-medium text-dim transition-colors hover:bg-paper-sunk hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Back
+        </button>
+
+        <div
+          className="flex items-center rounded-inset bg-paper-sunk p-0.5"
+          role="group"
+          aria-label="Date selection type"
+        >
+          {(["single", "range"] as const).map((choice) => (
+            <button
+              key={choice}
+              type="button"
+              aria-pressed={mode === choice}
+              onClick={() => {
+                setMode(choice);
+                if (choice === "single" && selection.from) {
+                  setSelection({ from: selection.from, to: selection.from });
+                }
+              }}
+              className={`rounded-inset px-2.5 py-1 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-lead ${
+                mode === choice ? "bg-white text-ink shadow-xs" : "text-dim hover:text-ink"
+              }`}
+            >
+              {choice === "single" ? "One day" : "Date range"}
+            </button>
+          ))}
+        </div>
+      </motion.div>
+
+      <motion.div variants={GLASS_ITEM} className="rounded-panel bg-white p-3">
+        <DateRangeCalendar
+          className="w-full"
+          mode={mode}
+          value={selection}
+          onChange={setSelection}
+          max={todayIso(now)}
+          presetOptions={presets}
+        />
+      </motion.div>
+
+      <motion.div variants={GLASS_ITEM} className="mt-3 flex justify-end">
+        <button
+          type="button"
+          disabled={!completeSelection}
+          onClick={() => {
+            // Save stages the chip AND returns to the filter list, same as
+            // picking any other option — the calendar is a drill-down, not a
+            // dead end that leaves the reader stuck looking at a date grid.
+            if (!completeSelection) return;
+            onApply(completeSelection);
+            onBack();
+          }}
+          className="inline-flex items-center gap-1.5 rounded-inset bg-ink px-4 py-2 text-[13px] font-bold text-white transition-colors hover:bg-ink/90 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
+        >
+          <Check className="h-3.5 w-3.5" />
+          Save
+        </button>
+      </motion.div>
+    </motion.div>
+  );
+}
 
 /**
  * F215 — a category whose value is typed rather than picked: the panel shows a
@@ -354,6 +542,8 @@ export function BrandSearchBar({
    promptButton = false,
    panelRows,
    freeTextCategories,
+   calendarDateFilter = false,
+   resetParamsOnSearch = [],
    compactRest = false,
    anchorLeft = false,
    chipsBelow = true,
@@ -366,6 +556,7 @@ export function BrandSearchBar({
    recentKey,
    busy = false,
    ask,
+   sort,
    openSignal,
    confirmSignal,
    confirm,
@@ -429,6 +620,44 @@ export function BrandSearchBar({
      maxLength?: number;
    };
    /**
+    * A sort control beside the filter toggle: the same pill, a second job.
+    *
+    * Additive and opt-in, like `ask` — a host that passes nothing renders what
+    * it rendered before, with no second button on the bar. It is its own
+    * button rather than a category inside the filter panel because sorting is
+    * not filtering: a filter decides which rows exist and is staged until the
+    * search is submitted, while a sort only reorders the rows already on
+    * screen. Mixing the two would mean either a sort that waits for a submit
+    * it has no reason to wait for, or a filter panel where one row behaves
+    * differently from all the others.
+    *
+    * Choosing a field or a direction navigates immediately, writing both to
+    * the URL, so an order can be linked, refreshed and gone back to like every
+    * other piece of this page's state.
+    */
+   sort?: {
+     /** The query parameter holding the field, e.g. "sort". */
+     param: string;
+     /** The query parameter holding the direction, e.g. "dir". */
+     directionParam: string;
+     /** The field currently sorted on — one of `options`. */
+     value: string;
+     direction: SortDirection;
+     /**
+      * What can be sorted on. Each field names its own two directions in the
+      * words that fit it: "A to Z" for a name is the same instruction as
+      * "Newest first" for a date, and a bare "Ascending" makes the reader
+      * translate. Defaults cover the case where they genuinely are just up and
+      * down.
+      */
+     options: {
+       label: string;
+       value: string;
+       ascLabel?: string;
+       descLabel?: string;
+     }[];
+   };
+   /**
     * Reactive open signal: whenever this value changes (after mount), the
     * panel opens. For failures that land while the panel is closed — the
     * error row is inside, so an invisible error is no error at all.
@@ -473,6 +702,13 @@ export function BrandSearchBar({
     * category name; the value's query parameter still comes from `params`.
     */
    freeTextCategories?: Record<string, FreeTextCategory>;
+   /**
+    * Replace the native date fields with the shared dashboard calendar. Opt-in
+    * because some hosts use this component inside much shorter toolbars.
+    */
+   calendarDateFilter?: boolean;
+   /** Host-owned pagination cursors that a new search must not carry forward. */
+   resetParamsOnSearch?: readonly string[];
    /**
     * Rest compact: the closed pill shrinks to its content instead of spanning
     * full width, then widens back on open before the panel unfolds — the
@@ -617,6 +853,29 @@ export function BrandSearchBar({
   const [restWidth, setRestWidth] = useState<number | null>(null);
   const [fullWidth, setFullWidth] = useState<number | null>(null);
 
+  /**
+   * The card animates `height: panelOut ? "auto" : ROW`. That target is the
+   * literal string "auto" for as long as the panel stays open, so swapping
+   * what is *inside* it — categories to the date calendar, day to range mode
+   * and back — changes nothing Motion can see: the string didn't change, so
+   * no transition runs and the box snaps straight to the new content's size.
+   * Measuring the body in pixels and animating to that number instead gives
+   * every swap a real target to tween towards, exactly like `restWidth` and
+   * `fullWidth` do for the compact-rest widen above.
+   */
+  const panelBodyRef = useRef<HTMLDivElement>(null);
+  const [panelBodyHeight, setPanelBodyHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    const body = panelBodyRef.current;
+    if (!open || !body) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setPanelBodyHeight(entry.contentRect.height);
+    });
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, [open]);
+
   // The confirmation is a panel state, not a popover: it opens the bar and
   // takes over the drawer the rows live in, so everything this component does
   // happens inside one box.
@@ -737,6 +996,34 @@ export function BrandSearchBar({
       router.push(`${window.location.pathname}?${params.toString()}`);
     });
   };
+  /**
+   * Whether the open panel is showing the sort view rather than the filters.
+   * One panel, two views: the bar is already the widest thing on the page, and
+   * a second floating sheet beside it would have to solve the same clipping
+   * and stacking problems this one already solves.
+   */
+  const [sorting, setSorting] = useState(false);
+
+  /**
+   * Sorting navigates on the tap, unlike a filter, which is staged until the
+   * search is submitted. A sort has nothing to stage — it cannot be combined
+   * with a second sort, and there is no cost to getting it wrong — so making
+   * the reader press Search afterwards would only be a step that never
+   * changes the answer.
+   */
+  const applySort = (field: string, direction: SortDirection) => {
+    if (!sort) return;
+    const params = new URLSearchParams(window.location.search);
+    params.set(sort.param, field);
+    params.set(sort.directionParam, direction);
+    // The order changed, so row 31 is a different row: page 4 of the old order
+    // is not a place to land.
+    params.delete("page");
+    startTransition(() => {
+      router.replace(`?${params.toString()}`, { scroll: false });
+    });
+  };
+
   const FILTER_PARAMS: Record<string, string> = useMemo(() => paramNames || DEFAULT_PARAMS, [paramNames]);
 
   // F215 — the free-text category's staged value. One input at a time is ever
@@ -905,6 +1192,7 @@ export function BrandSearchBar({
     const params = new URLSearchParams(window.location.search);
     params.delete("q");
     params.delete("page");
+    resetParamsOnSearch.forEach((name) => params.delete(name));
     Object.values(FILTER_PARAMS).forEach((name) => params.delete(name));
 
     if (q) params.set("q", q);
@@ -968,6 +1256,7 @@ export function BrandSearchBar({
     setOpen(false);
     setConfirming(false);
     setTimeout(() => {
+      setSorting(false);
       setActiveFilter(null);
       setFilterQuery("");
       setExpandedRow(null);
@@ -1117,7 +1406,13 @@ export function BrandSearchBar({
               borderRadius: ROW / 2,
             }}
             animate={{
-              height: panelOut ? "auto" : ROW,
+              // The measured body height (see panelBodyHeight above) once it's
+              // known, so a swap inside the open panel is a real number tween
+              // rather than a snap. Scoped to `open` (not the wider `panelOut`,
+              // which also covers the as-you-type suggestions dropdown that
+              // has no `panelBodyRef` of its own) — "auto" is the pre-measure
+              // fallback for the first open frame and for that dropdown.
+              height: open && panelBodyHeight != null ? ROW + panelBodyHeight : panelOut ? "auto" : ROW,
               // Pixels at both ends once measured (see restWidth/fullWidth), so
               // the widen is a pure number tween with nothing to resolve on the
               // frame it starts. The keyword pair is only the pre-measure
@@ -1374,10 +1669,17 @@ export function BrandSearchBar({
           )}
           <button
             type="button"
-            aria-label={open ? "Close filters" : "Open filters"}
-            aria-expanded={open}
-            aria-controls={open ? listId : undefined}
+            aria-label={open && !sorting ? "Close filters" : "Open filters"}
+            aria-expanded={open && !sorting}
+            aria-controls={open && !sorting ? listId : undefined}
             onClick={() => {
+              // While the sort view is out, this button is the way back to the
+              // filters rather than a second way to shut the panel — pressing
+              // the sliders and having the pill close reads as a mis-tap.
+              if (open && sorting) {
+                setSorting(false);
+                return;
+              }
               if (open) {
                 close();
                 inputRef.current?.blur();
@@ -1387,8 +1689,32 @@ export function BrandSearchBar({
             }}
             className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${T.toggle} transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
           >
-            {open ? <X className="h-5 w-5" /> : <SlidersHorizontal className="h-4 w-4" />}
+            {open && !sorting ? <X className="h-5 w-5" /> : <SlidersHorizontal className="h-4 w-4" />}
           </button>
+
+          {/* Sort, beside the filters and never inside them: what order the rows
+              are in is a different question from which rows there are. */}
+          {sort && sort.options.length > 0 && (
+            <button
+              type="button"
+              aria-label={open && sorting ? "Close sort options" : "Sort"}
+              aria-expanded={open && sorting}
+              aria-controls={open && sorting ? listId : undefined}
+              onClick={() => {
+                if (open && sorting) {
+                  close();
+                  inputRef.current?.blur();
+                  return;
+                }
+                setActiveFilter(null);
+                setSorting(true);
+                setOpen(true);
+              }}
+              className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${T.toggle} transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
+            >
+              {open && sorting ? <X className="h-5 w-5" /> : <ArrowDownUp className="h-4 w-4" />}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1408,6 +1734,7 @@ export function BrandSearchBar({
             // as a snap.
             style={compactRest && fullWidth ? { width: fullWidth } : undefined}
           >
+            <div ref={panelBodyRef}>
             <AnimatePresence mode="wait">
               {confirm && confirming ? (
                 <motion.div
@@ -1461,6 +1788,94 @@ export function BrandSearchBar({
                       {confirm.confirmLabel ?? submitLabel}
                     </button>
                   </div>
+                </motion.div>
+              ) : sort && sorting ? (
+                /* Sort: the fields, then the two directions the chosen field
+                   runs in, named in that field's own words. Both apply on the
+                   tap — see `applySort` — so the panel is a set of answers
+                   rather than a form. */
+                <motion.div
+                  key="sort"
+                  className="flex h-[280px] flex-col px-4 py-4"
+                  variants={PANEL_STAGGER}
+                  initial="hidden"
+                  animate="show"
+                  exit={{ opacity: 0, transition: { duration: 0.15 } }}
+                  role="group"
+                  aria-label="Sort"
+                >
+                  <motion.p
+                    variants={GLASS_ITEM}
+                    className={`shrink-0 px-3 pb-1.5 text-[13px] ${T.muted60}`}
+                  >
+                    Sort by
+                  </motion.p>
+
+                  <motion.ul
+                    variants={PANEL_STAGGER}
+                    className="min-h-0 flex-1 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+                  >
+                    {sort.options.map((option) => {
+                      const chosen = option.value === sort.value;
+                      return (
+                        <motion.li key={option.value} variants={GLASS_ITEM}>
+                          <button
+                            type="button"
+                            aria-pressed={chosen}
+                            onClick={() => applySort(option.value, sort.direction)}
+                            className={`font-body flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2 text-left text-lg font-medium transition-colors ${
+                              chosen ? T.bright : T.faint
+                            } ${T.hoverRow} ${T.hoverBright} focus-visible:outline-2 focus-visible:outline-offset-2 ${T.outline}`}
+                          >
+                            <span className="min-w-0 truncate">{option.label}</span>
+                            {chosen && (
+                              <Check
+                                aria-hidden="true"
+                                className={`h-4 w-4 shrink-0 ${T.accentText}`}
+                              />
+                            )}
+                          </button>
+                        </motion.li>
+                      );
+                    })}
+                  </motion.ul>
+
+                  {/* The direction, as the two things it would actually do.
+                      "A to Z" and "Z to A" say which way round the list comes
+                      out; "ascending" makes the reader work it out. */}
+                  {(() => {
+                    const field =
+                      sort.options.find((option) => option.value === sort.value) ??
+                      sort.options[0];
+                    const directions: { key: SortDirection; label: string }[] = [
+                      { key: "asc", label: field.ascLabel ?? "Ascending" },
+                      { key: "desc", label: field.descLabel ?? "Descending" },
+                    ];
+                    return (
+                      <motion.div
+                        variants={GLASS_ITEM}
+                        className={`mt-3 shrink-0 border-t ${T.divider} pt-3`}
+                      >
+                        <div className={`flex items-center gap-1 rounded-xl ${T.fieldBg} p-0.5`}>
+                          {directions.map((direction) => (
+                            <button
+                              key={direction.key}
+                              type="button"
+                              aria-pressed={sort.direction === direction.key}
+                              onClick={() => applySort(field.value, direction.key)}
+                              className={`font-body flex-1 rounded-lg px-2.5 py-1.5 text-xs font-bold transition-colors ${
+                                sort.direction === direction.key
+                                  ? "bg-[#e6f5c0] text-[#1a1a1a] shadow-xs"
+                                  : `${T.faint} ${T.hoverBright}`
+                              }`}
+                            >
+                              {direction.label}
+                            </button>
+                          ))}
+                        </div>
+                      </motion.div>
+                    );
+                  })()}
                 </motion.div>
               ) : panelRows ? (
                 <motion.ul
@@ -1647,7 +2062,29 @@ export function BrandSearchBar({
                   })}
                 </motion.ul>
               ) : isDateCategory ? (
-                <motion.div
+                calendarDateFilter ? (
+                  <SearchDateCalendar
+                    current={selectedFilters.find((filter) => filter.category === activeFilter)}
+                    options={activeOptions}
+                    onBack={() => {
+                      setActiveFilter(null);
+                      setFilterQuery("");
+                    }}
+                    onApply={({ from, to }) => {
+                      if (!activeFilter) return;
+                      const value = from === to ? from : `${from}..${to}`;
+                      const label =
+                        from === to
+                          ? formatCalendarDay(from)
+                          : `${formatCalendarDay(from)} – ${formatCalendarDay(to)}`;
+                      setSelectedFilters((previous) => [
+                        ...previous.filter((filter) => filter.category !== activeFilter),
+                        { category: activeFilter, label, value },
+                      ]);
+                    }}
+                  />
+                ) : (
+                  <motion.div
                   key="date-options"
                   className="flex flex-col h-[280px] pt-3 overflow-hidden"
                   variants={PANEL_STAGGER}
@@ -1853,7 +2290,8 @@ export function BrandSearchBar({
                       </motion.ul>
                     )}
                   </div>
-                </motion.div>
+                  </motion.div>
+                )
               ) : isFreeTextCategory ? (
                 <motion.div
                   key="free-text"
@@ -2043,6 +2481,7 @@ export function BrandSearchBar({
                 </motion.div>
               )}
             </AnimatePresence>
+            </div>
           </motion.div>
         ) : (showSuggestions || showRecents) ? (
           <motion.div
@@ -2196,9 +2635,33 @@ export function BrandSearchBar({
           move. Hanging underneath, the chips grow into the content instead, and
           the open panel simply covers them. Fixed-toolbar hosts hide this row
           (`chipsBelow={false}`) so picking a filter never shifts the layout —
-          their chips live at the bottom of the open dropdown instead. */}
+          their chips live at the bottom of the open dropdown instead.
+
+          This row's own document position never moves — the frame above it
+          stays a fixed `ROW` tall whether or not the panel is open, so the
+          gap the flex column already puts here is measured from THAT box,
+          not from the open card's actual (taller) bottom edge. `marginTop`
+          makes up the difference: it grows by the same measured
+          `panelBodyHeight` the card itself grows by (see the height comment
+          above), on the card's own transition, so the row rides down to sit
+          just past the card's real bottom edge as it opens and rides back up
+          in step as it closes — never mid-card, never behind it. */}
       {chipsBelow && (
-      <div className="flex flex-wrap items-center gap-2 px-2 empty:hidden">
+      <motion.div
+        // A z-index above the frame's (`z-50`) as a second line of defence:
+        // the frame is a positioned stacking context, and a plain sibling
+        // with no z-index paints below an explicit one regardless of DOM
+        // order. The margin above already keeps this row clear of the card
+        // in the open state; this only guards the brief instant mid-animation
+        // where the two edges cross.
+        initial={false}
+        animate={{ marginTop: open ? (panelBodyHeight ?? 0) : 0 }}
+        transition={
+          compactRest
+            ? { duration: 0.42, ease: EASE, delay: open ? 0.42 : 0 }
+            : { duration: 0.7, ease: EASE }
+        }
+        className="relative z-[60] flex flex-wrap items-center gap-2 px-2 empty:hidden">
         <AnimatePresence>
         {selectedFilters.map((filter) => {
           // F194 AC2 — a coloured tag's chip wears the same pill tint the tag
@@ -2246,7 +2709,7 @@ export function BrandSearchBar({
             Clear filters
           </button>
         )}
-      </div>
+      </motion.div>
       )}
     </div>
   );

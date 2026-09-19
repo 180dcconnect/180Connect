@@ -7,6 +7,7 @@ import { InlineAlert } from "@/components/ui/inline-alert";
 import type { PendingInvite } from "@/lib/admin/team-realtime";
 import { TeamPanel } from "./team-panel";
 import type { TeamUser } from "./user-management-table";
+import { RecordOnboardingStep } from "@/components/record-onboarding-step";
 import { Rise } from "@/components/dashboard-stage";
 import { SearchRail } from "@/components/search-rail";
 import { BrandSearchBar } from "@/components/brand/search-bar";
@@ -159,6 +160,7 @@ export default async function AdminUsersPage({
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-6 py-10 sm:px-10 sm:py-12">
+      {authorization.actor.role === "admin" && <RecordOnboardingStep step="invite_team" />}
       <SearchRail
         className="max-w-6xl"
         stageClassName="space-y-10"

@@ -24,11 +24,11 @@ const MANUAL_ENTRY_RPC_ERROR_MESSAGES: Record<string, string> = {
   "admin access required": "Only an admin can do this.",
   "this draft is not available to edit": "This draft can no longer be edited — it may have been submitted or reviewed already.",
   "complete every required manual-entry field before submission": "Fill in every required field before submitting.",
-  "personal email addresses are not permitted: contact_email must be a role address": "That contact email looks like a personal address. Use a role address (e.g. info@, contact@) — or, if it is the organisation's shared inbox rather than a person's, tick the confirmation above and try again.",
+  "personal email addresses are not permitted: contact_email must be a role address": "That contact email looks like a personal address. Use a role address (e.g. info@, contact@) — or, if it is the client's shared inbox rather than a person's, tick the confirmation above and try again.",
   "manual entry not found": "This entry could not be found. It may have been removed.",
-  "choose whether this is a new or existing organisation": "Decide whether this is a new organisation or a match to an existing one before approving.",
-  "confirm the organisation is eligible before approval": "Confirm the organisation is eligible before approving.",
-  "explain why this matching organisation is genuinely separate": "Explain why this is a genuinely separate organisation from the match found.",
+  "choose whether this is a new or existing organisation": "Decide whether this is a new client or a match to an existing one before approving.",
+  "confirm the organisation is eligible before approval": "Confirm the client is eligible before approving.",
+  "explain why this matching organisation is genuinely separate": "Explain why this is a genuinely separate client from the match found.",
 };
 
 function manualEntryRpcErrorMessage(error: unknown): string | null {

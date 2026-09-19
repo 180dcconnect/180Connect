@@ -102,7 +102,7 @@ export type FetchGrantsResult =
 export async function fetchGrantsForClient(input: unknown): Promise<FetchGrantsResult> {
   const parsed = safeValidate(fetchGrantsSchema, input);
   if (!parsed.success) {
-    return { ok: false, message: "That organisation could not be identified." };
+    return { ok: false, message: "That client could not be identified." };
   }
   const { organisationId } = parsed.data;
 
@@ -133,7 +133,7 @@ export async function fetchGrantsForClient(input: unknown): Promise<FetchGrantsR
     return {
       ok: false,
       message:
-        "This organisation has no charity or company number on record, so 360Giving cannot be asked about it.",
+        "This client has no charity or company number on record, so 360Giving cannot be asked about it.",
     };
   }
 
@@ -212,7 +212,7 @@ export async function fetchGrantsForClient(input: unknown): Promise<FetchGrantsR
     return {
       ok: true,
       found: 0,
-      message: "360Giving has no published grants for this organisation.",
+      message: "360Giving has no published grants for this client.",
     };
   } catch (error) {
     await reportError(error, { operation: "clients.fetch_grants", organisationId });

@@ -132,7 +132,7 @@ const ZONE_NOTES: {
     body:
       "Severe engagement hurdles or non-target profile: usually explicit opt-outs, inactive registry status, or negligible operating capacity. Kept on record, but requires a direct outreach reset before re-engaging.",
     reach:
-      "Rarely assigned unless an organisation explicitly opts out or has zero operating filings.",
+      "Rarely assigned unless a client explicitly opts out or has zero operating filings.",
   },
   {
     id: "low",
@@ -141,7 +141,7 @@ const ZONE_NOTES: {
     colour: PRIORITY_ZONE_COLOURS.low,
     text: "text-[#B05840]",
     body:
-      "Not a bad organisation — a later one. Typically reflects unengaged outreach (unanswered follow-ups), modest filed income, or non-priority sector alignment. New activity, fresh filings, or updated contact data will lift this score.",
+      "Not a bad client — a later one. Typically reflects unengaged outreach (unanswered follow-ups), modest filed income, or non-priority sector alignment. New activity, fresh filings, or updated contact data will lift this score.",
     reach:
       "Scores between 0.33 and 0.40 under current factors without active engagement.",
   },

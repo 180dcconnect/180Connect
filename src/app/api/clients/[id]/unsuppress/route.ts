@@ -67,7 +67,7 @@ export async function POST(
 
     if (lookupError || !activeSuppression) {
       return NextResponse.json(
-        { error: "No active suppression found for this charity." },
+        { error: "No active suppression found for this client." },
         { status: 404 },
       );
     }

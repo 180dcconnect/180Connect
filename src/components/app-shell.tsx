@@ -5,7 +5,12 @@ import { loadViewerState } from "@/lib/dashboard/viewer-state";
 import { canView, isViewOnly } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { logout } from "@/lib/auth/logout";
-import { ONBOARDING_STEPS, shouldShowGuide, type OnboardingUser } from "@/lib/onboarding";
+import {
+  guideProgressForRole,
+  onboardingStepsForRole,
+  shouldShowGuide,
+  type OnboardingUser,
+} from "@/lib/onboarding";
 import { DATA_IMPORTS_ROUTES } from "@/app/(app)/admin/import-group";
 import { AI_ROUTES } from "@/app/(app)/admin/ai-group";
 import { ANALYTICS_ROUTES } from "@/app/(app)/admin/analytics-group";
@@ -171,23 +176,42 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         : null,
     );
 
-    const doneKeys = new Set(
-      (completedSteps.data ?? []).map((row: { step_key: string }) => row.step_key),
-    );
+    // Admin's 4th step (invite_team) only appears in a tiny workspace (<3
+    // active users). Count active, not-deleted users — same filter the team
+    // page uses so the denominator matches what the admin sees listed.
+    let activeUserCount: number | null = null;
+    if (actor.role === "admin") {
+      try {
+        const supabase = await createClient();
+        const { count } = await supabase
+          .from("users")
+          .select("id", { count: "exact", head: true })
+          .eq("is_active", true)
+          .is("deleted_at", null);
+        if (typeof count === "number") activeUserCount = count;
+      } catch {
+        activeUserCount = null;
+      }
+    }
 
-    const steps = ONBOARDING_STEPS.map((s) => ({
+    const role = profile.data?.role ?? actor.role;
+    const doneKeys = (completedSteps.data ?? []).map(
+      (row: { step_key: string }) => row.step_key,
+    );
+    const progress = guideProgressForRole(role, doneKeys, {
+      activeUserCount,
+    });
+    const steps = progress.steps.map((s) => ({
       key: s.key,
       title: s.title,
       href: s.href,
-      done: doneKeys.has(s.key),
+      done: s.done,
     }));
-
-    const completedCount = steps.filter((s) => s.done).length;
 
     onboarding = {
       steps,
-      completedCount,
-      totalCount: steps.length,
+      completedCount: progress.completedCount,
+      totalCount: progress.totalCount,
       show: isEligible,
     };
   } catch {

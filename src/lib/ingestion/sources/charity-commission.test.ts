@@ -325,7 +325,7 @@ describe("createCharityCommissionLookupAdapter.fetch — not found / API failure
         createCharityCommissionLookupAdapter({
           registeredNumber: "99999999999",
         }).fetch(),
-      /Charity Commission could not find a charity with that registration number/,
+      /Charity Commission could not find a record with that registration number/,
     );
   });
 
@@ -335,7 +335,7 @@ describe("createCharityCommissionLookupAdapter.fetch — not found / API failure
     await assert.rejects(
       () =>
         createCharityCommissionLookupAdapter({ registeredNumber: "1218781" }).fetch(),
-      /Charity Commission could not find a charity with that registration number/,
+      /Charity Commission could not find a record with that registration number/,
     );
   });
 

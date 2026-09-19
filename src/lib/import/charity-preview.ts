@@ -80,7 +80,7 @@ export type CharityPreviewDependencies = {
 /** The messages the adapter raises that are safe and useful to show directly. */
 const READABLE_FETCH_ERRORS = new Set([
   "Enter a valid Charity Commission registration number.",
-  "Charity Commission could not find a charity with that registration number.",
+  "Charity Commission could not find a record with that registration number.",
 ]);
 
 /**
@@ -116,7 +116,7 @@ export async function previewCharity(
     raw = await deps.fetchRecord(registeredNumber);
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-    if (message === "Charity Commission could not find a charity with that registration number.") {
+    if (message === "Charity Commission could not find a record with that registration number.") {
       return { status: "not_found" };
     }
     return {

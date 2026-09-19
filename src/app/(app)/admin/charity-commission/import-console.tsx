@@ -60,11 +60,18 @@ export function NewImportButton() {
 export function ImportConsole({
   home,
   composer,
+  initialMode = "home",
 }: {
   home: ReactNode;
   composer: ReactNode;
+  /**
+   * Which view the screen opens on. "composer" is for arriving with a
+   * selection already in hand — repeating an earlier run — where landing on
+   * the history would hide the thing the link was for.
+   */
+  initialMode?: "home" | "composer";
 }) {
-  const [mode, setMode] = useState<"home" | "composer">("home");
+  const [mode, setMode] = useState<"home" | "composer">(initialMode);
 
   const go = (next: "home" | "composer") => {
     setMode(next);

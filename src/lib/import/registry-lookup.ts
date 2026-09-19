@@ -187,7 +187,7 @@ export async function resolveRegistry(
       notes.push(
         "companyNumber" in plan.company
           ? `The company number on this website (${plan.company.companyNumber}) could not be confirmed against Companies House. Check it before submitting.`
-          : "No single Companies House match was found for this organisation's name, so its registration has not been confirmed.",
+          : "No single Companies House match was found for this client's name, so its registration has not been confirmed.",
       );
     }
   }

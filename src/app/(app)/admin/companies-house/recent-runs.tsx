@@ -5,12 +5,20 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 
+import { importProgressPlanFromStats } from "@/lib/ingestion/import-progress";
 import { StatusBadge } from "../import-status/status-badge";
+import {
+  ImportRunDetailsLink,
+  ImportRunRefreshPoller,
+  RunningImportRow,
+} from "../import-status/running-import-row";
 import {
   isStalledRun,
   runDisplayStatus,
   stalledRunSummary,
 } from "../import-status/status-helpers.ts";
+import { describeImportFailure } from "@/lib/import-failure-reason";
+import { registerImportBreakdownFrom } from "../import-status/run-format";
 
 /**
  * The recent Companies House runs — and the landing view of this screen.
@@ -32,6 +40,8 @@ export type CompaniesHouseRun = {
   records_inserted: number;
   records_skipped: number;
   records_failed: number;
+  run_stats?: Record<string, unknown> | null;
+  triggered_by?: string | null;
 };
 
 const COUNT = new Intl.NumberFormat("en-GB");
@@ -70,6 +80,21 @@ function pipelineLabel(run: CompaniesHouseRun): string {
  */
 function headline(run: CompaniesHouseRun): { value: number; label: string } | null {
   if (run.job_status === "running" || run.job_status === "failed") return null;
+  // Same correction as the Charity Commission page: `records_inserted` counts
+  // register rows staged, not clients, and a run whose saves were refused has
+  // no figure worth enlarging.
+  const register = registerImportBreakdownFrom(run.api_source, run.run_stats);
+  if (register) {
+    if (register.failedToSave > 0) return null;
+    if (register.clientsAdded !== null) {
+      return register.clientsAdded > 0
+        ? {
+            value: register.clientsAdded,
+            label: register.clientsAdded === 1 ? "company added" : "companies added",
+          }
+        : null;
+    }
+  }
   if (run.records_inserted > 0)
     return { value: run.records_inserted, label: run.records_inserted === 1 ? "company added" : "companies added" };
   if (run.records_skipped > 0)
@@ -90,13 +115,25 @@ function detail(run: CompaniesHouseRun, now: Date): string {
   }
   if (run.job_status === "failed") return "Failed — nothing was imported.";
 
+  const register = registerImportBreakdownFrom(run.api_source, run.run_stats);
+  if (register && register.failedToSave > 0) {
+    const count = COUNT.format(register.failedToSave);
+    const noun = register.failedToSave === 1 ? "record" : "records";
+    const head =
+      register.clientsAdded === null || register.clientsAdded === 0
+        ? `Nothing was added to the client list — all ${count} ${noun} were refused`
+        : `${COUNT.format(register.clientsAdded)} added to the client list, ${count} ${noun} refused`;
+    const reason = describeImportFailure(register.failureReasons[0] ?? null);
+    return reason ? `${head}. ${reason.summary}.` : `${head}.`;
+  }
+
   const top = headline(run);
   const parts: string[] = [];
   if (run.records_inserted > 0 && top?.label !== "companies added" && top?.label !== "company added")
-    parts.push(`${COUNT.format(run.records_inserted)} written`);
+    parts.push(`${COUNT.format(run.records_inserted)} taken from the source`);
   if (run.records_skipped > 0 && top?.label !== "already on the list")
     parts.push(`${COUNT.format(run.records_skipped)} already on the list`);
-  if (run.records_failed > 0) parts.push(`${COUNT.format(run.records_failed)} unusable`);
+  if (run.records_failed > 0) parts.push(`${COUNT.format(run.records_failed)} could not be saved`);
 
   if (parts.length === 0) {
     return top ? "Nothing else changed." : "Nothing new to import.";
@@ -119,10 +156,13 @@ function summariseRun(run: CompaniesHouseRun, now: Date): string {
 export function CompaniesRecentRuns({
   runs,
   nowIso,
+  canInspect,
   action,
   secondaryAction,
 }: {
   runs: CompaniesHouseRun[];
+  /** Whether this reader may open the raw records for an individual run. */
+  canInspect: boolean;
   /**
    * The page's one clock, read on the server and passed down so the stalled
    * check renders identically on both sides — a relative time computed in the
@@ -139,8 +179,11 @@ export function CompaniesRecentRuns({
    */
   secondaryAction?: ReactNode;
 }) {
-  const [latest, ...older] = runs;
   const now = useMemo(() => new Date(nowIso), [nowIso]);
+  const currentRuns = runs.filter(
+    (run) => run.job_status === "running" && !isStalledRun(run.started_at, now),
+  );
+  const [latest, ...older] = runs.filter((run) => !currentRuns.includes(run));
   // `latest` is undefined when no import has ever run (a fresh production
   // database). The empty state below renders in that case, but this line runs
   // first — reading `job_status` off undefined threw and took the whole page
@@ -160,12 +203,37 @@ export function CompaniesRecentRuns({
         </div>
       </div>
 
-      {runs.length === 0 ? (
+      <ImportRunRefreshPoller active={currentRuns.length > 0} />
+
+      {currentRuns.length > 0 && (
+        <div className="divide-y divide-rule-soft border-t border-rule-soft">
+          {currentRuns.map((run) => (
+            <RunningImportRow
+              key={run.id}
+              run={{
+                id: run.id,
+                source: pipelineLabel(run),
+                startedLabel: when(run.started_at, true),
+                startedAt: run.started_at,
+                observedAt: nowIso,
+                progress: importProgressPlanFromStats(run.run_stats),
+                triggerLabel: run.triggered_by === "manual" ? "Manual" : run.triggered_by === "schedule" ? "Scheduled" : null,
+              }}
+              canInspect={canInspect}
+            />
+          ))}
+        </div>
+      )}
+
+      {latest === undefined ? (
         <div className="border-t border-black/[0.06] px-5 py-10 text-center sm:px-6">
-          <p className="text-sm font-bold text-foreground">Nothing imported yet</p>
+          <p className="text-sm font-bold text-foreground">
+            {currentRuns.length > 0 ? "No completed imports yet" : "Nothing imported yet"}
+          </p>
           <p className="mx-auto mt-1.5 max-w-sm text-sm leading-[1.6] text-foreground/55">
-            Start an import to choose which companies from the register should
-            become clients. Nothing is added until you confirm the selection.
+            {currentRuns.length > 0
+              ? "This import will appear in the history as soon as it finishes."
+              : "Start an import to choose which companies from the register should become clients. Nothing is added until you confirm the selection."}
           </p>
         </div>
       ) : (
@@ -180,7 +248,10 @@ export function CompaniesRecentRuns({
                   <span className="text-foreground/55">{when(latest.started_at, true)}</span>
                 </p>
               </div>
-              <StatusBadge status={runDisplayStatus(latest.job_status, latest.started_at, now)} />
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                <StatusBadge status={runDisplayStatus(latest.job_status, latest.started_at, now)} />
+                {canInspect && <ImportRunDetailsLink id={latest.id} />}
+              </div>
             </div>
 
             {(() => {
@@ -222,7 +293,10 @@ export function CompaniesRecentRuns({
                   <span className="min-w-0 flex-1 truncate text-sm text-foreground/70 flex items-center gap-2">
                     <span className="truncate">{summariseRun(run, now)}</span>
                   </span>
-                  <StatusBadge status={runDisplayStatus(run.job_status, run.started_at, now)} />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <StatusBadge status={runDisplayStatus(run.job_status, run.started_at, now)} />
+                    {canInspect && <ImportRunDetailsLink id={run.id} />}
+                  </div>
                 </li>
               ))}
             </ul>

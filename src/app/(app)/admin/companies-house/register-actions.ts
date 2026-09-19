@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { getViewingActor, getCurrentActor, actorFailureMessage } from "@/lib/auth/actor";
 import { reportError } from "@/lib/error-logging";
+import { failureNote } from "@/lib/import-failure-reason";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   describeFilters,
@@ -16,6 +17,7 @@ import {
   previewCompanies,
 } from "@/lib/companies-register/sqlite";
 import { createDefaultIngestionStore } from "@/lib/ingestion/store";
+import { registerImportProgressStats } from "@/lib/ingestion/import-progress";
 import { importSelection } from "@/lib/companies-register/import";
 import { promotePendingCompaniesHouseRecords } from "@/lib/standardize/write-organisations";
 import { ocrUnavailableReason } from "@/lib/cic-statement/ocr";
@@ -180,6 +182,19 @@ export type ImportState =
       doesNotMeet: number;
       /** Matched an organisation already on the list, so flagged rather than added. */
       duplicates: number;
+      /**
+       * Records promotion could not read at all (no usable name). Counted but
+       * previously never mentioned, so an import that staged thousands and
+       * added nothing named nowhere they went.
+       */
+      invalidData: number;
+      /**
+       * Records whose organisation insert failed. Each failure is logged with
+       * its raw record id, and the rows keep status `error` — promotion only
+       * reads `pending`, so these are NOT picked up by a re-run and need a
+       * developer rather than a second press.
+       */
+      failed: number;
     };
 
 /**
@@ -250,6 +265,9 @@ export async function runCompaniesRegisterImport(
         triggered_by: "manual",
         triggered_by_user_id: authorization.actor.id,
         job_status: "running",
+        // The status screen turns this one small, stated estimate into its
+        // countdown. No per-record heartbeat writes are needed.
+        run_stats: registerImportProgressStats(Math.min(available, cap)),
       })
       .select("id")
       .single();
@@ -262,15 +280,24 @@ export async function runCompaniesRegisterImport(
     await supabase
       .from("ingestion_runs")
       .update({
-        // `outcome.selected` is measured after the cap, so comparing it to the
-        // cap can only ever be false. `available` is the pre-cap match.
-        job_status: truncated ? "partial" : "completed",
-        completed_at: new Date().toISOString(),
+        // Still running: promotion follows this write and is most of the wall
+        // clock. The finishing update below owns both status and completed_at.
         records_fetched: outcome.selected,
         records_inserted: outcome.written,
         records_skipped: outcome.unchanged,
         records_failed: 0,
         run_stats: {
+          // Keep the countdown alive through promotion. This replaces the
+          // initial run_stats object, so the estimate must travel with it.
+          ...registerImportProgressStats(outcome.selected),
+          // What this run was asked for, so the run can explain itself and
+          // be repeated. Counts alone never could: "2,231 written" says
+          // nothing about which 2,231, and without the criteria a rerun would
+          // be a guess. Stored as the parsed filters plus the sentence the
+          // confirmation dialog showed, so the screen never has to rebuild
+          // that wording from the raw values.
+          criteria: parsed,
+          criteriaSentence: describeFilters(parsed),
           available,
           cap,
           truncated,
@@ -282,6 +309,90 @@ export async function runCompaniesRegisterImport(
       .eq("id", runId);
 
     const promoted = await promotePendingCompaniesHouseRecords();
+
+    // Records promotion could not save are the ones that need a human, and
+    // they used to be invisible: the message below never mentioned them, so an
+    // import that staged thousands and added nothing read as a silent zero.
+    // Logged with the run for the same reason — the counts alone in the run
+    // row cannot tell a quiet all-duplicates run from a broken one.
+    if (promoted.invalidData > 0 || promoted.failed > 0) {
+      await reportError(
+        new Error(
+          `Companies register import staged ${outcome.selected} but promotion ` +
+            `could not save ${promoted.invalidData + promoted.failed} ` +
+            `(invalid ${promoted.invalidData}, failed ${promoted.failed}).`,
+        ),
+        {
+          operation: "admin.companies_register.import.promote",
+          actorUserId: authorization.actor.id,
+          runId,
+          selected: outcome.selected,
+          written: outcome.written,
+          unchanged: outcome.unchanged,
+          inserted: promoted.inserted,
+          flagged: promoted.flagged,
+          // Matches certain enough that nobody was asked (see isCertainMatch).
+          // Kept apart from `flagged` so the screens can count them as clients
+          // we already hold rather than as work waiting for an admin.
+          alreadyHeld: promoted.alreadyHeld,
+          needsReview: promoted.needsReview,
+          doesNotMeet: promoted.doesNotMeet,
+          invalidData: promoted.invalidData,
+          failed: promoted.failed,
+        },
+      );
+    }
+
+    // The run row's own counters describe staging; the promotion breakdown
+    // joins them so the row explains the whole import on its own — Import
+    // Status reads this row, and without these it can only repeat the staging
+    // half ("2,231 written") while the client list tells the other half.
+    await supabase
+      .from("ingestion_runs")
+      .update({
+        run_stats: {
+          // What this run was asked for, so the run can explain itself and
+          // be repeated. Counts alone never could: "2,231 written" says
+          // nothing about which 2,231, and without the criteria a rerun would
+          // be a guess. Stored as the parsed filters plus the sentence the
+          // confirmation dialog showed, so the screen never has to rebuild
+          // that wording from the raw values.
+          criteria: parsed,
+          criteriaSentence: describeFilters(parsed),
+          available,
+          cap,
+          truncated,
+          selected: outcome.selected,
+          written: outcome.written,
+          unchanged: outcome.unchanged,
+          inserted: promoted.inserted,
+          flagged: promoted.flagged,
+          needsReview: promoted.needsReview,
+          doesNotMeet: promoted.doesNotMeet,
+          invalidData: promoted.invalidData,
+          failed: promoted.failed,
+          // Why they failed, not just how many. Without this the run row can
+          // only say "311 failed to save", which is what sent an admin looking
+          // for a developer with nothing for the developer to go on.
+          failureReasons: promoted.failureReasons,
+        },
+        // The run ends here, after promotion — see the note on the staging
+        // update above.
+        completed_at: new Date().toISOString(),
+        // A run that saved nothing did not complete, whatever the staging half
+        // did — a green badge over an import that added no clients is the bug
+        // this screen kept reporting. `partial` is the status for "some of it
+        // worked"; nothing working at all is a failure.
+        job_status:
+          promoted.failed > 0
+            ? promoted.inserted === 0
+              ? "failed"
+              : "partial"
+            : truncated
+              ? "partial"
+              : "completed",
+      })
+      .eq("id", runId);
 
     // The criteria in words, not just the count: an import is the awkward thing
     // to undo on this screen, and "2,000 organisations" tells nobody later what
@@ -306,20 +417,26 @@ export async function runCompaniesRegisterImport(
     revalidatePath("/admin/companies-house");
     revalidatePath("/clients");
 
-    // Truncation leads, because it changes what the other numbers mean: "500
-    // added" reads as the whole job unless it says the job was a tenth of what
-    // was asked for.
+    // Staging and promotion are two different counts and the message must carry
+    // both: staging says how many register rows were copied (`written` counts
+    // re-writes too, not just new companies), promotion says how many clients
+    // resulted.
+    const staged =
+      outcome.unchanged > 0
+        ? `${outcome.selected.toLocaleString()} staged (${outcome.unchanged.toLocaleString()} already held)`
+        : `${outcome.selected.toLocaleString()} staged`;
     const summary = [
       truncated
         ? `Imported the first ${cap.toLocaleString()} of ${available.toLocaleString()} matching companies`
-        : "",
+        : staged,
       `${promoted.inserted.toLocaleString()} added to the client list`,
       promoted.needsReview > 0 ? `${promoted.needsReview.toLocaleString()} flagged for review` : "",
       promoted.doesNotMeet > 0
         ? `${promoted.doesNotMeet.toLocaleString()} did not meet the client criteria`
         : "",
       promoted.flagged > 0 ? `${promoted.flagged.toLocaleString()} matched a client already on the list` : "",
-      outcome.unchanged > 0 ? `${outcome.unchanged.toLocaleString()} already held` : "",
+      promoted.invalidData > 0 ? `${promoted.invalidData.toLocaleString()} could not be used` : "",
+      promoted.failed > 0 ? failureNote(promoted.failed, promoted.failureReasons) : "",
     ]
       .filter(Boolean)
       .join(", ");
@@ -341,6 +458,8 @@ export async function runCompaniesRegisterImport(
       needsReview: promoted.needsReview,
       doesNotMeet: promoted.doesNotMeet,
       duplicates: promoted.flagged,
+      invalidData: promoted.invalidData,
+      failed: promoted.failed,
     };
   } catch (error) {
     if (runId) {

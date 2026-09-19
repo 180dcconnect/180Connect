@@ -111,7 +111,7 @@ describe("proposeMissionFromWebsite", () => {
     assert.match(result.reason, /too short/);
   });
 
-  it("skips a description that only repeats the organisation's name", async () => {
+  it("skips a description that only repeats the client's name", async () => {
     const result = await proposeMissionFromWebsite(
       "https://example.org",
       "Example Community Trust",
@@ -120,7 +120,7 @@ describe("proposeMissionFromWebsite", () => {
 
     assert.equal(result.status, "skipped");
     if (result.status !== "skipped") return;
-    assert.match(result.reason, /repeats the organisation's name/);
+    assert.match(result.reason, /repeats the client's name/);
   });
 
   it("caps a description that runs past the mission bound", async () => {

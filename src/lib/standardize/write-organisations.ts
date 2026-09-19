@@ -68,6 +68,8 @@ import { checkWebsiteReachability } from "../website-reachability.ts";
 import type { WebsiteStatus } from "../website-validation.ts";
 import {
   findDuplicateMatch,
+  normaliseName,
+  normalisePostcode,
   type DuplicateMatch,
   type ExistingOrganisationForMatch,
 } from "../dedup/match-organisations.ts";
@@ -126,6 +128,13 @@ export type PromoteCounts = {
   read: number;
   inserted: number;
   flagged: number;
+  /**
+   * Matches certain enough that nobody was asked about them — see
+   * `isCertainMatch`. Counted apart from `flagged` because they are the
+   * opposite kind of event: `flagged` is work waiting for an admin, this is
+   * work that did not need one.
+   */
+  alreadyHeld: number;
   // Total excluded from the active client list (invalidData + needsReview +
   // doesNotMeet) — kept as one field for callers that only want the headline
   // number; the breakdown below exists so a garbage-data spike (invalidData)
@@ -135,18 +144,49 @@ export type PromoteCounts = {
   needsReview: number;
   doesNotMeet: number;
   failed: number;
+  /**
+   * Why the `failed` records could not be saved, deduplicated and capped.
+   *
+   * The count on its own was the whole message for a year: Import Status said
+   * "311 failed to save" and the reason — a database error every one of them
+   * hit — was thrown away at the `reportError` call below. Callers persist
+   * these with the run so the screen can say what went wrong long after the
+   * server logs have rolled. Raw database text: it is translated for the
+   * reader by `src/lib/import-failure-reason.ts`, never rendered as it is.
+   */
+  failureReasons: string[];
 };
+
+/** How many distinct failure reasons a run keeps. Beyond this they repeat. */
+const MAX_FAILURE_REASONS = 5;
+
+/**
+ * Count one failure and remember why. Every `counts.failed++` goes through
+ * here, so a new promotion path cannot add a failure that records no reason.
+ */
+function recordFailure(counts: PromoteCounts, reason: unknown): void {
+  counts.failed++;
+  const message =
+    reason instanceof Error ? reason.message : typeof reason === "string" ? reason : String(reason);
+  const trimmed = message.trim();
+  if (!trimmed) return;
+  if (counts.failureReasons.includes(trimmed)) return;
+  if (counts.failureReasons.length >= MAX_FAILURE_REASONS) return;
+  counts.failureReasons.push(trimmed);
+}
 
 function newCounts(read: number): PromoteCounts {
   return {
     read,
     inserted: 0,
     flagged: 0,
+    alreadyHeld: 0,
     rejected: 0,
     invalidData: 0,
     needsReview: 0,
     doesNotMeet: 0,
     failed: 0,
+    failureReasons: [],
   };
 }
 
@@ -162,6 +202,50 @@ function newCounts(read: number): PromoteCounts {
  * activities must fill the mission of the 2026 charity it duplicates, not
  * just be counted as "already here" (see backfillMissingMissionOrReport).
  */
+/**
+ * Whether a match is certain enough that asking an admin would be asking them
+ * to re-confirm the importer's own strongest key.
+ *
+ * The duplicates queue exists for the cases a machine genuinely cannot call: a
+ * name-and-postcode match, a register record that has moved on from what we
+ * hold. It was also being filled with the cases nobody can call any other way
+ * — the same registration number, the same name, the same postcode, and the
+ * only thing "different" being that one side has filed accounts and the other
+ * does not, which is not a difference between two organisations at all. On the
+ * queue those read as "both copies agree", and confirming one writes nothing:
+ * per the migration, "confirming a duplicate needs no further write — the
+ * candidate correctly never became a second organisations row". So the press
+ * was pure ceremony, and a queue full of ceremony is a queue people stop
+ * reading.
+ *
+ * Deliberately strict. A registration number alone is not enough: numbers are
+ * mistyped and re-used across registers, so the name has to agree too (after
+ * the importer's own normalisation, which already treats "Ltd" and "Limited"
+ * as the same word). A postcode has to agree only when both sides have one —
+ * requiring it would send every record from a source that omits postcodes
+ * back into the queue, which is the bug this is fixing.
+ */
+export function isCertainMatch(
+  match: DuplicateMatch,
+  candidate: { legal_name: string; postcode: string },
+  existing: Pick<ExistingOrganisationForMatch, "legal_name" | "postcode">,
+): boolean {
+  if (match.matchedOn !== "registration_number") return false;
+
+  const candidateName = normaliseName(candidate.legal_name);
+  if (candidateName === "" || candidateName !== normaliseName(existing.legal_name)) {
+    return false;
+  }
+
+  const candidatePostcode = normalisePostcode(candidate.postcode ?? "");
+  const existingPostcode = normalisePostcode(existing.postcode ?? "");
+  if (candidatePostcode !== "" && existingPostcode !== "") {
+    return candidatePostcode === existingPostcode;
+  }
+
+  return true;
+}
+
 async function flagIfDuplicate(
   store: OrganisationWriteStore,
   counts: PromoteCounts,
@@ -178,6 +262,23 @@ async function flagIfDuplicate(
     new Set(dismissedOrganisationIds),
   );
   if (!match) return { flagged: false, matchedOrganisationId: null };
+
+  // A certain match is treated the way an unchanged record is treated: the
+  // client is already on the list, nothing is inserted, and nobody is asked.
+  // No candidate row is written, so it never reaches the duplicates queue —
+  // and the record still carries `matched_organisation_id`, so the screens can
+  // say which client it is.
+  const matchedExisting = existingOrganisations.find(
+    (organisation) => organisation.id === match.organisationId,
+  );
+  if (
+    matchedExisting &&
+    isCertainMatch(match, { legal_name: org.legal_name, postcode: org.postcode }, matchedExisting)
+  ) {
+    await store.markRecordStatus(record.id, "matched", match.organisationId);
+    counts.alreadyHeld++;
+    return { flagged: true, matchedOrganisationId: match.organisationId };
+  }
 
   const flagResult = await store.flagPotentialDuplicate({
     rawRecordId: record.id,
@@ -202,7 +303,7 @@ async function flagIfDuplicate(
       rawRecordId: record.id,
     });
     await store.markRecordStatus(record.id, "error");
-    counts.failed++;
+    recordFailure(counts, flagResult.error);
     return { flagged: true, matchedOrganisationId: null };
   }
 
@@ -459,14 +560,23 @@ export function createDefaultOrganisationWriteStore(): OrganisationWriteStore | 
 
   return {
     async loadPendingRecords(source) {
-      const { data, error } = await supabase
-        .from("raw_source_records")
-        .select("id, raw_payload, source_record_id")
-        .eq("record_source", source)
-        .eq("processing_status", "pending");
+      // Paged, ordered, oldest first so the pages tile rather than overlap.
+      // PostgREST caps an unbounded select at 1000 rows without saying it
+      // truncated one — a bulk import staging several thousand would otherwise
+      // promote the first thousand and silently leave the rest pending, to be
+      // discovered (or not) on some later run.
+      const pending = await fetchAllPages<PendingRecord>(async (from, to) => {
+        const { data, error } = await supabase
+          .from("raw_source_records")
+          .select("id, raw_payload, source_record_id")
+          .eq("record_source", source)
+          .eq("processing_status", "pending")
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data: data as PendingRecord[] | null, error };
+      });
 
-      if (error) throw error;
-      return (data ?? []) as PendingRecord[];
+      return pending;
     },
 
     async loadExistingOrganisationsForMatching() {
@@ -1395,7 +1505,7 @@ export async function promotePendingCharityCommissionRecords(
         rawRecordId: record.id,
       });
       await store.markRecordStatus(record.id, "error");
-      counts.failed++;
+      recordFailure(counts, result.error);
       continue;
     }
 
@@ -1485,7 +1595,7 @@ export async function promotePendingCompaniesHouseRecords(
         rawRecordId: record.id,
       });
       await store.markRecordStatus(record.id, "error");
-      counts.failed++;
+      recordFailure(counts, error);
       continue;
     }
 
@@ -1526,7 +1636,7 @@ export async function promotePendingCompaniesHouseRecords(
         rawRecordId: record.id,
       });
       await store.markRecordStatus(record.id, "error");
-      counts.failed++;
+      recordFailure(counts, result.error);
       continue;
     }
 
@@ -1587,7 +1697,7 @@ export async function promotePendingFindThatCharityRecords(
         rawRecordId: record.id,
       });
       await store.markRecordStatus(record.id, "error");
-      counts.failed++;
+      recordFailure(counts, error);
       continue;
     }
 
@@ -1624,7 +1734,7 @@ export async function promotePendingFindThatCharityRecords(
         rawRecordId: record.id,
       });
       await store.markRecordStatus(record.id, "error");
-      counts.failed++;
+      recordFailure(counts, result.error);
       continue;
     }
 
@@ -1771,7 +1881,7 @@ export async function promotePendingCharityCommissionBulkRecords(
         rawRecordId: record.id,
       });
       await store.markRecordStatus(record.id, "error");
-      counts.failed++;
+      recordFailure(counts, result.error);
       continue;
     }
 

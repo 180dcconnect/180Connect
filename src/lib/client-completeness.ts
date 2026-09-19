@@ -129,7 +129,7 @@ export function buildCompleteness(input: CompletenessInput): CompletenessResult 
       present: input.hasMission,
       detail: input.hasMission
         ? "Purpose text on file — filed activities, CIC statement or hand-written mission"
-        : "No mission on file — AI drafts generate without knowing what this organisation does, and no register publishes one for a company. An admin can read it from the organisation's website.",
+        : "No mission on file — AI drafts generate without knowing what this client does, and no register publishes one for a company. An admin can read it from the client's website.",
     },
     {
       key: "accounts",
@@ -147,7 +147,7 @@ export function buildCompleteness(input: CompletenessInput): CompletenessResult 
       detail:
         input.headcountFilingCount > 0
           ? `Staff numbers stated in ${plural(input.headcountFilingCount, "filed period", "filed periods")}`
-          : "No staff numbers filed — the size of the organisation is unknown",
+          : "No staff numbers filed — the size of the client is unknown",
     },
     {
       key: "grants",
@@ -156,7 +156,7 @@ export function buildCompleteness(input: CompletenessInput): CompletenessResult 
       detail:
         input.grantCount > 0
           ? `${plural(input.grantCount, "grant", "grants")} recorded`
-          : "No grants found — no record of who has funded this organisation",
+          : "No grants found — no record of who has funded this client",
     },
   ];
 

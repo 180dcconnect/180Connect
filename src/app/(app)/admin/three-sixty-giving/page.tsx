@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getViewingActor } from "@/lib/auth/actor";
-import { hasPermission } from "@/lib/auth/permissions";
+import { canView, hasPermission } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/error-logging";
 import { InlineAlert } from "@/components/ui/inline-alert";
@@ -30,6 +30,7 @@ export default async function ThreeSixtyGivingPage() {
   // gate asks for. Leadership passes the gate and would fail the action, so they
   // get the coverage without the control.
   const canBackfill = hasPermission(authorization.actor.role, "user:manage");
+  const canInspectRuns = canView(authorization.actor.role, "platform-settings:manage");
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -146,7 +147,11 @@ export default async function ThreeSixtyGivingPage() {
                 message="Import history could not be loaded. This has been recorded — refresh and try again."
               />
             ) : (
-              <ThreeSixtyRecentRuns runs={runs} now={now} />
+              <ThreeSixtyRecentRuns
+                runs={runs}
+                now={now}
+                canInspect={canInspectRuns}
+              />
             )}
           </Rise>
 

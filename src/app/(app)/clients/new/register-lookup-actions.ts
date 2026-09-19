@@ -347,7 +347,7 @@ export async function searchRegister(
   const unavailable: string[] = [];
   const charityFile = !registerUnavailableReason();
   const companyFile = !companiesRegisterUnavailableReason();
-  if (!charityFile) unavailable.push("the charity register");
+  if (!charityFile) unavailable.push("the register");
   if (!companyFile) unavailable.push("the companies register");
 
   try {
@@ -462,7 +462,7 @@ export async function importRegisterMatch(
     return {
       kind: "error",
       message:
-        "The charity register is not loaded on this deployment, so there is nothing to import from.",
+        "The register is not loaded on this deployment, so there is nothing to import from.",
     };
   }
   if (kind === "company" && companiesRegisterUnavailableReason()) {
@@ -561,7 +561,7 @@ export async function importRegisterMatch(
         kind: "done",
         message:
           promoted.flagged > 0
-            ? "That organisation is already on the client list — nothing was added."
+            ? "That client is already on the client list — nothing was added."
             : "Nothing new to add — the register record matched one already held.",
         organisationId: null,
       };

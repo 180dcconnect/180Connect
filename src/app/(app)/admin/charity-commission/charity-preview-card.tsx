@@ -43,17 +43,17 @@ const VERDICT = {
   meets: {
     surface: "bg-go-wash text-go",
     Icon: Check,
-    headline: "This charity meets the client criteria and will join the client list.",
+    headline: "This client meets the client criteria and will join the client list.",
   },
   needs_review: {
     surface: "bg-hold-wash text-hold",
     Icon: TriangleAlert,
-    headline: "This charity will be imported and held for review, not added to the client list.",
+    headline: "This client will be imported and held for review, not added to the client list.",
   },
   does_not_meet: {
     surface: "bg-hold-wash text-hold",
     Icon: TriangleAlert,
-    headline: "This charity does not meet the client criteria, so importing will not add it.",
+    headline: "This client does not meet the client criteria, so importing will not add it.",
   },
 } as const;
 
@@ -83,7 +83,7 @@ export function CharityPreviewCard({
     <div className="space-y-3">
       <div className="rounded-xl border border-rule bg-white p-4">
         <p className="text-base font-semibold leading-tight text-ink">
-          {organisation.legal_name || "This charity has no name on the register"}
+          {organisation.legal_name || "This client has no name on the register"}
         </p>
         <p className="mt-1 text-[13px] text-dim">
           Registered charity {preview.registeredNumber}
@@ -130,7 +130,7 @@ export function CharityPreviewCard({
         <div className="flex items-start gap-2.5 rounded-xl bg-stop-wash p-3 text-stop" role="alert">
           <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={2.4} />
           <p className="text-sm font-semibold">
-            This charity has been removed from the register
+            This client has been removed from the register
             {registration.removedOn ? ` (${formatDate(registration.removedOn)})` : ""}. It is no
             longer a registered charity.
           </p>

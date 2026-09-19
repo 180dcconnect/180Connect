@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Loader2 } from "lucide-react";
 
 import { StatusBadge } from "../import-status/status-badge";
+import { ImportRunDetailsLink } from "../import-status/running-import-row";
 import { isStalledRun, runDisplayStatus } from "../import-status/status-helpers.ts";
 import { summariseRun, type IngestionRunRow } from "../import-status/run-format";
 
@@ -42,7 +43,16 @@ function headline(run: IngestionRunRow): { value: number; label: string } | null
   return null;
 }
 
-export function ThreeSixtyRecentRuns({ runs, now }: { runs: IngestionRunRow[]; now: Date }) {
+export function ThreeSixtyRecentRuns({
+  runs,
+  now,
+  canInspect,
+}: {
+  runs: IngestionRunRow[];
+  now: Date;
+  /** Whether this reader may open the raw records for an individual run. */
+  canInspect: boolean;
+}) {
   const [latest, ...older] = runs;
   // `latest` is undefined when no import has ever run (a fresh production
   // database). The empty state below renders in that case, but this line runs
@@ -76,7 +86,10 @@ export function ThreeSixtyRecentRuns({ runs, now }: { runs: IngestionRunRow[]; n
           <div className="border-t border-rule-soft bg-paper px-5 py-5 sm:px-6">
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
               <p className="text-xs tabular-nums text-faint">{when(latest.started_at, true)}</p>
-              <StatusBadge status={runDisplayStatus(latest.job_status, latest.started_at, now)} />
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                <StatusBadge status={runDisplayStatus(latest.job_status, latest.started_at, now)} />
+                {canInspect && <ImportRunDetailsLink id={latest.id} />}
+              </div>
             </div>
 
             {(() => {
@@ -118,7 +131,10 @@ export function ThreeSixtyRecentRuns({ runs, now }: { runs: IngestionRunRow[]; n
                   <span className="min-w-0 flex-1 truncate text-sm text-dim">
                     {summariseRun(run, now)}
                   </span>
-                  <StatusBadge status={runDisplayStatus(run.job_status, run.started_at, now)} />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <StatusBadge status={runDisplayStatus(run.job_status, run.started_at, now)} />
+                    {canInspect && <ImportRunDetailsLink id={run.id} />}
+                  </div>
                 </li>
               ))}
             </ul>

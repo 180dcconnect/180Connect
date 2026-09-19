@@ -498,12 +498,12 @@ export function ReviewPanel({
           <QueueSearch
             value={flagsQuery}
             onChange={setFlagsQuery}
-            label="Search status changes by organisation, number or status"
+            label="Search status changes by client, number or status"
           />
           {filteredFlags.length === 0 ? (
             <EmptyQueue
               title="No status changes"
-              body="Every organisation's register status still reads as active."
+              body="Every client's register status still reads as active."
               searched={flagsQuery.trim().length > 0}
               onClearSearch={() => setFlagsQuery("")}
             />
@@ -522,7 +522,7 @@ export function ReviewPanel({
                       summary={
                         <>
                           <span className="block truncate font-medium text-ink">
-                            {flag.organisations?.legal_name ?? "Unknown organisation"}
+                            {flag.organisations?.legal_name ?? "Unknown client"}
                           </span>
                           <span className="mt-0.5 block truncate text-[13px] text-dim">
                             {sourceLabel(flag.source)} {flag.company_number}: {flag.previous_status}{" "}
@@ -723,7 +723,7 @@ export function ReviewPanel({
                       >
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-ink">
-                            {item.organisations?.legal_name ?? "Unknown organisation"}
+                            {item.organisations?.legal_name ?? "Unknown client"}
                           </p>
                           <p className="mt-0.5 text-[13px] text-dim">
                             {sourceLabel(item.source)}: {item.previous_status} → {item.new_status}

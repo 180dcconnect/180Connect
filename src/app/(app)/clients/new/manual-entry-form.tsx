@@ -121,7 +121,7 @@ const TYPE_LABELS: Readonly<Record<string, string>> = {
   ngo: "NGO",
   company: "Company",
   both: "Charity and company",
-  other: "Other organisation",
+  other: "Other",
 };
 
 /**
@@ -1132,7 +1132,7 @@ export function ManualEntryForm({
               "organisation",
               line([values.legalName, TYPE_LABELS[values.organisationType]]),
             )}
-            title="Organisation"
+            title="Client"
           >
             <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_14rem]">
               <div className="flex flex-col gap-1.5">
@@ -1180,7 +1180,7 @@ export function ManualEntryForm({
                   defaultValue={seeded.missionStatement}
                   maxLength={5000}
                   name="missionStatement"
-                  placeholder="What the organisation does, in its own words or yours."
+                  placeholder="What the client does, in its own words or yours."
                   required
                   rows={4}
                 />

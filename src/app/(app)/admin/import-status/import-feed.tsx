@@ -1,91 +1,56 @@
 "use client";
 
-import { useState, type ComponentType } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { AnimatePresence, motion, useReducedMotionConfig, type Variants } from "motion/react";
-import { ArrowRight, ChevronDown, CircleCheck, CircleDot, CircleX, ExternalLink, LoaderCircle, TriangleAlert } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { ArrowRight, ChevronDown, CircleX, TriangleAlert } from "lucide-react";
 
 import { EASE, entranceIndexed } from "@/components/brand/motion";
 import { StatusBadge } from "./status-badge";
+import { ImportRunRefreshPoller, RunningImportRow } from "./running-import-row";
 import type { RunCount, RunTone, RunView } from "./run-format";
 
 /**
  * Import runs as a feed rather than a table. Eight numeric columns forced the
  * reader to decode a row before knowing whether anything had gone wrong; here
- * each run says what happened, the badge says how it ended, and the full count
- * breakdown is one click away.
+ * each run puts the relevant outcome counts first, the badge says how it
+ * ended, and the full count breakdown is one click away.
  *
  * Everything shown was formatted on the server (`run-format.ts`), so there is no
  * clock in this component to disagree with the server's.
  */
 
-type RowIcon = ComponentType<{ className?: string; strokeWidth?: number; "aria-hidden"?: boolean }>;
-
-/** The status glyph. Same four states the badge names, drawn once each. */
-const ICONS: Record<RunTone, RowIcon> = {
-  success: CircleCheck,
-  warning: TriangleAlert,
-  danger: CircleX,
-  info: LoaderCircle,
-  neutral: CircleDot,
-};
-
-/** Matches the sidebar rail's spring, so every hover in the app feels the same. */
-const ICON_SPRING = { type: "spring", stiffness: 420, damping: 17, mass: 0.6 } as const;
-
-/**
- * A gesture per outcome, each under the rail's ~10% / ~8° ceiling. The running
- * spinner is the exception that proves it: it turns a half-revolution because
- * that is literally what the row is reporting.
- */
-const ICON_MOTION: Record<RunTone, Variants> = {
-  success: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.08, rotate: -6 } },
-  warning: { rest: { scale: 1, y: 0 }, hover: { scale: 1.08, y: -2 } },
-  danger: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.08, rotate: 8 } },
-  info: { rest: { scale: 1, rotate: 0 }, hover: { scale: 1.06, rotate: 180 } },
-  neutral: { rest: { scale: 1 }, hover: { scale: 1.08 } },
-};
-
-/**
- * Tone lands on the icon disc and on a count that matters — never on a row
- * background, which would turn a hundred runs into a heat map.
- *
- * The colours are the badge's own (`status-helpers.ts`): `bg-*-50 text-*-800`.
- * That pill is what people already read this page's status from, so the disc
- * beside it agrees with it rather than proposing a second palette.
- */
-const TONE_CLASS: Record<RunTone, string> = {
-  success: "bg-green-50 text-green-800",
-  warning: "bg-amber-50 text-amber-800",
-  danger: "bg-red-50 text-red-800",
-  info: "bg-blue-50 text-blue-800",
-  neutral: "bg-gray-50 text-gray-800",
-};
-
-/** A count chip only takes colour when its number is worth noticing. */
-const COUNT_CLASS: Record<RunTone, string> = {
-  success: "bg-green-50 text-green-800",
-  warning: "bg-amber-50 text-amber-800",
-  danger: "bg-red-50 text-red-800",
-  info: "bg-blue-50 text-blue-800",
-  neutral: "bg-black/[0.04] text-foreground/70",
-};
-
-const COUNT_DESCRIPTIONS: Record<string, string> = {
-  Fetched: "Total retrieved from registry API",
-  Added: "New or updated records saved",
-  Skipped: "Unchanged matching checksums",
-  Failed: "Malformed records or API errors",
-  Flagged: "Dissolved/status drift detected",
-};
-
 const COUNT_EXPLANATIONS: Record<string, string> = {
-  Fetched: "Total raw organisation records returned by the registry during this run.",
-  Added: "Brand-new organisations, or organisations whose details changed since last import.",
-  Skipped: "Records whose data was 100% identical to what we already store. Skipped to prevent redundant processing.",
-  Failed: "Records that failed validation, had empty IDs, or encountered network/database errors.",
-  Flagged: "Active client organisations where status recheck found the entity was dissolved, liquidated, or altered.",
+  "Added to the client list":
+    "Clients added by this import. Adding works through everything waiting, so on a run that clears a backlog this can be larger than the number of records this run read — the sentence above says when that happened.",
+  "Already on the list": "Records whose details matched what we already hold, so nothing changed.",
+  "Needs a look":
+    "Everything that stopped short of the client list and has somewhere to be answered: possible duplicates, records held for review, and records that could not be saved.",
+  "From the source":
+    "How many records this run read from the source before any of them were added.",
+  "Held for review":
+    "The client criteria could not decide these on their own. An admin answers them on the review queue.",
+  "Possible duplicates":
+    "These look like a client already on the list. An admin decides on the possible duplicates screen.",
+  "Did not fit the criteria":
+    "Outside the branch's client criteria — the wrong kind of organisation, or outside the region.",
+  "Could not be saved":
+    "The client list refused these. The reason is in the panel below, with what to do about it.",
 };
+
+/**
+ * The run's own page, filtered to the records a count is made of. Only offered
+ * when the reader can open that page at all — a link that lands on a redirect
+ * is worse than no link.
+ */
+function countHref(runId: string, count: RunCount, canInspect: boolean): string | undefined {
+  if (!canInspect || !count.statusKeys || count.statusKeys.length === 0 || count.value === 0) {
+    return undefined;
+  }
+  const params = new URLSearchParams();
+  for (const key of count.statusKeys) params.append("status", key);
+  return `/admin/import-status/${runId}?${params.toString()}`;
+}
 
 export type RunDayGroup = { key: string; label: string; events: RunView[] };
 
@@ -108,26 +73,26 @@ export function ImportFeed({
   canInspect: boolean;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
-  const reduceMotion = useReducedMotionConfig();
-
+  const hasActiveRun = groups.some((group) => group.events.some((run) => run.status === "running"));
   // Indexed across the whole feed, not restarted per day, so two short days in a
   // row don't arrive faster than one long one.
   let position = 0;
 
   return (
     <div className="space-y-8">
+      <ImportRunRefreshPoller active={hasActiveRun} />
       {groups.map((group) => (
         <section key={group.key} className="space-y-3">
           <div className="flex items-baseline justify-between gap-4 px-1 pb-1">
-            <h2 className="font-body text-lg sm:text-xl font-bold tracking-tight text-foreground">
+            <h2 className="font-body text-lg font-semibold tracking-[-0.01em] text-ink sm:text-xl">
               {formatOrdinalDate(group.label)}
             </h2>
-            <p className="font-body text-xs font-semibold tabular-nums text-foreground/45">
+            <p className="font-body text-xs font-semibold tabular-nums text-faint">
               {group.events.length} run{group.events.length === 1 ? "" : "s"}
             </p>
           </div>
 
-          <ul className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm">
+          <ul className="overflow-hidden rounded-panel border border-rule bg-white">
             {group.events.map((run) => (
               <RunRow
                 key={run.id}
@@ -135,7 +100,6 @@ export function ImportFeed({
                 index={position++}
                 open={expanded === run.id}
                 onToggle={() => setExpanded((current) => (current === run.id ? null : run.id))}
-                reduceMotion={Boolean(reduceMotion)}
                 canInspect={canInspect}
               />
             ))}
@@ -151,28 +115,44 @@ function RunRow({
   index,
   open,
   onToggle,
-  reduceMotion,
   canInspect,
 }: {
   run: RunView;
   index: number;
   open: boolean;
   onToggle: () => void;
-  reduceMotion: boolean;
   canInspect: boolean;
 }) {
-  const Icon = ICONS[run.tone];
+  if (run.status === "running") {
+    return (
+      <motion.li
+        variants={entranceIndexed()}
+        custom={index}
+        className="border-b border-rule-soft last:border-b-0"
+      >
+        <RunningImportRow
+          run={{
+            id: run.id,
+            source: run.source,
+            startedLabel: run.startedRelative,
+            startedAt: run.startedIso,
+            observedAt: run.observedAt,
+            progress: run.progress,
+            triggerLabel: run.triggerLabel,
+          }}
+          canInspect={canInspect}
+        />
+      </motion.li>
+    );
+  }
 
   return (
     <motion.li
       variants={entranceIndexed()}
       custom={index}
-      className="border-b border-black/[0.06] last:border-b-0"
+      className="border-b border-rule-soft last:border-b-0"
     >
-      {/* Hover is claimed by the whole row, not the glyph: a 20px icon is a poor
-          target, and the gesture answers "what is this row" as the cursor
-          crosses it. */}
-      <motion.div initial="rest" animate="rest" whileHover="hover">
+      <motion.div>
         <div
           role="button"
           tabIndex={0}
@@ -184,86 +164,79 @@ function RunRow({
             }
           }}
           aria-expanded={open}
-          className="flex w-full items-start gap-3 px-4 py-4 text-left transition-colors hover:bg-black/[0.02] cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand sm:gap-4 sm:px-5"
+          className="flex w-full flex-col gap-4 cursor-pointer px-4 py-5 text-left transition-colors hover:bg-paper/55 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-lead sm:flex-row sm:gap-6 sm:px-5"
         >
-          <motion.span
-            aria-hidden="true"
-            variants={reduceMotion ? undefined : ICON_MOTION[run.tone]}
-            transition={ICON_SPRING}
-            className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${TONE_CLASS[run.tone]}`}
-          >
-            <Icon className="h-[18px] w-[18px]" strokeWidth={1.9} aria-hidden={true} />
-          </motion.span>
-
-          <span className="min-w-0 flex-1">
-            {/* On a phone the stamp rides this row instead of holding its own
-                column, the same arrangement the audit feed uses. */}
-            <span className="flex items-center justify-between gap-3">
-              <span className="flex min-w-0 items-center gap-2.5">
-                <span className="truncate text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/40">
-                  {run.source}
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              <span className="text-[13.5px] font-semibold text-ink">{run.source}</span>
+              {run.triggerLabel && (
+                <span className="rounded-inset bg-paper-sunk px-2 py-0.5 text-[11px] font-medium text-dim">
+                  {run.triggerLabel}
                 </span>
-                <StatusBadge status={run.status} />
-                {run.triggerLabel && (
-                  <span className="rounded-[4px] bg-black/[0.04] px-1.5 py-0.5 text-[10.5px] font-medium tracking-wide text-foreground/55">
-                    {run.triggerLabel}
-                  </span>
-                )}
-              </span>
-              <span
-                className="shrink-0 whitespace-nowrap font-body text-xs font-semibold tabular-nums text-foreground/45 sm:hidden"
-                title={run.startedExact}
-              >
-                {run.startedRelative}
-              </span>
-            </span>
+              )}
+            </div>
 
-            <span className="mt-1.5 block text-[15px] font-bold leading-[1.45] text-foreground">{run.summary}</span>
+            {/* The sentence always shows, even when there are numbers beside
+                it: it is the only place a run says something the counts cannot
+                — that a backlog was cleared, that the run did not finish, why
+                records were refused. Hiding it behind a non-zero count is how
+                "821 added from 98 records" ended up on screen unexplained. */}
+            <p className="mt-3 text-sm leading-[1.6] text-dim">{run.summary}</p>
 
             {run.highlights.length > 0 && (
-              <span className="mt-2 flex flex-wrap items-center gap-1.5">
+              <dl className="mt-4 flex flex-wrap items-start gap-x-6 gap-y-3">
                 {run.highlights.map((count) => (
-                  <CountChip key={count.label} count={count} />
+                  <CountMetric
+                    key={count.label}
+                    count={count}
+                    href={countHref(run.id, count, canInspect)}
+                  />
                 ))}
-              </span>
+              </dl>
             )}
 
             {/* F039 AC3 — a failure has to be legible without opening anything,
                 so the reason sits on the collapsed row in friendly terms. */}
-            {run.errorMessage && !open && (
-              <span className="mt-2 flex items-center gap-1.5 text-sm leading-[1.7] text-red-800 font-medium">
-                <TriangleAlert className="h-4 w-4 shrink-0 text-red-700" aria-hidden={true} />
+            {/* Not `errorMessage`: a register import that staged rows and then
+                had every one refused stores no run-level error, and that is
+                exactly the run whose reason has to be on the collapsed row. */}
+            {run.humanError && !open && (
+              <div className="mt-3 flex items-center gap-1.5 text-sm leading-[1.7] font-medium text-stop">
+                <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden={true} />
                 <span>{run.humanError?.summary ?? run.errorMessage}</span>
-              </span>
+              </div>
             )}
-          </span>
+          </div>
 
-          <span className="flex shrink-0 items-center gap-3 pt-0.5">
+          <div className="flex shrink-0 flex-col items-start gap-3 sm:items-end sm:self-stretch">
+            <div className="flex items-center gap-2">
+              <StatusBadge status={run.status} />
             {canInspect && (
               <Link
                 href={`/admin/import-status/${run.id}`}
                 onClick={(e) => e.stopPropagation()}
-                className="hidden sm:inline-flex items-center gap-1 rounded-lg bg-black/[0.04] px-2.5 py-1 text-xs font-bold text-foreground/75 hover:bg-brand/10 hover:text-brand transition-colors"
+                className="inline-flex items-center gap-1.5 rounded-inset bg-lead px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-lead-mid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
               >
                 <span>View records</span>
                 <ArrowRight className="h-3 w-3" />
               </Link>
             )}
-            <span
-              className="hidden text-right font-body text-xs font-semibold tabular-nums text-foreground/45 sm:block"
-              title={run.startedExact}
-            >
-              {run.startedRelative}
-            </span>
             <motion.span
               aria-hidden="true"
               animate={{ rotate: open ? 180 : 0 }}
               transition={{ duration: 0.25, ease: EASE }}
-              className="text-foreground/25"
+              className="text-faint"
             >
               <ChevronDown className="h-4 w-4" strokeWidth={2} />
             </motion.span>
-          </span>
+            </div>
+            <span
+              className="mt-1 font-body text-xs font-semibold tabular-nums text-faint sm:mt-auto"
+              title={run.startedExact}
+            >
+              {run.startedRelative}
+            </span>
+          </div>
         </div>
 
         <AnimatePresence initial={false}>
@@ -276,7 +249,7 @@ function RunRow({
               transition={{ duration: 0.35, ease: EASE }}
               className="overflow-hidden"
             >
-              <div className="border-t border-black/[0.05] bg-black/[0.015] px-4 py-4 sm:px-5 sm:pl-[4.25rem]">
+              <div className="border-t border-rule-soft bg-paper px-4 py-5 sm:px-5">
                 <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-5">
                   <Field label="Source" value={run.source} />
                   <Field
@@ -294,96 +267,37 @@ function RunRow({
                   <Field label="Took" value={run.duration} />
                 </dl>
 
-                {/* Every count, zeroes included. "0 failed" is the reassurance
-                    the collapsed row deliberately leaves out — it belongs where
-                    someone has asked for the full picture. */}
-                <div className="mt-5">
-                  <div className="flex items-baseline justify-between gap-4">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                      Record Outcomes Breakdown
-                    </p>
-                    <span className="text-[11px] text-foreground/45 hidden sm:inline">
-                      Hover on any metric for detailed explanation
-                    </span>
-                  </div>
-                  <dl className="mt-2 grid overflow-hidden rounded-xl bg-white ring-1 ring-black/[0.06] sm:grid-cols-5">
-                    {run.counts.map((count) => (
-                      <div
-                        key={count.label}
-                        title={COUNT_EXPLANATIONS[count.label]}
-                        className="group flex items-baseline justify-between gap-3 border-b border-black/[0.05] p-3.5 last:border-b-0 transition-colors hover:bg-black/[0.015] sm:flex-col sm:items-start sm:gap-1 sm:border-b-0 sm:border-r sm:last:border-r-0"
-                      >
-                        <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                          {count.label}
-                        </dt>
-                        <dd
-                          className={`text-[19px] font-black tabular-nums ${
-                            count.value > 0 && count.tone !== "neutral"
-                              ? COUNT_TEXT[count.tone]
-                              : "text-foreground/80"
-                          }`}
-                        >
-                          {count.value.toLocaleString()}
-                        </dd>
-                        <p className="hidden text-[11px] leading-[1.3] text-foreground/50 sm:block">
-                          {COUNT_DESCRIPTIONS[count.label]}
-                        </p>
-                      </div>
-                    ))}
-                  </dl>
-                </div>
-
-                {/* Direct Action Link to Inspect Records — admin-only page */}
-                {canInspect && (
-                <div className="mt-5 flex flex-col gap-3 rounded-xl border border-black/[0.06] bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h4 className="text-xs font-bold text-foreground">
-                      Inspect Ingestion Records
-                    </h4>
-                    <p className="text-xs text-foreground/60">
-                      View all organisation records retrieved during this run, click through to added clients, or inspect skipped and duplicate candidates.
-                    </p>
-                  </div>
-                  <Link
-                    href={`/admin/import-status/${run.id}`}
-                    className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-lead px-3.5 py-2 text-xs font-bold text-white hover:bg-lead-hover transition-colors shadow-2xs"
-                  >
-                    <span>View All Records in This Run</span>
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </Link>
-                </div>
-                )}
-
-                {run.errorMessage && (
+                {run.humanError && (
                   <div className="mt-5">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-                      Why it stopped
+                    <p className="text-xs font-semibold text-stop">
+                      {run.errorMessage ? "Why it stopped" : "Why records were not saved"}
                     </p>
-                    <div className="mt-2 overflow-hidden rounded-xl border border-red-200/80 bg-red-50/70 p-4">
+                    <div className="mt-2 overflow-hidden rounded-inset border border-stop/25 bg-stop-wash p-4">
                       <div className="flex items-start gap-3">
-                        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-red-100 text-red-700">
+                        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-inset bg-white/70 text-stop">
                           <CircleX className="h-4 w-4" strokeWidth={2.2} />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <h4 className="text-sm font-bold text-red-950">
+                          <h4 className="text-sm font-semibold text-stop">
                             {run.humanError?.summary ?? "Ingestion run failed"}
                           </h4>
-                          <p className="mt-1 text-xs leading-[1.6] text-red-900/85">
+                          <p className="mt-1 text-xs leading-[1.6] text-ink">
                             {run.humanError?.description ?? run.errorMessage}
                           </p>
                           {run.humanError?.actionHint && (
-                            <div className="mt-3 flex items-start gap-1.5 rounded-lg bg-white/90 px-3 py-2 text-xs text-red-950 shadow-2xs ring-1 ring-red-200/70">
-                              <span className="font-bold shrink-0">How to fix:</span>
+                            <div className="mt-3 flex items-start gap-1.5 rounded-inset bg-white/85 px-3 py-2 text-xs text-ink ring-1 ring-stop/20">
+                              <span className="font-semibold shrink-0">How to fix:</span>
                               <span>{run.humanError.actionHint}</span>
                             </div>
                           )}
                           {run.humanError?.rawMessage &&
+                            run.humanError.rawMessage.trim() !== "" &&
                             run.humanError.rawMessage !== run.humanError.summary && (
-                              <details className="mt-3 text-[11px] text-red-900/75">
-                                <summary className="cursor-pointer font-mono font-bold hover:underline">
+                              <details className="mt-3 text-[11px] text-dim">
+                                <summary className="cursor-pointer font-medium hover:underline">
                                   Technical diagnostic details
                                 </summary>
-                                <pre className="mt-1.5 overflow-x-auto rounded bg-red-950/5 p-2 font-mono text-[11px] text-red-950">
+                                <pre className="mt-1.5 overflow-x-auto rounded-inset bg-white/65 p-2 font-mono text-[11px] text-ink">
                                   {run.humanError.rawMessage}
                                 </pre>
                               </details>
@@ -402,37 +316,61 @@ function RunRow({
   );
 }
 
-/** Text-only tones, for a number that is already sitting on white. */
+/** Text-only state tones, for a number that is already sitting on white. */
 const COUNT_TEXT: Record<RunTone, string> = {
-  success: "text-green-800",
-  warning: "text-amber-800",
-  danger: "text-red-800",
-  info: "text-blue-800",
-  neutral: "text-foreground/80",
+  success: "text-go",
+  warning: "text-hold",
+  danger: "text-stop",
+  info: "text-lead",
+  neutral: "text-ink",
 };
 
-function CountChip({ count }: { count: RunCount }) {
-  // A count only earns its colour by being non-zero and by meaning something
-  // went wrong; "260 skipped" is routine and stays neutral.
+/**
+ * One headline count. When the count has records behind it and someone who may
+ * open them, it is a link into the run filtered to exactly those — the same
+ * affordance the run's own page gives its cards, so "Needs a look: 6" is never
+ * a number the reader has to go hunting for.
+ */
+function CountMetric({ count, href }: { count: RunCount; href?: string }) {
   const tone: RunTone = count.value > 0 ? count.tone : "neutral";
+  const body = (
+    <>
+      <dd className={`text-[28px] font-semibold leading-none tabular-nums tracking-[-0.03em] ${COUNT_TEXT[tone]}`}>
+        {count.value.toLocaleString()}
+      </dd>
+      <dt className="mt-1 text-xs font-medium text-dim">{count.label}</dt>
+    </>
+  );
+
+  if (!href) {
+    return (
+      <div title={COUNT_EXPLANATIONS[count.label] ?? count.label} className="min-w-[4.5rem]">
+        {body}
+      </div>
+    );
+  }
+
   return (
-    <span
+    <Link
+      href={href}
+      onClick={(event) => event.stopPropagation()}
       title={COUNT_EXPLANATIONS[count.label] ?? count.label}
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold tracking-[0.02em] ${COUNT_CLASS[tone]}`}
+      className="min-w-[4.5rem] rounded-inset transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
+      aria-label={`Show the ${count.value.toLocaleString()} ${count.label.toLowerCase()} records from this run`}
     >
-      <span className="tabular-nums">{count.value.toLocaleString()}</span>
-      <span className="font-bold uppercase tracking-[0.08em] opacity-60">{count.label}</span>
-    </span>
+      {body}
+      <span className="mt-1 block text-[11px] font-semibold text-lead underline decoration-lead/30 underline-offset-2">
+        Show these
+      </span>
+    </Link>
   );
 }
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[11px] font-bold uppercase tracking-[0.12em] text-foreground/35">
-        {label}
-      </dt>
-      <dd className="mt-1.5 truncate text-[13px] text-foreground/75" title={value}>
+      <dt className="text-xs font-medium text-dim">{label}</dt>
+      <dd className="mt-1.5 truncate text-[13px] text-ink" title={value}>
         {value}
       </dd>
     </div>

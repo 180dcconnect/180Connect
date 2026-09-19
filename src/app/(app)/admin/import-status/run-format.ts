@@ -22,6 +22,10 @@ import {
   // tsconfig path alias, and this module is tested directly.
 } from "../../../../lib/display-format.ts";
 import { describeImportFailure } from "../../../../lib/import-failure-reason.ts";
+import {
+  importProgressPlanFromStats,
+  type ImportProgressPlan,
+} from "../../../../lib/ingestion/import-progress.ts";
 import { labelForStatus, runDisplayStatus, stalledRunSummary } from "./status-helpers.ts";
 
 /**
@@ -226,7 +230,15 @@ export type RunView = {
   errorMessage: string | null;
   humanError: HumanisedError | null;
   startedRelative: string;
+  /** Shared server clock for a hydration-safe first countdown reading. */
+  observedAt: string;
   startedExact: string;
+  /**
+   * The stored timestamp, untouched — the cursor the list page pages on. Kept
+   * beside the formatted times because a cursor built from a display string
+   * would be a different instant the first time a format changed.
+   */
+  startedIso: string;
   finishedExact: string | null;
   duration: string;
   dayKey: string;
@@ -239,6 +251,8 @@ export type RunView = {
    * and for every job that has no criteria to state (a backfill, a recheck).
    */
   criteriaSentence: string | null;
+  /** Real source progress when available, otherwise a clearly-labelled estimate. */
+  progress: ImportProgressPlan | null;
 };
 
 /**
@@ -277,6 +291,13 @@ export type RegisterImportBreakdown = {
   staged: number;
   clientsAdded: number | null;
   duplicates: number;
+  /**
+   * Records the importer matched to a client it already holds, certainly
+   * enough that no one was asked (`isCertainMatch` in write-organisations.ts).
+   * They are clients we already have, not work waiting on anybody, so they
+   * count alongside the skipped records rather than with the duplicates.
+   */
+  alreadyHeld: number;
   needsReview: number;
   didNotMeet: number;
   notUsable: number;
@@ -319,6 +340,7 @@ export function registerImportBreakdownFrom(
     staged,
     clientsAdded: numericStat(stats, "inserted"),
     duplicates: numericStat(stats, "flagged") ?? 0,
+    alreadyHeld: numericStat(stats, "alreadyHeld") ?? 0,
     needsReview: numericStat(stats, "needsReview") ?? 0,
     didNotMeet: numericStat(stats, "doesNotMeet") ?? 0,
     notUsable: numericStat(stats, "invalidData") ?? 0,
@@ -483,7 +505,11 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
           tone: "success",
           statusKeys: ["validated"],
         },
-        { label: "Already on the list", value: run.records_skipped, tone: "neutral" },
+        {
+          label: "Already on the list",
+          value: run.records_skipped + register.alreadyHeld,
+          tone: "neutral",
+        },
         {
           // Everything that stopped short of the client list and has somewhere
           // to be answered — one number, because a reader wants to know whether
@@ -599,7 +625,9 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
     errorMessage: run.error_message,
     humanError,
     startedRelative: formatRelativeTime(started, now),
+    observedAt: now.toISOString(),
     startedExact: formatExactTime(started),
+    startedIso: run.started_at,
     finishedExact: finished ? formatExactTime(finished) : null,
     // A run still going has no duration yet, and guessing one from `now` would
     // show a number that changes every refresh for a reason nothing explains.
@@ -609,6 +637,7 @@ export function describeRun(run: IngestionRunRow, now: Date): RunView {
     triggeredBy,
     triggerLabel,
     criteriaSentence: runCriteriaSentence(run),
+    progress: importProgressPlanFromStats(run.run_stats),
   };
 }
 

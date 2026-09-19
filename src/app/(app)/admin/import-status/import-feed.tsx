@@ -135,6 +135,9 @@ function RunRow({
             id: run.id,
             source: run.source,
             startedLabel: run.startedRelative,
+            startedAt: run.startedIso,
+            observedAt: run.observedAt,
+            progress: run.progress,
             triggerLabel: run.triggerLabel,
           }}
           canInspect={canInspect}

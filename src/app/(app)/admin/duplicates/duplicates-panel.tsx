@@ -7,6 +7,7 @@ import { ChevronsUpDown, X } from "lucide-react";
 import { Pill, SectionCard } from "@/app/(app)/clients/[id]/section-card";
 import { BrandSearchBar, type FilterOption } from "@/components/brand/search-bar";
 import { InlineAlert } from "@/components/ui/inline-alert";
+import { useToast } from "@/components/ui/toast";
 import { VIEW_ONLY_CONTROL_NOTE } from "@/lib/auth/view-only";
 import { formatShortDate } from "@/lib/display-format";
 // Type-only, deliberately: `@/lib/duplicates` reads register payloads, so it
@@ -568,6 +569,7 @@ export function DuplicatesPanel({
   /** How many decisions the read took (`DECIDED_LIMIT`), so the caveat under the history is honest. */
   decidedLimit: number;
 }) {
+  const { showToast } = useToast();
   const [pending, setPending] = useState(initialPending);
   const [decided, setDecided] = useState(initialDecided);
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -729,6 +731,11 @@ export function DuplicatesPanel({
             ? "Kept as one record. The client record stays exactly as it was."
             : `Kept as one record — took ${appliedIncoming === 1 ? "1 detail" : `${appliedIncoming} details`} from the register; everything else stays as it was.`
         : "Treated as two charities — the importer adds it as its own client next time it runs.";
+      // The answered card and its dialog disappear on success, so confirmation
+      // must follow the reader rather than landing at the top of a long queue.
+      // The inline notice stays as a persistent fallback and carries any
+      // follow-up warning from the conflict check.
+      showToast(`Saved. ${done}`);
       setNotice(
         body.warning
           ? { tone: "warning", text: `${done} ${body.warning}` }

@@ -68,6 +68,10 @@ import {
   formatIncomeSliderLabel,
 } from "@/lib/income-range";
 import {
+  estimateRegisterImportSeconds,
+  formatProgressDuration,
+} from "@/lib/ingestion/import-progress";
+import {
   countRegisterSelection,
   deleteFilterPreset,
   previewRegisterSelection,
@@ -132,23 +136,6 @@ function formatIncome(value: number | null): string {
 
 /** Mirrors MAX_IMPORT in register-actions.ts: the action caps the selection, so the estimate must too. */
 const IMPORT_CAP = 10_000;
-
-/**
- * Seconds one charity costs an import, staging plus promotion. A rough
- * calibration, not a measurement: staging is local SQLite reads plus one
- * batched upsert per 500 charities, promotion standardises and writes each
- * record to Postgres. It only covers the seconds before anything real could
- * be known — the import writes its run row when it finishes, so unlike the
- * 360Giving backfill there is no live count to poll, and the gauge fills on
- * this estimate instead.
- */
-const SECONDS_PER_CHARITY = 0.5;
-
-function formatImportDuration(totalSeconds: number): string {
-  const clamped = Math.max(0, Math.round(totalSeconds));
-  const minutes = Math.floor(clamped / 60);
-  return `${minutes}:${String(clamped % 60).padStart(2, "0")}`;
-}
 
 // The slider's scale, labels and histogram live in src/lib/income-range.ts,
 // shared with the size preference on Settings → Outreach preferences.
@@ -543,14 +530,14 @@ export type PresetSummary = {
  * estimate (never full before the action resolves) and the tooltip stays off,
  * because hover numbers drawn from an estimate would read as measurements.
  */
-function ImportProgressGauge({
+export function ImportProgressGauge({
   total,
   elapsed,
 }: {
   total: number;
   elapsed: number;
 }) {
-  const estimatedTotal = Math.max(total, 1) * SECONDS_PER_CHARITY;
+  const estimatedTotal = estimateRegisterImportSeconds(total);
   const estimatedLeft = Math.max(estimatedTotal - elapsed, 0);
   const attemptPercent = Math.min(95, Math.round((elapsed / estimatedTotal) * 100));
   const filled = Math.min(Math.max(total - 1, 0), Math.round((attemptPercent / 100) * total));
@@ -561,16 +548,16 @@ function ImportProgressGauge({
         {total > 0 ? (
           <>
             Importing {total.toLocaleString()} {total === 1 ? "client" : "clients"} —{" "}
-            {formatImportDuration(elapsed)} so far ·{" "}
+            {formatProgressDuration(elapsed)} so far ·{" "}
             {estimatedLeft > 0 ? (
-              <>about {formatImportDuration(estimatedLeft)} to go</>
+              <>about {formatProgressDuration(estimatedLeft)} to go</>
             ) : (
               "taking longer than expected, still working"
             )}
             .
           </>
         ) : (
-          <>Importing… {formatImportDuration(elapsed)} so far.</>
+          <>Importing… {formatProgressDuration(elapsed)} so far.</>
         )}
       </p>
       {total > 0 && (
@@ -1020,7 +1007,7 @@ export function FilterBuilder({
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            {!importing && <div className="flex flex-wrap items-center gap-2">
               {/* Saved sets live here, not in a card at the foot of the page:
                   they act on the whole selection, which is what this bar is,
                   and the returning user's first move is to load one — putting
@@ -1128,7 +1115,7 @@ export function FilterBuilder({
               >
                 Import{count !== null && count > 0 ? ` ${count.toLocaleString()}` : ""}
               </OriginButton>
-            </div>
+            </div>}
           </div>
 
           {unfiltered && (
@@ -1262,7 +1249,23 @@ export function FilterBuilder({
       </AnimatePresence>
 
       {/* ── The controls ──────────────────────────────────────────────────── */}
-      <section className="rounded-panel border border-rule bg-white px-5">
+      {importing && (
+        <p
+          id="charity-import-criteria-lock"
+          className="rounded-inset bg-paper px-4 py-3 text-[13px] leading-[1.55] text-dim"
+          role="status"
+        >
+          This import is using the criteria shown below. They are locked until it
+          finishes; then you can change them and start another import.
+        </p>
+      )}
+      <section
+        aria-describedby={importing ? "charity-import-criteria-lock" : undefined}
+        className={`rounded-panel border border-rule bg-white px-5 transition-opacity ${
+          importing ? "opacity-60" : ""
+        }`}
+        inert={importing}
+      >
         <FilterSection
           onCommit={commitCount}
           title="Size"

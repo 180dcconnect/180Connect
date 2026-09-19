@@ -276,7 +276,11 @@ export default async function IngestionRunDetailPage({
         // `run_stats` is not optional decoration: without it `describeRun`
         // cannot tell staged rows from clients added, and this page repeated
         // the staging counter as "added" while the client list said otherwise.
-        "id, api_source, job_status, records_fetched, records_inserted, records_skipped, records_failed, records_flagged, started_at, completed_at, error_message, run_stats, triggered_by",
+        // The person who started it, joined here rather than left as an id:
+        // "Started by a person" is what the screen could say without it, and a
+        // run history nobody is named in is the one thing an audit trail is
+        // for.
+        "id, api_source, job_status, records_fetched, records_inserted, records_skipped, records_failed, records_flagged, started_at, completed_at, error_message, run_stats, triggered_by, triggered_by_user:users(full_name, email)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -300,6 +304,25 @@ export default async function IngestionRunDetailPage({
   }
 
   const runRow = runData as IngestionRunRow;
+
+  // Who pressed the button. The join can come back empty — the user has since
+  // been removed, or this reader cannot see the users table — and that is not
+  // an error: the run still says it was started by hand, just not by whom.
+  // PostgREST types an embedded row as an array, and returns one either way
+  // depending on how it reads the relationship, so both shapes are accepted.
+  const triggeredByJoin = (
+    runData as {
+      triggered_by_user?:
+        | { full_name: string | null; email: string }
+        | { full_name: string | null; email: string }[]
+        | null;
+    }
+  ).triggered_by_user;
+  const triggeredByUser = Array.isArray(triggeredByJoin)
+    ? triggeredByJoin[0]
+    : triggeredByJoin;
+  const startedByName =
+    triggeredByUser?.full_name?.trim() || triggeredByUser?.email?.trim() || null;
   const now = new Date();
   const runView = describeRun(runRow, now);
 
@@ -383,12 +406,52 @@ export default async function IngestionRunDetailPage({
     }
   }
 
+  // Which of the matched records are genuinely on the duplicates queue. Both
+  // kinds are stored `matched`: the ones the importer was certain about (same
+  // registration number, name and postcode) never had a candidate row written
+  // for them, and calling those "possible duplicates" put a Resolve button on
+  // a record with nothing to resolve. Asked the same chunked way as the review
+  // lookup above.
+  const duplicateQueued = new Set<string>();
+  const matchedIds = rows
+    .filter((row) => row.processing_status === "matched")
+    .map((row) => row.id);
+  if (matchedIds.length > 0) {
+    const CANDIDATE_LOOKUP_CHUNK = 200;
+    for (let start = 0; start < matchedIds.length; start += CANDIDATE_LOOKUP_CHUNK) {
+      const { data: candidates, error: candidatesError } = await supabase
+        .from("entity_match_candidates")
+        .select("raw_source_record_id")
+        .eq("match_status", "pending")
+        .in("raw_source_record_id", matchedIds.slice(start, start + CANDIDATE_LOOKUP_CHUNK));
+      if (candidatesError) {
+        // A failed lookup falls back to treating every match as queued, which
+        // is the older and safer of the two labels: it may send someone to a
+        // queue with nothing in it, where the opposite would hide a decision
+        // nobody has made.
+        await reportError(candidatesError, {
+          operation: "admin.import_status.get_match_candidates",
+          runId: id,
+        });
+        matchedIds.forEach((rawId) => duplicateQueued.add(rawId));
+        break;
+      }
+      for (const candidate of (candidates ?? []) as { raw_source_record_id: string | null }[]) {
+        if (candidate.raw_source_record_id) duplicateQueued.add(candidate.raw_source_record_id);
+      }
+    }
+  }
+
   const recordViews = rows.map((row) =>
     describeRawRecord(
       row,
       row.matched_organisation_id ? orgMap.get(row.matched_organisation_id) ?? null : null,
       now,
-      { heldForReview: heldForReview.has(row.id) },
+      {
+        heldForReview: heldForReview.has(row.id),
+        duplicateQueued:
+          row.processing_status === "matched" ? duplicateQueued.has(row.id) : true,
+      },
     ),
   );
 
@@ -515,7 +578,9 @@ export default async function IngestionRunDetailPage({
                   </span>
                   <span>
                     {runView.triggerLabel === "Manual"
-                      ? "Started by a person"
+                      ? startedByName
+                        ? `Started by ${startedByName}`
+                        : "Started by a person"
                       : "Started on a schedule"}
                   </span>
                 </>

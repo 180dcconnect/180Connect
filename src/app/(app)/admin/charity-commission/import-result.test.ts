@@ -53,6 +53,7 @@ function promoteCounts(overrides: Partial<PromoteCounts> = {}): PromoteCounts {
     read: 0,
     inserted: 0,
     flagged: 0,
+    alreadyHeld: 0,
     rejected: 0,
     invalidData: 0,
     needsReview: 0,

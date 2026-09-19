@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 
+import { importProgressPlanFromStats } from "@/lib/ingestion/import-progress";
 import { StatusBadge } from "../import-status/status-badge";
 import {
   ImportRunDetailsLink,
@@ -213,6 +214,9 @@ export function CompaniesRecentRuns({
                 id: run.id,
                 source: pipelineLabel(run),
                 startedLabel: when(run.started_at, true),
+                startedAt: run.started_at,
+                observedAt: nowIso,
+                progress: importProgressPlanFromStats(run.run_stats),
                 triggerLabel: run.triggered_by === "manual" ? "Manual" : run.triggered_by === "schedule" ? "Scheduled" : null,
               }}
               canInspect={canInspect}

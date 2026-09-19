@@ -21,6 +21,7 @@ import {
   nextSelection,
   rangeLengthDays,
   todayIso,
+  type CalendarPreset,
   type MonthKey,
   type RangeSelection,
 } from "@/lib/date-range";
@@ -75,6 +76,11 @@ export type DateRangeCalendarProps = {
   now?: Date;
   /** Hides the This month / Last month / This quarter row. Forced off in single mode. */
   showPresets?: boolean;
+  /**
+   * Host-specific shortcuts. Omit this to keep the dashboard calendar's
+   * standard month and quarter choices.
+   */
+  presetOptions?: CalendarPreset[];
   className?: string;
 };
 
@@ -96,6 +102,7 @@ export function DateRangeCalendar({
   max,
   now,
   showPresets = true,
+  presetOptions,
   className = "",
 }: DateRangeCalendarProps) {
   const reduceMotion = useReducedMotionConfig();
@@ -210,10 +217,10 @@ export function DateRangeCalendar({
   }, [month]);
   const presets = useMemo(() => {
     if (!showPresets || mode === "single") return [];
-    return calendarPresets(now ?? new Date())
+    return (presetOptions ?? calendarPresets(now ?? new Date()))
       .map((preset) => clampPreset(preset, min, max))
       .filter((preset): preset is NonNullable<typeof preset> => preset !== null);
-  }, [showPresets, mode, now, min, max]);
+  }, [showPresets, mode, now, presetOptions, min, max]);
 
   // Paging is disabled at the edges rather than allowed and then empty: the
   // whole month is out of bounds, so there is nothing to show there.
@@ -695,7 +702,7 @@ export function DateRangeCalendar({
       </p>
 
       {presets.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1 border-t border-black/[0.06] pt-2 dark:border-white/[0.08]">
+        <div className="mt-2 flex flex-wrap gap-1 pt-2">
           {presets.map((preset) => {
             const isActive = value.from === preset.from && value.to === preset.to;
             return (

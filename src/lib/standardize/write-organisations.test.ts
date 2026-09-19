@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   fetchAllPages,
+  isCertainMatch,
   promotePendingCharityCommissionRecords,
   promotePendingCompaniesHouseRecords,
   promotePendingCharityCommissionBulkRecords,
@@ -2224,6 +2225,11 @@ describe("promotePendingCompaniesHouseRecords — SIC codes", () => {
   });
 });
 
+// These four are all certain matches — same registration number, name and
+// postcode — so none of them reaches the duplicates queue any more
+// (`isCertainMatch`). They are counted as clients already held, and the
+// healing they exist to prove still runs: that was never the admin's decision
+// to make, it is the refresh filling a gap on a row we already have.
 describe("duplicate re-import heals a missing mission", () => {
   it("bulk path: a refresh carrying activities annotates the existing charity", async () => {
     const { store, annotations, flagged } = fakeStore({
@@ -2244,9 +2250,12 @@ describe("duplicate re-import heals a missing mission", () => {
 
     const counts = await promotePendingCharityCommissionBulkRecords(store);
 
-    assert.equal(counts.flagged, 1);
+    assert.equal(counts.flagged, 0);
+    assert.equal(counts.alreadyHeld, 1);
     assert.equal(counts.inserted, 0);
-    assert.equal(flagged.length, 1);
+    // Nothing queued: nobody is asked to confirm a charity number against
+    // itself.
+    assert.equal(flagged.length, 0);
     assert.equal(annotations.length, 1);
     assert.equal(annotations[0].organisationId, "org-existing");
     assert.equal(
@@ -2281,7 +2290,7 @@ describe("duplicate re-import heals a missing mission", () => {
 
     const counts = await promotePendingCharityCommissionBulkRecords(store);
 
-    assert.equal(counts.flagged, 1);
+    assert.equal(counts.alreadyHeld, 1);
     assert.equal(annotations.length, 0);
   });
 
@@ -2319,7 +2328,7 @@ describe("duplicate re-import heals a missing mission", () => {
       }),
     );
 
-    assert.equal(counts.flagged, 1);
+    assert.equal(counts.alreadyHeld, 1);
     assert.equal(counts.inserted, 0);
     assert.equal(annotations.length, 1);
     assert.equal(annotations[0].organisationId, "org-existing");
@@ -2351,7 +2360,73 @@ describe("duplicate re-import heals a missing mission", () => {
       () => null,
     );
 
-    assert.equal(counts.flagged, 1);
+    assert.equal(counts.alreadyHeld, 1);
     assert.equal(annotations.length, 0);
+  });
+});
+
+describe("isCertainMatch", () => {
+  const match = { organisationId: "org-1", matchedOn: "registration_number" as const };
+
+  it("is certain when the number, the name and the postcode all agree", () => {
+    assert.equal(
+      isCertainMatch(
+        match,
+        { legal_name: "Leeds Hospice Ltd", postcode: "ls1 4ab" },
+        { legal_name: "Leeds Hospice Limited", postcode: "LS1 4AB" },
+      ),
+      true,
+    );
+  });
+
+  it("is certain when only one side has a postcode", () => {
+    assert.equal(
+      isCertainMatch(
+        match,
+        { legal_name: "Leeds Hospice", postcode: "" },
+        { legal_name: "Leeds Hospice", postcode: "LS1 4AB" },
+      ),
+      true,
+    );
+  });
+
+  it("is not certain when the postcodes disagree", () => {
+    assert.equal(
+      isCertainMatch(
+        match,
+        { legal_name: "Leeds Hospice", postcode: "LS1 4AB" },
+        { legal_name: "Leeds Hospice", postcode: "YO1 7HH" },
+      ),
+      false,
+    );
+  });
+
+  it("is not certain when the names disagree", () => {
+    assert.equal(
+      isCertainMatch(
+        match,
+        { legal_name: "Leeds Hospice", postcode: "LS1 4AB" },
+        { legal_name: "Leeds Hospital Trust", postcode: "LS1 4AB" },
+      ),
+      false,
+    );
+  });
+
+  it("is never certain on a name-and-postcode match — that is what the queue is for", () => {
+    assert.equal(
+      isCertainMatch(
+        { organisationId: "org-1", matchedOn: "name_and_postcode" },
+        { legal_name: "Leeds Hospice", postcode: "LS1 4AB" },
+        { legal_name: "Leeds Hospice", postcode: "LS1 4AB" },
+      ),
+      false,
+    );
+  });
+
+  it("is not certain when there is no usable name on either side", () => {
+    assert.equal(
+      isCertainMatch(match, { legal_name: "  ", postcode: "LS1 4AB" }, { legal_name: "", postcode: "LS1 4AB" }),
+      false,
+    );
   });
 });

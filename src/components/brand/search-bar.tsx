@@ -7,6 +7,8 @@ import { useRouter } from "next/navigation";
 
 import { EASE, stagger } from "@/components/brand/motion";
 import { LIP, SEARCH_GLASS, SEARCH_GLASS_FROSTED, SEARCH_GLASS_FROSTED_LIGHT, SEARCH_GLASS_LIGHT, SEARCH_GLASS_OPEN, SEARCH_GLASS_OPEN_LIGHT } from "@/components/brand/tokens";
+import { DateRangeCalendar } from "@/components/ui/date-range-calendar";
+import { todayIso, type CalendarPreset, type RangeSelection } from "@/lib/date-range";
 import { tagPillStyle } from "@/lib/tags/tag-colours";
 
 /** Cycles behind the prompt while the field is empty and unfocused. */
@@ -183,6 +185,189 @@ function rankOption(label: string, query: string): number {
  */
 export type FilterOption = { label: string; value: string; colour?: string };
 
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_MONTH = /^\d{4}-\d{2}$/;
+const IMPORT_DATE_PRESET_VALUES = new Set([
+  "today",
+  "yesterday",
+  "7d",
+  "30d",
+  "this_month",
+  "last_month",
+]);
+
+function isoDayFromUtc(year: number, month: number, day: number): string {
+  return new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10);
+}
+
+/** Turns the Import Status URL vocabulary into the calendar's concrete span. */
+function dateRangeForFilterValue(value: string, now: Date): RangeSelection | null {
+  const today = todayIso(now);
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+
+  if (value === "today") return { from: today, to: today };
+  if (value === "yesterday") {
+    const yesterday = isoDayFromUtc(year, month, now.getUTCDate() - 1);
+    return { from: yesterday, to: yesterday };
+  }
+  if (value === "7d" || value === "30d") {
+    const days = value === "7d" ? 7 : 30;
+    return { from: isoDayFromUtc(year, month, now.getUTCDate() - days), to: today };
+  }
+  if (value === "this_month") {
+    return { from: isoDayFromUtc(year, month, 1), to: today };
+  }
+  if (value === "last_month") {
+    return {
+      from: isoDayFromUtc(year, month - 1, 1),
+      to: isoDayFromUtc(year, month, 0),
+    };
+  }
+  if (ISO_MONTH.test(value)) {
+    const [filterYear, filterMonth] = value.split("-").map(Number);
+    return {
+      from: isoDayFromUtc(filterYear, filterMonth - 1, 1),
+      to: isoDayFromUtc(filterYear, filterMonth, 0),
+    };
+  }
+  if (value.includes("..")) {
+    const [from, to] = value.split("..");
+    if (ISO_DAY.test(from) && ISO_DAY.test(to)) {
+      return from <= to ? { from, to } : { from: to, to: from };
+    }
+  }
+  if (ISO_DAY.test(value)) return { from: value, to: value };
+  return null;
+}
+
+function formatCalendarDay(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function SearchDateCalendar({
+  current,
+  options,
+  onBack,
+  onApply,
+}: {
+  current?: FilterOption;
+  options: FilterOption[];
+  onBack: () => void;
+  onApply: (selection: { from: string; to: string }) => void;
+}) {
+  // This instance owns one clock so midnight cannot make the selected range
+  // and the preset row disagree during a single open interaction.
+  const [now] = useState(() => new Date());
+  const initial = current ? dateRangeForFilterValue(current.value, now) : null;
+  const [mode, setMode] = useState<"single" | "range">(
+    current && ISO_DAY.test(current.value) ? "single" : "range",
+  );
+  const [selection, setSelection] = useState<RangeSelection>(
+    initial ?? { from: null, to: null },
+  );
+
+  const presets = useMemo<CalendarPreset[]>(
+    () =>
+      options
+        .filter((option) => IMPORT_DATE_PRESET_VALUES.has(option.value))
+        .flatMap((option) => {
+          const range = dateRangeForFilterValue(option.value, now);
+          return range?.from && range.to
+            ? [{ label: option.label, from: range.from, to: range.to }]
+            : [];
+        }),
+    [now, options],
+  );
+
+  const completeSelection =
+    selection.from && selection.to
+      ? { from: selection.from, to: selection.to }
+      : null;
+
+  return (
+    <motion.div
+      key="date-calendar"
+      className="max-h-[calc(100vh-7rem)] overflow-y-auto px-4 pb-4 pt-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+      variants={PANEL_STAGGER}
+      initial="hidden"
+      animate="show"
+      exit={{ opacity: 0, transition: { duration: 0.15 } }}
+    >
+      <motion.div variants={GLASS_ITEM} className="mb-3 flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="font-body flex shrink-0 items-center gap-1 rounded-inset px-2.5 py-1 text-[13px] font-medium text-dim transition-colors hover:bg-paper-sunk hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Back
+        </button>
+
+        <div
+          className="flex items-center rounded-inset bg-paper-sunk p-0.5"
+          role="group"
+          aria-label="Date selection type"
+        >
+          {(["single", "range"] as const).map((choice) => (
+            <button
+              key={choice}
+              type="button"
+              aria-pressed={mode === choice}
+              onClick={() => {
+                setMode(choice);
+                if (choice === "single" && selection.from) {
+                  setSelection({ from: selection.from, to: selection.from });
+                }
+              }}
+              className={`rounded-inset px-2.5 py-1 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-lead ${
+                mode === choice ? "bg-white text-ink shadow-xs" : "text-dim hover:text-ink"
+              }`}
+            >
+              {choice === "single" ? "One day" : "Date range"}
+            </button>
+          ))}
+        </div>
+      </motion.div>
+
+      <motion.div variants={GLASS_ITEM} className="rounded-panel bg-white p-3">
+        <DateRangeCalendar
+          className="w-full"
+          mode={mode}
+          value={selection}
+          onChange={setSelection}
+          max={todayIso(now)}
+          presetOptions={presets}
+        />
+      </motion.div>
+
+      <motion.div variants={GLASS_ITEM} className="mt-3 flex justify-end">
+        <button
+          type="button"
+          disabled={!completeSelection}
+          onClick={() => {
+            // Save stages the chip AND returns to the filter list, same as
+            // picking any other option — the calendar is a drill-down, not a
+            // dead end that leaves the reader stuck looking at a date grid.
+            if (!completeSelection) return;
+            onApply(completeSelection);
+            onBack();
+          }}
+          className="inline-flex items-center gap-1.5 rounded-inset bg-ink px-4 py-2 text-[13px] font-bold text-white transition-colors hover:bg-ink/90 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lead"
+        >
+          <Check className="h-3.5 w-3.5" />
+          Save
+        </button>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 /**
  * F215 — a category whose value is typed rather than picked: the panel shows a
  * text field instead of an option list ("climate", "youth education"). The
@@ -357,6 +542,8 @@ export function BrandSearchBar({
    promptButton = false,
    panelRows,
    freeTextCategories,
+   calendarDateFilter = false,
+   resetParamsOnSearch = [],
    compactRest = false,
    anchorLeft = false,
    chipsBelow = true,
@@ -516,6 +703,13 @@ export function BrandSearchBar({
     */
    freeTextCategories?: Record<string, FreeTextCategory>;
    /**
+    * Replace the native date fields with the shared dashboard calendar. Opt-in
+    * because some hosts use this component inside much shorter toolbars.
+    */
+   calendarDateFilter?: boolean;
+   /** Host-owned pagination cursors that a new search must not carry forward. */
+   resetParamsOnSearch?: readonly string[];
+   /**
     * Rest compact: the closed pill shrinks to its content instead of spanning
     * full width, then widens back on open before the panel unfolds — the
     * widen-then-drop two-beat. The widest cycling subject reserves the rest
@@ -658,6 +852,29 @@ export function BrandSearchBar({
    */
   const [restWidth, setRestWidth] = useState<number | null>(null);
   const [fullWidth, setFullWidth] = useState<number | null>(null);
+
+  /**
+   * The card animates `height: panelOut ? "auto" : ROW`. That target is the
+   * literal string "auto" for as long as the panel stays open, so swapping
+   * what is *inside* it — categories to the date calendar, day to range mode
+   * and back — changes nothing Motion can see: the string didn't change, so
+   * no transition runs and the box snaps straight to the new content's size.
+   * Measuring the body in pixels and animating to that number instead gives
+   * every swap a real target to tween towards, exactly like `restWidth` and
+   * `fullWidth` do for the compact-rest widen above.
+   */
+  const panelBodyRef = useRef<HTMLDivElement>(null);
+  const [panelBodyHeight, setPanelBodyHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    const body = panelBodyRef.current;
+    if (!open || !body) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setPanelBodyHeight(entry.contentRect.height);
+    });
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, [open]);
 
   // The confirmation is a panel state, not a popover: it opens the bar and
   // takes over the drawer the rows live in, so everything this component does
@@ -975,6 +1192,7 @@ export function BrandSearchBar({
     const params = new URLSearchParams(window.location.search);
     params.delete("q");
     params.delete("page");
+    resetParamsOnSearch.forEach((name) => params.delete(name));
     Object.values(FILTER_PARAMS).forEach((name) => params.delete(name));
 
     if (q) params.set("q", q);
@@ -1188,7 +1406,13 @@ export function BrandSearchBar({
               borderRadius: ROW / 2,
             }}
             animate={{
-              height: panelOut ? "auto" : ROW,
+              // The measured body height (see panelBodyHeight above) once it's
+              // known, so a swap inside the open panel is a real number tween
+              // rather than a snap. Scoped to `open` (not the wider `panelOut`,
+              // which also covers the as-you-type suggestions dropdown that
+              // has no `panelBodyRef` of its own) — "auto" is the pre-measure
+              // fallback for the first open frame and for that dropdown.
+              height: open && panelBodyHeight != null ? ROW + panelBodyHeight : panelOut ? "auto" : ROW,
               // Pixels at both ends once measured (see restWidth/fullWidth), so
               // the widen is a pure number tween with nothing to resolve on the
               // frame it starts. The keyword pair is only the pre-measure
@@ -1510,6 +1734,7 @@ export function BrandSearchBar({
             // as a snap.
             style={compactRest && fullWidth ? { width: fullWidth } : undefined}
           >
+            <div ref={panelBodyRef}>
             <AnimatePresence mode="wait">
               {confirm && confirming ? (
                 <motion.div
@@ -1837,7 +2062,29 @@ export function BrandSearchBar({
                   })}
                 </motion.ul>
               ) : isDateCategory ? (
-                <motion.div
+                calendarDateFilter ? (
+                  <SearchDateCalendar
+                    current={selectedFilters.find((filter) => filter.category === activeFilter)}
+                    options={activeOptions}
+                    onBack={() => {
+                      setActiveFilter(null);
+                      setFilterQuery("");
+                    }}
+                    onApply={({ from, to }) => {
+                      if (!activeFilter) return;
+                      const value = from === to ? from : `${from}..${to}`;
+                      const label =
+                        from === to
+                          ? formatCalendarDay(from)
+                          : `${formatCalendarDay(from)} – ${formatCalendarDay(to)}`;
+                      setSelectedFilters((previous) => [
+                        ...previous.filter((filter) => filter.category !== activeFilter),
+                        { category: activeFilter, label, value },
+                      ]);
+                    }}
+                  />
+                ) : (
+                  <motion.div
                   key="date-options"
                   className="flex flex-col h-[280px] pt-3 overflow-hidden"
                   variants={PANEL_STAGGER}
@@ -2043,7 +2290,8 @@ export function BrandSearchBar({
                       </motion.ul>
                     )}
                   </div>
-                </motion.div>
+                  </motion.div>
+                )
               ) : isFreeTextCategory ? (
                 <motion.div
                   key="free-text"
@@ -2233,6 +2481,7 @@ export function BrandSearchBar({
                 </motion.div>
               )}
             </AnimatePresence>
+            </div>
           </motion.div>
         ) : (showSuggestions || showRecents) ? (
           <motion.div
@@ -2386,9 +2635,33 @@ export function BrandSearchBar({
           move. Hanging underneath, the chips grow into the content instead, and
           the open panel simply covers them. Fixed-toolbar hosts hide this row
           (`chipsBelow={false}`) so picking a filter never shifts the layout —
-          their chips live at the bottom of the open dropdown instead. */}
+          their chips live at the bottom of the open dropdown instead.
+
+          This row's own document position never moves — the frame above it
+          stays a fixed `ROW` tall whether or not the panel is open, so the
+          gap the flex column already puts here is measured from THAT box,
+          not from the open card's actual (taller) bottom edge. `marginTop`
+          makes up the difference: it grows by the same measured
+          `panelBodyHeight` the card itself grows by (see the height comment
+          above), on the card's own transition, so the row rides down to sit
+          just past the card's real bottom edge as it opens and rides back up
+          in step as it closes — never mid-card, never behind it. */}
       {chipsBelow && (
-      <div className="flex flex-wrap items-center gap-2 px-2 empty:hidden">
+      <motion.div
+        // A z-index above the frame's (`z-50`) as a second line of defence:
+        // the frame is a positioned stacking context, and a plain sibling
+        // with no z-index paints below an explicit one regardless of DOM
+        // order. The margin above already keeps this row clear of the card
+        // in the open state; this only guards the brief instant mid-animation
+        // where the two edges cross.
+        initial={false}
+        animate={{ marginTop: open ? (panelBodyHeight ?? 0) : 0 }}
+        transition={
+          compactRest
+            ? { duration: 0.42, ease: EASE, delay: open ? 0.42 : 0 }
+            : { duration: 0.7, ease: EASE }
+        }
+        className="relative z-[60] flex flex-wrap items-center gap-2 px-2 empty:hidden">
         <AnimatePresence>
         {selectedFilters.map((filter) => {
           // F194 AC2 — a coloured tag's chip wears the same pill tint the tag
@@ -2436,7 +2709,7 @@ export function BrandSearchBar({
             Clear filters
           </button>
         )}
-      </div>
+      </motion.div>
       )}
     </div>
   );

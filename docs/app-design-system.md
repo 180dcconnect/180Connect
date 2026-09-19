@@ -265,19 +265,11 @@ put `.dark` on `<html>` and define token overrides under it.
 | Pick one of a few (settings) | `OptionGroup` from `src/app/settings/option-group.tsx` |
 | A tag | `TagChip` from `src/lib/tags/tag-chips.tsx` |
 | A reading's shape | The sticks — `HorizontalStickGauge`, `StackedStickColumns` |
-| Paging a list | `PaginatedList` on a screen still on the old language (it keeps its footer); `list-pager.tsx` on a converted one (controls at the top) |
+| Paging a list the browser holds | `list-pager.tsx` (`useListPager`, `PageSizeSelect`, `PagingSummary`, `PagerRow`) |
+| Paging a list the database windows | `url-pager.tsx` (`UrlPageSize`, `UrlPagingSummary`) |
+| Paging on a screen still on the old language | `PaginatedList` — keeps its footer until that screen is converted |
 
-**Paged lists carry their count above the first row.** A list an admin works
-through — the CAM request queue, the decision history, the suppression lists — is
-answered as it is read, so a pager under the last row is one the reader has to
-traverse the whole list to reach. On a converted screen the page size sits on the
-card's heading row beside the title and the pill, and "Showing 1 to 10 of 13" with
-the chevrons is the first line of the body; a list with no card heading of its own
-(`PagerRow`) puts both on one row above its first card. `PaginatedList` keeps its
-footer until its screen is converted, which is why the two look different rather
-than half-converted. **Never drop the count**: these lists only grow, and a pager
-without a count reads as though the page is all there is. The arithmetic is
-`src/lib/pagination.ts` for both, so the two placements can't disagree.
+See [Paging a list](#paging-a-list) for the whole rule.
 
 **A panel that opens on a click grows, it doesn't snap.** Two ways, and the
 choice is not taste:
@@ -362,6 +354,77 @@ drawn for a one-column tile arrives stretched the moment its card takes two
 `origin-button`, `gooey-action-button`, `send-button`, `gooey-email-input` and
 the other gooey/animated variants are one-off brand pieces, not app defaults.
 Reach for them only where a screen is deliberately expressive.
+
+## Paging a list
+
+Every list in the app that can outgrow a screen pages the same way, because a
+reader who has learned one of them has learned all of them. The arithmetic is
+`src/lib/pagination.ts` — `paginate` for rows in memory, `pageSummary` for a
+count alone — and no screen derives `from`, `to` or `totalPages` for itself. Two
+call sites doing that arithmetic separately is how a list ends up saying "of 12"
+above fifteen rows.
+
+### Which of the two
+
+| The list is | Use | Because |
+| --- | --- | --- |
+| Held in the browser already (a queue of tens, filtered client-side) | `useListPager` + `list-pager.tsx` | slicing an array is free; no round trip to change page |
+| Windowed by the database (a history that only grows) | `UrlPageSize` + `UrlPagingSummary` from `url-pager.tsx` | the page never holds what it is not showing |
+
+The second is the one to reach for when the list has no ceiling: import runs,
+the AI generation log, the audit trail. Those pages read `page` and `pageSize`
+from `searchParams`, clamp them through `pageSummary`, and window the query with
+`.range()`. The parameters are the whole contract — which is also what makes a
+filtered, sorted, paged view a link someone can send to a colleague.
+
+### The rules
+
+- **The count is the size of the list, not the size of the page.** "Showing 51
+  to 100 of 1,284." A pager that counts only what it is showing tells the reader
+  they have seen everything, which on a history that outgrew its window is never
+  true. Get it from one `count: "exact", head: true` with the same filters as the
+  rows — a second copy of the filter logic will drift, and then the count
+  describes a different set from the list under it.
+- **Never replace the count with a limit notice.** "Most recent 100 runs" is the
+  page admitting it has stopped without saying what it stopped short of.
+- **Clamp, never refuse.** A page past the end — the history was pruned, a filter
+  narrowed, the link is a year old — resolves to the last real page.
+  `pageSummary` does this. A list that answers a stale page number with an empty
+  box reads as broken.
+- **Changing the page size returns to page one.** Page 4 of 25-per-page is a
+  different set of rows from page 4 of 100.
+- **Controls go above the first row on converted screens.** The page size sits on
+  the card's heading row beside the title; "Showing … of …" with the chevrons is
+  the first line of the body. A list with no card heading of its own uses
+  `PagerRow`. A control under the last row is one the reader has to traverse the
+  whole list to reach.
+- **Past five pages, offer a page number to type.** `PagingSummary` adds a
+  "Go to ___" box on its own once `totalPages > 5`, because stepping to page 34
+  with a chevron is not a thing anyone should be asked to do. Out-of-range
+  entries clamp; they are never rejected with a message.
+- **Page sizes are the reader's, not the query planner's.** `PAGE_SIZE_CHOICES`
+  (5/10/15/20) for lists of things to think about — clients, decisions, requests.
+  A coarser set (25/50/100) for lists that are scanned rather than considered,
+  like import runs. Never offer a size that is not on the screen's own scale.
+
+### Offset, not keyset
+
+These lists page by offset (`.range()`), and that is deliberate even though a
+cursor is steadier under writes. A cursor can only move forwards and backwards;
+it cannot answer "page 34", and it cannot say how many pages there are. On a
+history an admin searches — *which imports ran that March* — being able to name
+a position is worth more than never re-showing a row that a scheduled job
+inserted mid-read. Where a list is a live feed being appended to constantly and
+nobody needs to jump, a cursor is the better tool; nothing in the app is that
+yet.
+
+### When a page is not the answer
+
+Paging is for a list a reader moves through. It is not a substitute for filters:
+if the only way to reach something is page 34, the screen is missing a filter,
+not a bigger pager. Import Status pages *and* filters by source, outcome, date —
+including a named month and a chosen date range — so the pager is the last step,
+not the only one.
 
 ## Converting an old screen
 

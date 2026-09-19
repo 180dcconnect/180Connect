@@ -187,9 +187,82 @@ export function PagingSummary({
           >
             <ChevronRight aria-hidden="true" className="size-4" />
           </button>
+
+          {totalPages > JUMP_THRESHOLD && (
+            <JumpToPage totalPages={totalPages} onPageChange={onPageChange} />
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * How many pages a list needs before stepping through it stops being reasonable.
+ *
+ * Under this, the chevrons reach anywhere in a few clicks and a second control
+ * is furniture. Over it — a history two years deep — "page 34" is a place the
+ * reader can name but not click to, so the list has to take the number.
+ */
+const JUMP_THRESHOLD = 5;
+
+/**
+ * "Go to page ___" for a list too long to step through.
+ *
+ * A number box rather than a list of page links: the page count grows without
+ * limit here, and a strip of thirty-four numbers is a worse way to find page 34
+ * than typing it. Out-of-range entries are clamped, never rejected — the reader
+ * asked to go as far as the list goes, and an error message in place of the last
+ * page would be the page arguing with them.
+ */
+function JumpToPage({
+  totalPages,
+  onPageChange,
+}: {
+  totalPages: number;
+  onPageChange: (page: number) => void;
+}) {
+  const [value, setValue] = useState("");
+
+  const go = () => {
+    const requested = Number.parseInt(value, 10);
+    if (!Number.isFinite(requested)) return;
+    onPageChange(Math.min(Math.max(1, requested), totalPages));
+    setValue("");
+  };
+
+  return (
+    <span className="ml-1 inline-flex items-center gap-1 border-l border-rule pl-2">
+      <label htmlFor="jump-to-page" className="text-faint">
+        Go to
+      </label>
+      <input
+        id="jump-to-page"
+        type="number"
+        inputMode="numeric"
+        min={1}
+        max={totalPages}
+        value={value}
+        placeholder={String(totalPages)}
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            go();
+          }
+        }}
+        aria-label={`Go to a page between 1 and ${totalPages}`}
+        className="h-7 w-14 rounded-inset border border-rule bg-white px-1.5 text-center text-[12px] tabular-nums text-ink focus-visible:ring-2 focus-visible:ring-lead/30 focus-visible:outline-none"
+      />
+      <button
+        type="button"
+        onClick={go}
+        disabled={value.trim() === ""}
+        className="cursor-pointer rounded-inset px-1.5 py-1 text-[12px] font-semibold text-dim transition-colors hover:bg-paper hover:text-ink focus-visible:ring-2 focus-visible:ring-lead/30 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-dim"
+      >
+        Go
+      </button>
+    </span>
   );
 }
 

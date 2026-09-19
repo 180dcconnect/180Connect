@@ -19,6 +19,7 @@ import {
 } from "@/lib/charity-register/sqlite";
 import { LABEL_KIND } from "@/lib/charity-register/sqlite-query";
 import { createDefaultIngestionStore } from "@/lib/ingestion/store";
+import { registerImportProgressStats } from "@/lib/ingestion/import-progress";
 import { importSelection } from "@/lib/charity-register/import";
 import {
   runAnnualReturnBackfill,
@@ -261,7 +262,8 @@ export async function runRegisterImport(
   try {
     // Counted again here rather than trusting the number the browser last saw:
     // a register refresh may have landed between the preview and the click.
-    if (countCharities(parsed) === 0) {
+    const selectedCount = countCharities(parsed);
+    if (selectedCount === 0) {
       return {
         kind: "error",
         message: "Those filters select no charities, so there is nothing to import.",
@@ -282,6 +284,9 @@ export async function runRegisterImport(
         triggered_by: "manual",
         triggered_by_user_id: authorization.actor.id,
         job_status: "running",
+        // The status screen turns this one small, stated estimate into its
+        // countdown. No per-record heartbeat writes are needed.
+        run_stats: registerImportProgressStats(Math.min(selectedCount, cap)),
       })
       .select("id")
       .single();
@@ -294,17 +299,16 @@ export async function runRegisterImport(
     await supabase
       .from("ingestion_runs")
       .update({
-        job_status: outcome.selected > cap ? "partial" : "completed",
-        // No `completed_at` yet: promotion runs after this write and is most of
-        // the wall clock. Stamping it here recorded a minute-long import as
-        // under a second, which is what Import Status then showed as its
-        // duration. The finishing update below stamps it when the run is
-        // genuinely over.
+        // Still running: promotion follows this write and is most of the wall
+        // clock. The finishing update below owns both status and completed_at.
         records_fetched: outcome.selected,
         records_inserted: outcome.written,
         records_skipped: outcome.unchanged,
         records_failed: 0,
         run_stats: {
+          // Keep the countdown alive through promotion. This replaces the
+          // initial run_stats object, so the estimate must travel with it.
+          ...registerImportProgressStats(outcome.selected),
           // What this run was asked for, so the run can explain itself and
           // be repeated. Counts alone never could: "2,231 written" says
           // nothing about which 2,231, and without the criteria a rerun would
@@ -343,6 +347,10 @@ export async function runRegisterImport(
           unchanged: outcome.unchanged,
           inserted: promoted.inserted,
           flagged: promoted.flagged,
+          // Matches certain enough that nobody was asked (see isCertainMatch).
+          // Kept apart from `flagged` so the screens can count them as clients
+          // we already hold rather than as work waiting for an admin.
+          alreadyHeld: promoted.alreadyHeld,
           needsReview: promoted.needsReview,
           doesNotMeet: promoted.doesNotMeet,
           invalidData: promoted.invalidData,
@@ -388,9 +396,14 @@ export async function runRegisterImport(
         // did — a green badge over an import that added no clients is the bug
         // this screen kept reporting. `partial` is the status for "some of it
         // worked"; nothing working at all is a failure.
-        ...(promoted.failed > 0
-          ? { job_status: promoted.inserted === 0 ? "failed" : "partial" }
-          : {}),
+        job_status:
+          promoted.failed > 0
+            ? promoted.inserted === 0
+              ? "failed"
+              : "partial"
+            : selectedCount > cap
+              ? "partial"
+              : "completed",
       })
       .eq("id", runId);
 

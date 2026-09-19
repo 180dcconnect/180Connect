@@ -1,10 +1,16 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion, useReducedMotionConfig } from "motion/react";
 
+import { HorizontalStickGauge } from "@/components/ui/horizontal-stick-gauge";
+import {
+  formatProgressDuration,
+  importProgressReadingAt,
+  type ImportProgressPlan,
+} from "@/lib/ingestion/import-progress";
 import { StatusBadge } from "./status-badge";
 
 const STICKS = Array.from({ length: 28 }, (_, index) => index);
@@ -14,6 +20,9 @@ export type RunningImport = {
   id: string;
   source: string;
   startedLabel: string;
+  startedAt: string;
+  observedAt: string;
+  progress: ImportProgressPlan | null;
   triggerLabel?: string | null;
 };
 
@@ -31,8 +40,8 @@ export function ImportRunDetailsLink({ id }: { id: string }) {
 
 /**
  * Re-reads the server-owned run state only while there is work to watch. The
- * database remains the source of truth; this component never estimates a
- * percentage or keeps a second copy of a run in browser state.
+ * database remains the source of truth; this poller never decides that a run
+ * finished or keeps a second copy of its status in browser state.
  */
 export function ImportRunRefreshPoller({ active }: { active: boolean }) {
   const router = useRouter();
@@ -54,15 +63,35 @@ export function ImportRunRefreshPoller({ active }: { active: boolean }) {
   return null;
 }
 
-/** An activity gauge, not a percentage: register imports do not report a total. */
-export function RunningImportGauge() {
+/** A measured/estimated gauge when possible, with an honest activity fallback. */
+export function RunningImportGauge({
+  percent,
+  ariaValueText,
+}: {
+  percent: number | null;
+  ariaValueText: string;
+}) {
   const reduceMotion = useReducedMotionConfig();
+
+  if (percent !== null) {
+    return (
+      <HorizontalStickGauge
+        checked={percent}
+        total={100}
+        ariaLabel="Import progress"
+        ariaValueText={ariaValueText}
+        showTooltip={false}
+        stickHeight={12}
+        className="mt-3"
+      />
+    );
+  }
 
   return (
     <div
       role="progressbar"
       aria-label="Import in progress"
-      aria-valuetext="Import is still working. Progress is not available yet."
+      aria-valuetext={ariaValueText}
       className="mt-3 flex h-4 items-center gap-1 overflow-hidden"
     >
       {STICKS.map((stick) => (
@@ -89,6 +118,27 @@ export function RunningImportRow({
   run: RunningImport;
   canInspect: boolean;
 }) {
+  // Start from the server's clock so hydration prints the same reading, then
+  // advance locally. This is display-only: the five-second route refresh still
+  // owns the authoritative transition from running to finished.
+  const [nowMs, setNowMs] = useState(() => Date.parse(run.observedAt));
+
+  useEffect(() => {
+    const update = () => setNowMs(Date.now());
+    update();
+    const timer = window.setInterval(update, 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const reading = run.progress
+    ? importProgressReadingAt(run.progress, run.startedAt, nowMs)
+    : null;
+  const elapsedSeconds = Math.max(
+    0,
+    Math.floor((nowMs - Date.parse(run.startedAt)) / 1_000),
+  );
+  const fallbackText = `${formatProgressDuration(elapsedSeconds)} so far · this import does not report a progress count.`;
+
   return (
     <div className="bg-paper px-5 py-5 sm:px-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -109,8 +159,13 @@ export function RunningImportRow({
           {canInspect && <ImportRunDetailsLink id={run.id} />}
         </div>
       </div>
-      <RunningImportGauge />
-      <p className="mt-2 text-xs text-dim">This import is still working. Progress will appear here when it is available.</p>
+      <RunningImportGauge
+        percent={reading?.percent ?? null}
+        ariaValueText={reading?.ariaValueText ?? fallbackText}
+      />
+      <p className="mt-2 text-xs text-dim">
+        {reading?.statusText ?? fallbackText}
+      </p>
     </div>
   );
 }

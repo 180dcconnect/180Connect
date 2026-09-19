@@ -68,6 +68,8 @@ import { checkWebsiteReachability } from "../website-reachability.ts";
 import type { WebsiteStatus } from "../website-validation.ts";
 import {
   findDuplicateMatch,
+  normaliseName,
+  normalisePostcode,
   type DuplicateMatch,
   type ExistingOrganisationForMatch,
 } from "../dedup/match-organisations.ts";
@@ -126,6 +128,13 @@ export type PromoteCounts = {
   read: number;
   inserted: number;
   flagged: number;
+  /**
+   * Matches certain enough that nobody was asked about them — see
+   * `isCertainMatch`. Counted apart from `flagged` because they are the
+   * opposite kind of event: `flagged` is work waiting for an admin, this is
+   * work that did not need one.
+   */
+  alreadyHeld: number;
   // Total excluded from the active client list (invalidData + needsReview +
   // doesNotMeet) — kept as one field for callers that only want the headline
   // number; the breakdown below exists so a garbage-data spike (invalidData)
@@ -171,6 +180,7 @@ function newCounts(read: number): PromoteCounts {
     read,
     inserted: 0,
     flagged: 0,
+    alreadyHeld: 0,
     rejected: 0,
     invalidData: 0,
     needsReview: 0,
@@ -192,6 +202,50 @@ function newCounts(read: number): PromoteCounts {
  * activities must fill the mission of the 2026 charity it duplicates, not
  * just be counted as "already here" (see backfillMissingMissionOrReport).
  */
+/**
+ * Whether a match is certain enough that asking an admin would be asking them
+ * to re-confirm the importer's own strongest key.
+ *
+ * The duplicates queue exists for the cases a machine genuinely cannot call: a
+ * name-and-postcode match, a register record that has moved on from what we
+ * hold. It was also being filled with the cases nobody can call any other way
+ * — the same registration number, the same name, the same postcode, and the
+ * only thing "different" being that one side has filed accounts and the other
+ * does not, which is not a difference between two organisations at all. On the
+ * queue those read as "both copies agree", and confirming one writes nothing:
+ * per the migration, "confirming a duplicate needs no further write — the
+ * candidate correctly never became a second organisations row". So the press
+ * was pure ceremony, and a queue full of ceremony is a queue people stop
+ * reading.
+ *
+ * Deliberately strict. A registration number alone is not enough: numbers are
+ * mistyped and re-used across registers, so the name has to agree too (after
+ * the importer's own normalisation, which already treats "Ltd" and "Limited"
+ * as the same word). A postcode has to agree only when both sides have one —
+ * requiring it would send every record from a source that omits postcodes
+ * back into the queue, which is the bug this is fixing.
+ */
+export function isCertainMatch(
+  match: DuplicateMatch,
+  candidate: { legal_name: string; postcode: string },
+  existing: Pick<ExistingOrganisationForMatch, "legal_name" | "postcode">,
+): boolean {
+  if (match.matchedOn !== "registration_number") return false;
+
+  const candidateName = normaliseName(candidate.legal_name);
+  if (candidateName === "" || candidateName !== normaliseName(existing.legal_name)) {
+    return false;
+  }
+
+  const candidatePostcode = normalisePostcode(candidate.postcode ?? "");
+  const existingPostcode = normalisePostcode(existing.postcode ?? "");
+  if (candidatePostcode !== "" && existingPostcode !== "") {
+    return candidatePostcode === existingPostcode;
+  }
+
+  return true;
+}
+
 async function flagIfDuplicate(
   store: OrganisationWriteStore,
   counts: PromoteCounts,
@@ -208,6 +262,23 @@ async function flagIfDuplicate(
     new Set(dismissedOrganisationIds),
   );
   if (!match) return { flagged: false, matchedOrganisationId: null };
+
+  // A certain match is treated the way an unchanged record is treated: the
+  // client is already on the list, nothing is inserted, and nobody is asked.
+  // No candidate row is written, so it never reaches the duplicates queue —
+  // and the record still carries `matched_organisation_id`, so the screens can
+  // say which client it is.
+  const matchedExisting = existingOrganisations.find(
+    (organisation) => organisation.id === match.organisationId,
+  );
+  if (
+    matchedExisting &&
+    isCertainMatch(match, { legal_name: org.legal_name, postcode: org.postcode }, matchedExisting)
+  ) {
+    await store.markRecordStatus(record.id, "matched", match.organisationId);
+    counts.alreadyHeld++;
+    return { flagged: true, matchedOrganisationId: match.organisationId };
+  }
 
   const flagResult = await store.flagPotentialDuplicate({
     rawRecordId: record.id,

@@ -5,6 +5,13 @@ import { useEffect, useState } from "react";
 import { discrepancyFieldLabel } from "@/lib/discrepancies";
 import type { MergePreviewRow } from "@/lib/discrepancies/detect-field-discrepancies";
 import type { PendingReview } from "@/lib/duplicates";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/animate-ui/components/radix/dialog";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { reportError } from "@/lib/error-logging";
 
@@ -142,19 +149,8 @@ export function MergeDialog({
     };
   }, [candidateId]);
 
-  // Escape closes, except mid-save — the decision is already underway then.
-  useEffect(() => {
-    if (saving) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [saving, onCancel]);
-
   const loading = rows === null && !previewFailed;
   const disagreements = rows ?? [];
-  const headingId = `merge-${candidateId}-heading`;
 
   function save() {
     onSave(
@@ -166,30 +162,35 @@ export function MergeDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-5"
-      onClick={saving ? undefined : onCancel}
+    // Keep this on the shared portal. The queue sits inside an animated Rise;
+    // rendering a `fixed` overlay inside that transformed ancestor makes its
+    // containing block the full queue instead of the visible viewport.
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !saving) onCancel();
+      }}
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={headingId}
-        onClick={(event) => event.stopPropagation()}
-        className="flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-panel border border-rule bg-white shadow-[0_24px_60px_-20px_rgba(15,23,42,0.5)]"
+      <DialogContent
+        showCloseButton={false}
+        onEscapeKeyDown={(event) => {
+          if (saving) event.preventDefault();
+        }}
+        onPointerDownOutside={(event) => {
+          if (saving) event.preventDefault();
+        }}
+        className="flex max-h-[85vh] flex-col gap-0 overflow-hidden rounded-panel border-rule bg-white p-0 shadow-[0_24px_60px_-20px_rgba(15,23,42,0.5)] sm:max-w-xl"
       >
-        <div className="border-b border-rule-soft px-5 py-4">
-          <h2
-            id={headingId}
-            className="font-body text-[16px] leading-[1.35] font-semibold tracking-[-0.01em] text-ink"
-          >
+        <DialogHeader className="gap-0 border-b border-rule-soft px-5 py-4 text-left">
+          <DialogTitle className="font-body text-[16px] leading-[1.35] font-semibold tracking-[-0.01em] text-ink">
             Same charity — pick the winning details
-          </h2>
-          <p className="mt-1 font-body text-[13px] leading-[1.6] text-dim">
+          </DialogTitle>
+          <DialogDescription className="mt-1 font-body text-[13px] leading-[1.6] text-dim">
             {flag.name} stays as one client. For each detail the two copies disagree on, choose
             which copy to keep — anything left alone stays exactly as it is, and every pick is
             recorded in the client&apos;s change history.
-          </p>
-        </div>
+          </DialogDescription>
+        </DialogHeader>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
           {saveError && <InlineAlert tone="error" message={saveError} />}
@@ -271,7 +272,7 @@ export function MergeDialog({
                 : "Keep one record with these details"}
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

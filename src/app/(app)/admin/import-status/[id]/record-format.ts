@@ -109,47 +109,101 @@ const HELD_FOR_REVIEW: StatusDetails = {
   reviewLabel: "Answer it on Review queue",
 };
 
+/**
+ * The same five states, for a 360Giving run — and they mean something
+ * different there, which is why this map exists at all.
+ *
+ * A grant import never creates a client. It reads grants that funders have
+ * published and tries to attach each one to a client already on our list, by
+ * charity or company number (`src/lib/standardize/three-sixty-giving.ts`). So
+ * "matched" is the success here, not "added", and a grant whose recipient we
+ * do not hold is simply not kept — nothing is waiting for anyone to decide.
+ *
+ * The old wording said "Pending Match — imported and queued for client
+ * matching", which named a queue and a process rather than saying what has or
+ * has not happened to the grant, and left a reader to guess whether it was
+ * theirs to act on.
+ *
+ * `pending` and `rejected` are the pair worth keeping apart, because they look
+ * alike and are not: `pending` has not been checked against the client list
+ * yet, `rejected` was checked and the recipient is not a client. The checking
+ * is `promotePendingThreeSixtyGivingRecords`, which the 360Giving backfill job
+ * calls on every slice that finds grants (every 15 minutes — see
+ * `docs/ingestion.md`), and which drains every pending row, not only the ones
+ * belonging to the run being looked at.
+ */
+/**
+ * A `matched` record nobody was asked about.
+ *
+ * The importer holds a record as `matched` whenever it recognises an existing
+ * client, but only some of those go to the duplicates queue: a match on the
+ * registration number that also agrees on name and postcode is treated as the
+ * client we already hold and no candidate row is written for it
+ * (`isCertainMatch`, write-organisations.ts). Those records are not possible
+ * duplicates and there is nothing to decide about them, so they must not wear
+ * the label — or the button — of the ones that are. The caller says which by
+ * passing `duplicateQueued`.
+ */
+const ALREADY_HELD: StatusDetails = {
+  label: "Already on the list",
+  tone: "neutral",
+  badgeClass: "bg-black/[0.04] text-foreground/70 ring-black/[0.08]",
+  description:
+    "The same registration number, name and postcode as a client already on the list, so this was treated as that client rather than added again. Nothing to decide.",
+};
+
 const GRANT_STATUS_MAP: Record<ProcessingStatus, StatusDetails> = {
   validated: {
-    label: "Grant Saved",
+    label: "Saved",
     tone: "success",
     badgeClass: "bg-green-50 text-green-800 ring-green-600/20",
-    description: "Grant successfully recorded in 180Connect",
+    description: "Recorded against the client that received it.",
   },
   matched: {
-    label: "Matched to Client",
+    label: "Attached to a client",
     tone: "success",
     badgeClass: "bg-green-50 text-green-800 ring-green-600/20",
-    description: "Successfully matched and linked to an active client profile in 180Connect",
+    description:
+      "The charity or company number on this grant matched a client on the list, so the grant is now on that client's record.",
   },
   pending: {
-    label: "Pending Match",
+    // Not the same as "the recipient is not a client", which is `rejected`
+    // below. A grant that was checked and found no client is rejected; one
+    // still sitting here has not been checked yet. The two used to read alike,
+    // which made this one look like a dead end when nothing is wrong with it.
+    label: "Waiting to be matched",
     tone: "info",
     badgeClass: "bg-blue-50 text-blue-800 ring-blue-600/20",
-    description: "Imported and queued for client matching",
+    description:
+      "Read from 360Giving, and not yet checked against the client list — this does not mean the client is missing. The 360Giving job checks these automatically the next time it finds grants, and it runs every 15 minutes. Nothing to do.",
   },
   rejected: {
-    label: "No Matching Client",
+    label: "Recipient is not a client",
     tone: "neutral",
     badgeClass: "bg-black/[0.04] text-foreground/70 ring-black/[0.08]",
-    description: "Grant recipient does not match any current client organisation in 180Connect",
+    description:
+      "This one was checked: the charity or company that received the grant is not on the client list, and grant imports never add one. Add that organisation as a client and a later run will attach its grants.",
   },
   error: {
-    label: "Import Issue",
+    label: "Could not be saved",
     tone: "danger",
     badgeClass: "bg-red-50 text-red-800 ring-red-600/20",
-    description: "Could not be processed due to missing or invalid grant data",
+    description:
+      "Something in this grant stopped it being saved — usually a missing amount, date or recipient. The reason is at the top of this page.",
   },
 };
 
 export function getStatusDetails(
   status: ProcessingStatus,
   source?: string | null,
-  options?: { heldForReview?: boolean },
+  options?: { heldForReview?: boolean; duplicateQueued?: boolean },
 ): StatusDetails {
   const map = source === "360giving" ? GRANT_STATUS_MAP : STATUS_MAP;
   if (status === "rejected" && options?.heldForReview && source !== "360giving") {
     return HELD_FOR_REVIEW;
+  }
+  if (status === "matched" && options?.duplicateQueued === false && source !== "360giving") {
+    return ALREADY_HELD;
   }
   return (
     map[status] ?? {
@@ -482,6 +536,11 @@ export type RawRecordView = {
   statusKey: string;
   /** True when this record is waiting on the review queue. */
   heldForReview: boolean;
+  /**
+   * For a `matched` record: whether it is actually on the duplicates queue.
+   * False means the importer was certain and asked nobody — see `ALREADY_HELD`.
+   */
+  duplicateQueued: boolean;
   status: StatusDetails;
   matchedOrgId: string | null;
   matchedOrg: OrganisationPreview | null;
@@ -501,9 +560,13 @@ export function describeRawRecord(
   orgPreview: OrganisationPreview | null,
   now: Date,
   /** True when this record is sitting on the review queue — see `getStatusDetails`. */
-  options?: { heldForReview?: boolean },
+  options?: { heldForReview?: boolean; duplicateQueued?: boolean },
 ): RawRecordView {
   const heldForReview = Boolean(options?.heldForReview) && row.processing_status === "rejected";
+  // Defaults to queued: a run read before this distinction existed has a
+  // candidate row for every match, and calling one of those "already on the
+  // list" would hide a decision somebody still owes.
+  const duplicateQueued = options?.duplicateQueued ?? true;
   const received = new Date(row.received_at);
   const name = orgPreview?.legalName || extractRecordName(row.raw_payload, row.source_record_id);
   const city = orgPreview?.city || extractRecordCity(row.raw_payload);
@@ -536,9 +599,13 @@ export function describeRawRecord(
     filingType,
     registryStatus,
     processingStatus: row.processing_status,
-    statusKey: recordStatusKey(row.processing_status, heldForReview),
+    statusKey: recordStatusKey(row.processing_status, heldForReview, duplicateQueued),
     heldForReview,
-    status: getStatusDetails(row.processing_status, row.record_source, options),
+    duplicateQueued,
+    status: getStatusDetails(row.processing_status, row.record_source, {
+      ...options,
+      duplicateQueued,
+    }),
     matchedOrgId: row.matched_organisation_id,
     matchedOrg: orgPreview,
     grantDetails,
@@ -559,8 +626,14 @@ export function describeRawRecord(
 export function recordStatusKey(
   status: ProcessingStatus,
   heldForReview: boolean,
+  duplicateQueued: boolean = true,
 ): string {
-  return heldForReview && status === "rejected" ? "rejected_review" : status;
+  if (heldForReview && status === "rejected") return "rejected_review";
+  // A certain match and a possible duplicate are both stored `matched` and are
+  // different answers to "is anything waiting on me", so the filter has to be
+  // able to ask for one without the other.
+  if (status === "matched" && !duplicateQueued) return "matched_held";
+  return status;
 }
 
 /** Whether a record is on the client list — the thing "Added" ultimately means. */

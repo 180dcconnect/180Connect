@@ -190,7 +190,7 @@ for (let offset = 0; ; ) {
     }
 
     const decidedAt = new Date().toISOString();
-    const { error: updateError } = await supabase
+    const { data: updatedRows, error: updateError } = await supabase
       .from("entity_match_candidates")
       .update({
         match_status: "confirmed_match",
@@ -201,12 +201,25 @@ for (let offset = 0; ; ) {
       .eq("id", row.id)
       // Still pending at the moment of the write: an admin may have answered
       // this one while the script was running, and their decision wins.
-      .eq("match_status", "pending");
+      .eq("match_status", "pending")
+      .select("id");
 
     if (updateError) {
       failed++;
       stillPending++;
       console.error(`  failed         ${name}: ${updateError.message}`);
+      continue;
+    }
+
+    // A guarded update matching zero rows returns no error — the .eq() simply
+    // filtered everything out, exactly as it would for a genuine no-op. That
+    // is indistinguishable from "someone else decided this one first" unless
+    // the affected row is checked, and without this check the script would
+    // still write a duplicate_confirmed audit entry and count it confirmed,
+    // attributing somebody else's decision to this reviewer.
+    if (!updatedRows || updatedRows.length === 0) {
+      stillPending++;
+      console.log(`  already decided ${name} — leaving it as answered`);
       continue;
     }
 
